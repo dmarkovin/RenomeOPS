@@ -1,37 +1,51 @@
 services:
+
   postgres:
     image: postgres:16
     container_name: renome-postgres
     restart: unless-stopped
+
     environment:
       POSTGRES_DB: renome
       POSTGRES_USER: renome
       POSTGRES_PASSWORD: renome_password
+
     ports:
       - "5432:5432"
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./bot/app/database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+
 
 
   redis:
     image: redis:7
     container_name: renome-redis
     restart: unless-stopped
+
     ports:
       - "6379:6379"
+
 
 
   bot:
     build:
       context: ./bot
+
     container_name: renome-bot
+
     restart: unless-stopped
+
     env_file:
       - .env
+
     depends_on:
       - postgres
       - redis
 
 
+
 volumes:
+
   postgres_data:

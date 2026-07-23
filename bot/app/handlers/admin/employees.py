@@ -6,10 +6,11 @@ from aiogram.fsm.context import FSMContext
 from app.keyboards.employees import employees_keyboard
 from app.keyboards.admin import admin_keyboard
 from app.keyboards.roles import roles_keyboard
-from app.keyboards.teams import teams_keyboard
 
 
 from app.states.employee import EmployeeRegistration
+
+from app.services.employee_service import create_employee
 
 
 router = Router()
@@ -105,7 +106,7 @@ async def employee_phone(
 
 
     await message.answer(
-        "Выберите роль сотрудника:",
+        "Выберите подразделение:",
         reply_markup=roles_keyboard()
     )
 
@@ -114,89 +115,144 @@ async def employee_phone(
 @router.message(
     EmployeeRegistration.role
 )
-async def employee_role(
+async def employee_department(
     message: Message,
     state: FSMContext
 ):
 
-    roles = {
-        "🛎 Консьерж": "CONCIERGE",
-        "👨‍💼 Директор": "DIRECTOR",
-        "🔧 Исполнитель": "EXECUTOR"
+
+    departments = {
+
+        "🏢 Администрация": (
+            "DIRECTOR",
+            "TEAM_ADMINISTRATION"
+        ),
+
+
+        "🛎 Консьерж Сервис": (
+            "CONCIERGE",
+            "TEAM_CONCIERGE"
+        ),
+
+
+        "🔧 Технический специалист": (
+            "TECH_SPECIALIST",
+            "TEAM_TECH"
+        ),
+
+
+        "🧹 Сотрудник клининга": (
+            "CLEANING",
+            "TEAM_CLEANING"
+        ),
+
+
+        "🛡 Охрана": (
+            "SECURITY",
+            "TEAM_SECURITY"
+        )
+
     }
 
 
-    if message.text not in roles:
+
+    if message.text == "❌ Отмена":
+
+        await state.clear()
 
         await message.answer(
-            "Выберите роль кнопкой ниже."
+            "❌ Регистрация отменена",
+            reply_markup=admin_keyboard()
         )
 
         return
 
+
+
+    if message.text not in departments:
+
+        await message.answer(
+            "Выберите подразделение кнопкой."
+        )
+
+        return
+
+
+
+    role, team = departments[message.text]
 
 
     await state.update_data(
-        role=roles[message.text]
+
+        role=role,
+
+        team=team
+
     )
 
 
-    await state.set_state(
-        EmployeeRegistration.team
-    )
-
-
-    await message.answer(
-        "Выберите команду:",
-        reply_markup=teams_keyboard()
+    await save_employee(
+        message,
+        state
     )
 
 
 
-@router.message(
-    EmployeeRegistration.team
-)
-async def employee_team(
+async def save_employee(
     message: Message,
     state: FSMContext
 ):
-
-    teams = {
-        "🔧 Техника": "TEAM_TECH",
-        "🧹 Клининг": "TEAM_CLEANING",
-        "🛡 Охрана": "TEAM_SECURITY"
-    }
-
-
-    if message.text not in teams:
-
-        await message.answer(
-            "Выберите команду кнопкой."
-        )
-
-        return
-
-
 
     data = await state.get_data()
 
 
+
+    employee = await create_employee(
+
+        telegram_id=0,
+
+        username=None,
+
+        full_name=data["full_name"],
+
+        phone=data["phone"],
+
+        role=data["role"],
+
+        team=data["team"]
+
+    )
+
+
+
     await message.answer(
+
         f"""
-✅ Сотрудник подготовлен
+✅ Новый сотрудник создан
 
-ФИО:
-{data['full_name']}
 
-Телефон:
-{data['phone']}
+👤 ФИО:
+{employee['full_name']}
 
-Роль:
-{data['role']}
 
-Команда:
-{teams[message.text]}
-"""
+📞 Телефон:
+{employee['phone']}
+
+
+📌 Роль:
+{employee['role']}
+
+
+🏢 Команда:
+{employee['team']}
+
+
+🟢 Статус:
+Активен
+""",
+
+        reply_markup=admin_keyboard()
+
     )
 
 

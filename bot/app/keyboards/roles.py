@@ -1,30 +1,51 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 
+
 def roles_keyboard():
 
     return ReplyKeyboardMarkup(
+
         keyboard=[
+
             [
                 KeyboardButton(
-                    text="🛎 Консьерж"
+                    text="🏢 Администрация"
                 )
             ],
+
             [
                 KeyboardButton(
-                    text="👨‍💼 Директор"
+                    text="🛎 Консьерж Сервис"
                 )
             ],
+
             [
                 KeyboardButton(
-                    text="🔧 Исполнитель"
+                    text="🔧 Технический специалист"
                 )
             ],
+
+            [
+                KeyboardButton(
+                    text="🧹 Сотрудник клининга"
+                )
+            ],
+
+            [
+                KeyboardButton(
+                    text="🛡 Охрана"
+                )
+            ],
+
             [
                 KeyboardButton(
                     text="❌ Отмена"
                 )
             ]
+
         ],
+
         resize_keyboard=True
+
     )

@@ -3,8 +3,12 @@ from enum import Enum
 
 class EmployeeTeam(str, Enum):
 
-    TECH = "TECH"
+    ADMINISTRATION = "TEAM_ADMINISTRATION"
 
-    CLEANING = "CLEANING"
+    CONCIERGE_SERVICE = "TEAM_CONCIERGE"
 
-    SECURITY = "SECURITY"
+    TECHNICAL = "TEAM_TECH"
+
+    CLEANING = "TEAM_CLEANING"
+
+    SECURITY = "TEAM_SECURITY"

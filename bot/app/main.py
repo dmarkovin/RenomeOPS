@@ -13,12 +13,15 @@ from app.database import (
 )
 
 
-from app.services.bootstrap import create_first_admin
-
+# Основные роутеры
 
 from app.handlers.start import router as start_router
 
+from app.handlers.menu import router as menu_router
+
 from app.handlers.admin.employees import router as employees_router
+
+from app.handlers.concierge.reports import router as concierge_reports_router
 
 
 
@@ -26,15 +29,15 @@ async def main():
 
 
     if not BOT_TOKEN:
+
         raise RuntimeError(
             "BOT_TOKEN is not set"
         )
 
 
+
     await connect_db()
 
-
-    await create_first_admin()
 
 
     bot = Bot(
@@ -42,17 +45,41 @@ async def main():
     )
 
 
+
     dp = Dispatcher()
 
+
+
+    # Стартовый обработчик
 
     dp.include_router(
         start_router
     )
 
 
+
+    # Авторизация и меню пользователей
+
+    dp.include_router(
+        menu_router
+    )
+
+
+
+    # Администрация - сотрудники
+
     dp.include_router(
         employees_router
     )
+
+
+
+    # Консьерж - отчеты
+
+    dp.include_router(
+        concierge_reports_router
+    )
+
 
 
     print(
@@ -60,9 +87,13 @@ async def main():
     )
 
 
+
     try:
 
-        await dp.start_polling(bot)
+        await dp.start_polling(
+            bot
+        )
+
 
     finally:
 
