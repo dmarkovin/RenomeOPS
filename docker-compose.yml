@@ -12,6 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+
   redis:
     image: redis:7
     container_name: renome-redis
@@ -19,6 +20,18 @@ services:
     ports:
       - "6379:6379"
 
+
+  bot:
+    build:
+      context: ./bot
+    container_name: renome-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+
+
 volumes:
   postgres_data:
-
