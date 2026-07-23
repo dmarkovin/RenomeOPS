@@ -34,3 +34,10 @@ POSTGRES_PASSWORD = os.getenv(
     "POSTGRES_PASSWORD",
     "renome_password"
 )
+
+ADMIN_TELEGRAM_ID = int(
+    os.getenv(
+        "ADMIN_TELEGRAM_ID",
+        0
+    )
+)
