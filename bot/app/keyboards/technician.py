@@ -1,7 +1,7 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 
-def security_keyboard():
+def technician_keyboard():
 
     return ReplyKeyboardMarkup(
 
@@ -9,25 +9,17 @@ def security_keyboard():
 
             [
                 KeyboardButton(
-                    text="🚪 Пропуска"
+                    text="📋 Мои задачи"
                 )
             ],
 
             [
                 KeyboardButton(
-                    text="👥 Посетители"
-                )
-            ],
+                    text="📷 Фотоотчет"
+                ),
 
-            [
                 KeyboardButton(
-                    text="📋 Обходы"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="📊 Отчеты"
+                    text="📊 Отчет"
                 )
             ],
 
