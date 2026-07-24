@@ -9,7 +9,9 @@ from app.services.employee_service import get_employee
 from app.keyboards.admin import admin_keyboard
 from app.keyboards.director import director_keyboard
 from app.keyboards.concierge import concierge_keyboard
-from app.keyboards.executor import executor_keyboard
+from app.keyboards.technical import technical_keyboard
+from app.keyboards.cleaning import cleaning_keyboard
+from app.keyboards.security import security_keyboard
 
 
 
@@ -17,8 +19,8 @@ router = Router()
 
 
 
-@router.message(Command("menu"))
 @router.message(Command("start"))
+@router.message(Command("menu"))
 async def menu_handler(
     message: Message
 ):
@@ -27,6 +29,7 @@ async def menu_handler(
     employee = await get_employee(
         message.from_user.id
     )
+
 
 
     if not employee:
@@ -52,6 +55,10 @@ async def menu_handler(
 
 
 
+    keyboard = None
+
+
+
     if role == "SUPER_ADMIN":
 
         keyboard = admin_keyboard()
@@ -70,19 +77,21 @@ async def menu_handler(
 
 
 
-    elif role in [
-        "TECH_SPECIALIST",
-        "CLEANING",
-        "SECURITY"
-    ]:
+    elif role == "TECH_SPECIALIST":
 
-        keyboard = executor_keyboard()
+        keyboard = technical_keyboard()
 
 
 
-    else:
+    elif role == "CLEANING":
 
-        keyboard = None
+        keyboard = cleaning_keyboard()
+
+
+
+    elif role == "SECURITY":
+
+        keyboard = security_keyboard()
 
 
 
@@ -91,6 +100,9 @@ async def menu_handler(
         f"""
 👋 Добро пожаловать,
 {employee['full_name']}
+
+
+🏢 Renome OPS
 
 
 Ваша роль:

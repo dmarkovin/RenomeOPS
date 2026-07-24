@@ -5,15 +5,21 @@ from aiogram.fsm.context import FSMContext
 
 from app.keyboards.employees import employees_keyboard
 from app.keyboards.admin import admin_keyboard
-from app.keyboards.roles import roles_keyboard
+from app.keyboards.teams import teams_keyboard
 
 
 from app.states.employee import EmployeeRegistration
 
+
 from app.services.employee_service import create_employee
 
 
+from app.utils.invite import generate_invite_link
+
+
+
 router = Router()
+
 
 
 
@@ -31,6 +37,7 @@ async def employees_menu(
 
 
 
+
 @router.message(
     F.text == "⬅️ Назад"
 )
@@ -45,6 +52,7 @@ async def employees_back(
 
 
 
+
 @router.message(
     F.text == "➕ Добавить сотрудника"
 )
@@ -53,13 +61,18 @@ async def add_employee_start(
     state: FSMContext
 ):
 
+    await state.clear()
+
+
     await state.set_state(
         EmployeeRegistration.full_name
     )
 
+
     await message.answer(
         "Введите ФИО нового сотрудника:"
     )
+
 
 
 
@@ -72,7 +85,7 @@ async def employee_full_name(
 ):
 
     await state.update_data(
-        full_name=message.text
+        full_name=message.text.strip()
     )
 
 
@@ -87,6 +100,7 @@ async def employee_full_name(
 
 
 
+
 @router.message(
     EmployeeRegistration.phone
 )
@@ -96,64 +110,30 @@ async def employee_phone(
 ):
 
     await state.update_data(
-        phone=message.text
+        phone=message.text.strip()
     )
 
 
     await state.set_state(
-        EmployeeRegistration.role
+        EmployeeRegistration.team
     )
 
 
     await message.answer(
         "Выберите подразделение:",
-        reply_markup=roles_keyboard()
+        reply_markup=teams_keyboard()
     )
 
 
 
+
 @router.message(
-    EmployeeRegistration.role
+    EmployeeRegistration.team
 )
-async def employee_department(
+async def employee_team(
     message: Message,
     state: FSMContext
 ):
-
-
-    departments = {
-
-        "🏢 Администрация": (
-            "DIRECTOR",
-            "TEAM_ADMINISTRATION"
-        ),
-
-
-        "🛎 Консьерж Сервис": (
-            "CONCIERGE",
-            "TEAM_CONCIERGE"
-        ),
-
-
-        "🔧 Технический специалист": (
-            "TECH_SPECIALIST",
-            "TEAM_TECH"
-        ),
-
-
-        "🧹 Сотрудник клининга": (
-            "CLEANING",
-            "TEAM_CLEANING"
-        ),
-
-
-        "🛡 Охрана": (
-            "SECURITY",
-            "TEAM_SECURITY"
-        )
-
-    }
-
 
 
     if message.text == "❌ Отмена":
@@ -169,47 +149,71 @@ async def employee_department(
 
 
 
+    departments = {
+
+        "🏢 Администрация":
+        {
+            "role": "DIRECTOR",
+            "team": "ADMINISTRATION"
+        },
+
+
+        "🛎 Консьерж Сервис":
+        {
+            "role": "CONCIERGE",
+            "team": "CONCIERGE"
+        },
+
+
+        "🔧 Техника":
+        {
+            "role": "TECHNICIAN",
+            "team": "TEAM_TECH"
+        },
+
+
+        "🧹 Клининг":
+        {
+            "role": "CLEANING",
+            "team": "TEAM_CLEANING"
+        },
+
+
+        "🛡 Охрана":
+        {
+            "role": "SECURITY",
+            "team": "TEAM_SECURITY"
+        }
+
+    }
+
+
+
+
     if message.text not in departments:
 
         await message.answer(
-            "Выберите подразделение кнопкой."
+            "⚠️ Выберите подразделение кнопкой."
         )
 
         return
 
 
 
-    role, team = departments[message.text]
-
-
-    await state.update_data(
-
-        role=role,
-
-        team=team
-
-    )
-
-
-    await save_employee(
-        message,
-        state
-    )
-
-
-
-async def save_employee(
-    message: Message,
-    state: FSMContext
-):
 
     data = await state.get_data()
+
+
+    department = departments[
+        message.text
+    ]
+
 
 
 
     employee = await create_employee(
 
-        telegram_id=0,
+        telegram_id=None,
 
         username=None,
 
@@ -217,43 +221,76 @@ async def save_employee(
 
         phone=data["phone"],
 
-        role=data["role"],
+        role=department["role"],
 
-        team=data["team"]
+        team=department["team"]
 
     )
+
+
+
+    invite_link = generate_invite_link(
+        employee["invite_code"]
+    )
+
+
+
+    await state.clear()
 
 
 
     await message.answer(
 
         f"""
-✅ Новый сотрудник создан
+✅ Сотрудник создан!
 
 
 👤 ФИО:
+
 {employee['full_name']}
 
 
 📞 Телефон:
+
 {employee['phone']}
 
 
-📌 Роль:
+🏢 Подразделение:
+
+{message.text}
+
+
+🎯 Роль:
+
 {employee['role']}
 
 
-🏢 Команда:
+👥 Команда:
+
 {employee['team']}
 
 
-🟢 Статус:
-Активен
-""",
+📲 Telegram:
 
-        reply_markup=admin_keyboard()
+Не подключен
+
+
+🔗 Ссылка приглашения:
+
+
+{invite_link}
+
+
+Отправьте эту ссылку сотруднику.
+"""
 
     )
 
 
-    await state.clear()
+    await message.answer(
+
+        "👥 Меню сотрудников",
+
+        reply_markup=employees_keyboard()
+
+    )

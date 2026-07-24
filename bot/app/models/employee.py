@@ -5,12 +5,13 @@ from app.models.role import EmployeeRole
 from app.models.team import EmployeeTeam
 
 
+
 @dataclass
 class Employee:
 
     id: int
 
-    telegram_id: int
+    telegram_id: int | None
 
     username: str | None
 
@@ -23,5 +24,7 @@ class Employee:
     team: EmployeeTeam | None
 
     is_active: bool
+
+    invite_code: str | None
 
     created_at: datetime | None

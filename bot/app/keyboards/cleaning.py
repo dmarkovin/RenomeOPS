@@ -1,47 +1,46 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 
-def teams_keyboard():
+
+def cleaning_keyboard():
 
     return ReplyKeyboardMarkup(
+
         keyboard=[
 
             [
                 KeyboardButton(
-                    text="🔧 Техника"
+                    text="📋 Мои задачи"
                 )
             ],
 
             [
                 KeyboardButton(
-                    text="🧹 Клининг"
+                    text="✅ Выполненные"
                 )
             ],
 
             [
                 KeyboardButton(
-                    text="🛡 Охрана"
+                    text="📝 Отчет работы"
                 )
             ],
 
             [
                 KeyboardButton(
-                    text="🛎 Консьерж Сервис"
+                    text="👤 Профиль"
                 )
             ],
 
             [
                 KeyboardButton(
-                    text="🏢 Администрация"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="❌ Отмена"
+                    text="⬅️ Назад"
                 )
             ]
 
         ],
+
         resize_keyboard=True
+
     )
+

@@ -1,119 +1,201 @@
 from aiogram import Router
 from aiogram.types import Message
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 
 
-from app.services.employee_service import get_employee
+from app.services.employee_service import (
+    get_employee,
+    get_employee_by_invite,
+    activate_employee
+)
 
 
-from app.keyboards.admin import admin_keyboard
+from app.keyboards.main import admin_menu
 from app.keyboards.concierge import concierge_keyboard
 from app.keyboards.director import director_keyboard
 from app.keyboards.executor import executor_keyboard
-
 
 
 router = Router()
 
 
 
-@router.message(Command("start"))
-async def start_handler(
-    message: Message
+async def send_role_menu(
+    message: Message,
+    employee
 ):
+
+    role = employee["role"]
+
+
+    if role == "SUPER_ADMIN":
+
+        await message.answer(
+            """
+👑 Renome OPS
+
+Роль:
+Супер Администратор
+""",
+            reply_markup=admin_menu()
+        )
+
+
+    elif role == "DIRECTOR":
+
+        await message.answer(
+            """
+👨‍💼 Renome OPS
+
+Роль:
+Директор
+""",
+            reply_markup=director_keyboard()
+        )
+
+
+    elif role == "CONCIERGE":
+
+        await message.answer(
+            """
+🛎 Renome OPS
+
+Роль:
+Консьерж Сервис
+""",
+            reply_markup=concierge_keyboard()
+        )
+
+
+    elif role in [
+        "TECHNICIAN",
+        "CLEANING",
+        "SECURITY"
+    ]:
+
+        await message.answer(
+            """
+🔧 Renome OPS
+
+Рабочее меню сотрудника
+""",
+            reply_markup=executor_keyboard()
+        )
+
+
+    else:
+
+        await message.answer(
+            """
+⚠️ Роль не определена.
+Обратитесь к администратору.
+"""
+        )
+
+
+
+
+
+@router.message(
+    Command("start")
+)
+async def start_handler(
+    message: Message,
+    command: CommandObject
+):
+
 
     telegram_id = message.from_user.id
 
+    username = message.from_user.username
+
+
+
+    # Проверяем уже зарегистрированного сотрудника
 
     employee = await get_employee(
         telegram_id
     )
 
 
-    if not employee:
+    if employee:
 
-        await message.answer(
-            """
-👋 Добро пожаловать в Renome OPS!
-
-Ваш аккаунт еще не зарегистрирован.
-
-Обратитесь к администратору.
-"""
+        await send_role_menu(
+            message,
+            employee
         )
 
         return
 
 
 
-    role = employee["role"]
+
+    # Проверяем приглашение
+
+
+    if command.args:
+
+
+        invite_code = command.args.strip()
 
 
 
-    if role == "SUPER_ADMIN":
+        employee = await get_employee_by_invite(
+            invite_code
+        )
 
-        keyboard = admin_keyboard()
 
-        text = """
-👑 Администратор Renome OPS
 
-Полный доступ к системе.
+        if employee:
+
+
+            activated = await activate_employee(
+                employee["id"],
+                telegram_id,
+                username
+            )
+
+
+
+            await message.answer(
+                f"""
+✅ Доступ активирован!
+
+
+Добро пожаловать в Renome OPS
+
+
+👤 {activated['full_name']}
+
+
+🏢 Подразделение:
+
+{activated['team']}
 """
+            )
 
 
 
-    elif role == "CONCIERGE":
-
-        keyboard = concierge_keyboard()
-
-        text = """
-🛎 Консьерж Renome OPS
-
-Рабочее меню ресепшен.
-"""
+            await send_role_menu(
+                message,
+                activated
+            )
 
 
+            return
 
-    elif role == "DIRECTOR":
-
-        keyboard = director_keyboard()
-
-        text = """
-👨‍💼 Начальник объекта
-
-Контроль и аналитика.
-"""
-
-
-
-    elif role in (
-        "EXECUTOR",
-        "TEAM_TECH",
-        "TEAM_CLEANING",
-        "TEAM_SECURITY"
-    ):
-
-        keyboard = executor_keyboard()
-
-        text = """
-🔧 Исполнитель
-
-Ваши рабочие задачи.
-"""
-
-
-
-    else:
-
-        keyboard = None
-
-        text = """
-⚠️ Роль пользователя не определена.
-"""
 
 
 
     await message.answer(
-        text,
-        reply_markup=keyboard
+        """
+👋 Добро пожаловать в Renome OPS!
+
+
+Ваш Telegram еще не зарегистрирован.
+
+
+Если у вас есть приглашение,
+перейдите по ссылке от администратора.
+"""
     )
