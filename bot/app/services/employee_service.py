@@ -177,3 +177,47 @@ async def get_all_employees():
             ORDER BY created_at DESC
             """
         )
+# =====================================================
+# Получить сотрудников команды
+# =====================================================
+
+async def get_team_members(team: str):
+
+    pool = await get_db()
+
+    async with pool.acquire() as conn:
+
+        return await conn.fetch(
+            """
+            SELECT *
+
+            FROM employees
+
+            WHERE team=$1
+
+            ORDER BY full_name
+            """,
+            team
+        )
+
+
+# =====================================================
+# Получить сотрудника по ID
+# =====================================================
+
+async def get_employee_by_id(employee_id: int):
+
+    pool = await get_db()
+
+    async with pool.acquire() as conn:
+
+        return await conn.fetchrow(
+            """
+            SELECT *
+
+            FROM employees
+
+            WHERE id=$1
+            """,
+            employee_id
+        )
