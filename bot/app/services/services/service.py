@@ -4,10 +4,10 @@ from app.database import AsyncSessionLocal
 from app.database.models import Service, ServiceOrder, User
 from datetime import datetime
 
+
 # ==========================
 # Управление услугами (админ)
 # ==========================
-
 async def create_service(
     name: str,
     description: str,
@@ -26,6 +26,7 @@ async def create_service(
         await db.commit()
         await db.refresh(service)
         return service
+
 
 async def update_service(
     service_id: int,
@@ -53,6 +54,7 @@ async def update_service(
         await db.refresh(service)
         return service
 
+
 async def get_all_services(active_only: bool = True) -> List[Service]:
     async with AsyncSessionLocal() as db:
         query = select(Service)
@@ -62,14 +64,15 @@ async def get_all_services(active_only: bool = True) -> List[Service]:
         result = await db.execute(query)
         return result.scalars().all()
 
+
 async def get_service(service_id: int) -> Optional[Service]:
     async with AsyncSessionLocal() as db:
         return await db.get(Service, service_id)
 
+
 # ==========================
 # Заказы услуг (пользователи)
 # ==========================
-
 async def create_service_order(
     service_id: int,
     user_id: int,
@@ -97,17 +100,26 @@ async def create_service_order(
         await db.refresh(order)
         return order
 
-async def get_user_orders(user_id: int) -> List[ServiceOrder]:
+
+async def get_user_orders(user_id: int, status: Optional[str] = None) -> List[ServiceOrder]:
     async with AsyncSessionLocal() as db:
-        query = select(ServiceOrder).where(ServiceOrder.user_id == user_id).order_by(ServiceOrder.created_at.desc())
+        query = select(ServiceOrder).where(ServiceOrder.user_id == user_id)
+        if status:
+            query = query.where(ServiceOrder.status == status)
+        query = query.order_by(ServiceOrder.created_at.desc())
         result = await db.execute(query)
         return result.scalars().all()
 
-async def get_all_orders(limit: int = 100, offset: int = 0) -> List[ServiceOrder]:
+
+async def get_all_orders(limit: int = 100, offset: int = 0, status: Optional[str] = None) -> List[ServiceOrder]:
     async with AsyncSessionLocal() as db:
-        query = select(ServiceOrder).order_by(ServiceOrder.created_at.desc()).limit(limit).offset(offset)
+        query = select(ServiceOrder)
+        if status:
+            query = query.where(ServiceOrder.status == status)
+        query = query.order_by(ServiceOrder.created_at.desc()).limit(limit).offset(offset)
         result = await db.execute(query)
         return result.scalars().all()
+
 
 async def update_order_status(order_id: int, status: str) -> Optional[ServiceOrder]:
     async with AsyncSessionLocal() as db:
@@ -119,3 +131,8 @@ async def update_order_status(order_id: int, status: str) -> Optional[ServiceOrd
         await db.commit()
         await db.refresh(order)
         return order
+
+
+async def get_order(order_id: int) -> Optional[ServiceOrder]:
+    async with AsyncSessionLocal() as db:
+        return await db.get(ServiceOrder, order_id)

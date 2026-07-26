@@ -9,10 +9,6 @@ def employees_admin_menu() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="🔍 Поиск"),
-                KeyboardButton(text="♻️ Активировать"),
-            ],
-            [
-                KeyboardButton(text="🚫 Заблокировать"),
                 KeyboardButton(text="⬅️ Назад"),
             ],
         ],

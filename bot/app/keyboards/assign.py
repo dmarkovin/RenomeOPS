@@ -4,34 +4,28 @@ from typing import List
 
 
 def assign_type_keyboard(task_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура выбора типа назначения: на команду или на сотрудника"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton("👥 На команду", callback_data=f"assign_type_team:{task_id}")],
-            [InlineKeyboardButton("👤 На сотрудника", callback_data=f"assign_type_user:{task_id}")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="cancel_action")]
+            [InlineKeyboardButton(text="👥 На команду", callback_data=f"assign_type_team:{task_id}")],
+            [InlineKeyboardButton(text="👤 На сотрудника", callback_data=f"assign_type_user:{task_id}")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data=f"assign_skip:{task_id}")]
         ]
     )
 
 
 def team_selection_keyboard(teams: List[dict], task_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура выбора команды"""
     buttons = []
     for item in teams:
         team = item["team"]
         members = item["members"]
-        buttons.append([
-            InlineKeyboardButton(
-                f"{team.value} ({members} чел.)",
-                callback_data=f"assign_team:{team.value}:{task_id}"
-            )
-        ])
-    buttons.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel_action")])
+        label = f"{team.value} ({members} чел.)"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"assign_team:{team.value}:{task_id}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"assign_back_to_type:{task_id}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"assign_skip:{task_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def employee_selection_keyboard(employees: List[User], action: str, task_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура выбора сотрудника"""
     buttons = []
     for emp in employees:
         status_emoji = "✅" if emp.active else "❌"
@@ -41,5 +35,6 @@ def employee_selection_keyboard(employees: List[User], action: str, task_id: int
                 callback_data=f"{action}_emp:{emp.id}:{task_id}"
             )
         ])
-    buttons.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel_action")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"assign_back_to_type:{task_id}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"assign_skip:{task_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

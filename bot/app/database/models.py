@@ -35,6 +35,7 @@ class Team(str, enum.Enum):
     TEAM_TECH = "TEAM_TECH"
     TEAM_CLEANING = "TEAM_CLEANING"
     TEAM_SECURITY = "TEAM_SECURITY"
+    TEAM_CONCIERGE = "TEAM_CONCIERGE"
 
 # ===========================
 # Статусы задач
@@ -73,14 +74,18 @@ class Task(Base):
     description = Column(Text)
     status = Column(Enum(TaskStatus), default=TaskStatus.CREATED, nullable=False)
     # Локация
-    building = Column(Integer, nullable=True)           # 1 или 2
-    entrance = Column(Integer, nullable=True)          # подъезд
-    floor = Column(Integer, nullable=True)             # этаж
-    apartment = Column(Integer, nullable=True)         # квартира
-    location_type = Column(String(50), nullable=True)  # apartment, common_area, elevator, etc.
-    parking_level = Column(Integer, nullable=True)     # -1 или -2
-    parking_spot = Column(Integer, nullable=True)      # номер машиноместа
-    cellar = Column(Integer, nullable=True)            # номер келлера
+    building = Column(Integer, nullable=True)
+    entrance = Column(Integer, nullable=True)
+    floor = Column(Integer, nullable=True)
+    apartment = Column(Integer, nullable=True)
+    location_type = Column(String(50), nullable=True)
+    parking_level = Column(Integer, nullable=True)
+    parking_spot = Column(Integer, nullable=True)
+    cellar = Column(Integer, nullable=True)
+    # Заявитель
+    applicant_type = Column(String(20), nullable=True)
+    applicant_name = Column(String(255), nullable=True)
+    applicant_phone = Column(String(20), nullable=True)
     priority = Column(Integer, default=3)
     created_by = Column(Integer, ForeignKey("users.id"))
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -152,7 +157,7 @@ class ServiceOrder(Base):
     id = Column(Integer, primary_key=True)
     service_id = Column(Integer, ForeignKey("services.id"))
     user_id = Column(Integer, ForeignKey("users.id"))
-    status = Column(String(20), default="pending")  # pending, paid, completed, cancelled
+    status = Column(String(20), default="pending")
     building = Column(Integer, nullable=True)
     entrance = Column(Integer, nullable=True)
     floor = Column(Integer, nullable=True)
@@ -179,7 +184,31 @@ class Delivery(Base):
     comment = Column(Text)
     photo_ids = Column(JSON, default=list)
     created_by = Column(Integer, ForeignKey("users.id"))
-    status = Column(String(20), default="pending")  # pending, received, completed
+    status = Column(String(20), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     creator = relationship("User", foreign_keys=[created_by])
+
+# ===========================
+# Пропуска
+# ===========================
+class Pass(Base):
+    __tablename__ = "passes"
+    id = Column(Integer, primary_key=True)
+    type = Column(String(20), nullable=False)  # guest, car
+    guest_name = Column(String(255), nullable=True)  # для гостя
+    car_number = Column(String(20), nullable=True)   # для авто
+    purpose = Column(String(255), nullable=True)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    status = Column(String(20), default="active")  # active, used, expired
+    comment = Column(Text)
+    photo_ids = Column(JSON, default=list)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)  # охрана
+    checked_in_at = Column(DateTime, nullable=True)
+    checked_out_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    creator = relationship("User", foreign_keys=[created_by])
+    assignee = relationship("User", foreign_keys=[assigned_to])

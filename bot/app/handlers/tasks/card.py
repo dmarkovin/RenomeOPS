@@ -32,17 +32,14 @@ async def show_task_card(callback: CallbackQuery):
     if not task:
         await callback.answer("Заявка не найдена", show_alert=True)
         return
-
     employee = await get_employee(callback.from_user.id)
     if not employee:
         await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
-
     if employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
         if task.assigned_to != employee.id and not (task.assigned_team == employee.team and task.assigned_to is None):
             await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
             return
-
     status_emoji = get_task_status_emoji(task.status)
     text = (
         f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
@@ -56,7 +53,6 @@ async def show_task_card(callback: CallbackQuery):
     )
     if task.closed_at:
         text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
-
     await callback.message.edit_text(
         text,
         reply_markup=task_actions_keyboard(task, employee),
@@ -71,12 +67,10 @@ async def take_task_callback(callback: CallbackQuery):
     if not employee:
         await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
-
     task = await take_task(task_id, employee.id)
     if not task:
         await callback.answer("Не удалось взять задачу. Возможно, она уже назначена другому.", show_alert=True)
         return
-
     await callback.answer("✅ Задача взята в работу")
     await show_task_card(callback)
     await notify_admins(f"📢 Сотрудник {employee.full_name} взял задачу #{task_id} в работу.")
@@ -86,7 +80,6 @@ async def change_task_status(callback: CallbackQuery):
     parts = callback.data.split(":")
     task_id = int(parts[1])
     status_str = parts[2]
-
     status_map = {
         "accept": TaskStatus.ACCEPTED,
         "start": TaskStatus.IN_PROGRESS,
@@ -98,17 +91,14 @@ async def change_task_status(callback: CallbackQuery):
     if not new_status:
         await callback.answer("Неизвестный статус", show_alert=True)
         return
-
     employee = await get_employee(callback.from_user.id)
     if not employee:
         await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
-
     task = await get_task(task_id)
     if not task:
         await callback.answer("Задача не найдена", show_alert=True)
         return
-
     if employee.role in (UserRole.TECHNICIAN, UserRole.CLEANER, UserRole.SECURITY):
         if task.assigned_to != employee.id:
             await callback.answer("Вы не исполнитель этой задачи", show_alert=True)
@@ -123,19 +113,15 @@ async def change_task_status(callback: CallbackQuery):
     else:
         await callback.answer("У вас нет прав", show_alert=True)
         return
-
     task = await change_status(task_id, new_status, employee.id)
     if not task:
         await callback.answer("Ошибка изменения статуса", show_alert=True)
         return
-
     await callback.answer(f"✅ Статус изменён на {new_status.value}")
-
     if new_status == TaskStatus.CHECKING:
         await notify_admins(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}")
     elif new_status == TaskStatus.CLOSED:
         await notify_admins(f"✅ Задача #{task_id} закрыта. Проверил: {employee.full_name}")
-
     await show_task_card(callback)
 
 @router.callback_query(F.data.startswith("task_comment:"))
@@ -155,7 +141,6 @@ async def process_comment(message: Message, state: FSMContext):
         await message.answer("Вы не зарегистрированы")
         await state.clear()
         return
-
     comment = await add_comment(task_id, employee.id, message.text)
     if comment:
         await message.answer("✅ Комментарий добавлен.")
@@ -170,7 +155,6 @@ async def show_task_history(callback: CallbackQuery):
     if not history:
         await callback.answer("История пуста", show_alert=True)
         return
-
     text = f"📜 <b>История задачи #{task_id}</b>\n\n"
     for entry in history[:10]:
         user_name = entry.user.full_name if entry.user else "—"
@@ -178,10 +162,8 @@ async def show_task_history(callback: CallbackQuery):
         text += f"👤 {user_name}\n"
         text += f"📌 {entry.action}\n"
         text += f"📝 {entry.description}\n\n"
-
     if len(history) > 10:
         text += f"... и ещё {len(history)-10} записей."
-
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
@@ -217,14 +199,11 @@ async def finish_photo_upload(message: Message, state: FSMContext):
         await message.answer("Ошибка")
         await state.clear()
         return
-
     if not photos:
         await message.answer("Нет фото для добавления.")
         await state.clear()
         return
-
     for file_id in photos:
         await add_photo(task_id, employee.id, file_id)
-
     await message.answer(f"✅ Добавлено {len(photos)} фото к задаче #{task_id}.")
     await state.clear()

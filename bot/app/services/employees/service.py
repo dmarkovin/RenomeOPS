@@ -185,3 +185,45 @@ async def update_employee_role(user_id: int, new_role: UserRole) -> Optional[Use
         await db.commit()
         await db.refresh(user)
         return user
+
+async def get_all_employees(
+    active: Optional[bool] = None,
+    role: Optional[UserRole] = None,
+    team: Optional[Team] = None,
+    search: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[User]:
+    async with AsyncSessionLocal() as db:
+        query = select(User)
+        filters = []
+        if active is not None:
+            filters.append(User.active == active)
+        if role:
+            filters.append(User.role == role)
+        if team:
+            filters.append(User.team == team)
+        if search:
+            filters.append(
+                or_(
+                    User.full_name.ilike(f"%{search}%"),
+                    User.phone.ilike(f"%{search}%"),
+                    User.username.ilike(f"%{search}%"),
+                )
+            )
+        if filters:
+            query = query.where(and_(*filters))
+        query = query.order_by(User.created_at.desc()).limit(limit).offset(offset)
+        result = await db.execute(query)
+        return result.scalars().all()
+
+async def update_employee_team(user_id: int, new_team: Optional[Team]) -> Optional[User]:
+    """Изменить команду сотрудника"""
+    async with AsyncSessionLocal() as db:
+        user = await db.get(User, user_id)
+        if not user:
+            return None
+        user.team = new_team
+        await db.commit()
+        await db.refresh(user)
+        return user

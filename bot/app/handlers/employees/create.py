@@ -63,7 +63,8 @@ async def process_role(message: Message, state: FSMContext):
     role = role_map[message.text]
     await state.update_data(role=role)
 
-    if role in (UserRole.TECHNICIAN, UserRole.CLEANER, UserRole.SECURITY):
+    # Для всех ролей, кроме ADMIN, спрашиваем команду
+    if role != UserRole.ADMIN:
         await state.set_state(EmployeeRegistration.team)
         await message.answer("Выберите команду для этого сотрудника:", reply_markup=team_keyboard())
     else:
@@ -76,6 +77,7 @@ async def process_team(message: Message, state: FSMContext):
         "🔧 TEAM_TECH": Team.TEAM_TECH,
         "🧹 TEAM_CLEANING": Team.TEAM_CLEANING,
         "🛡 TEAM_SECURITY": Team.TEAM_SECURITY,
+        "🛎 TEAM_CONCIERGE": Team.TEAM_CONCIERGE,
         "🏢 ADMINISTRATION": None,
     }
     if message.text not in team_map:

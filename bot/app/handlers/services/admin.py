@@ -1,4 +1,4 @@
-from aiogram import Router, F
+from aiogram import Router, F, types
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -47,7 +47,7 @@ async def service_price(message: Message, state: FSMContext):
         if price < 0:
             raise ValueError
     except:
-        await message.answer("❌ Введите корректную цену (положительное число).")
+        await message.answer("Введите корректную цену (положительное число).")
         return
     await state.update_data(price=price)
     await state.set_state(ServiceCreation.category)
@@ -59,7 +59,7 @@ async def service_category(message: Message, state: FSMContext):
     await state.update_data(category=text if text != "-" else None)
     data = await state.get_data()
     await state.set_state(ServiceCreation.confirm)
-    await message.answer(
+    text = (
         f"📝 Проверьте данные:\n"
         f"Название: {data['name']}\n"
         f"Описание: {data['description'] or '—'}\n"
@@ -67,6 +67,7 @@ async def service_category(message: Message, state: FSMContext):
         f"Категория: {data['category'] or '—'}\n\n"
         f"Подтвердить создание? (да/нет)"
     )
+    await message.answer(text)
 
 @router.message(ServiceCreation.confirm, F.text.lower() == "да")
 async def confirm_create_service(message: Message, state: FSMContext):
