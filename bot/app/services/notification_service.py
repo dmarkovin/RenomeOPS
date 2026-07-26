@@ -1,3 +1,4 @@
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Bot
 from app.config import settings
 from app.services.employees.service import get_all_employees
@@ -39,3 +40,32 @@ async def notify_team(team: Team, text: str):
     for emp in employees:
         if emp.telegram_id:
             await notify_user(emp.telegram_id, text)
+
+async def notify_concierges(text: str):
+    """Отправить уведомление всем активным консьержам"""
+    if not bot:
+        return
+    employees = await get_all_employees(role=UserRole.CONCIERGE, active=True)
+    for emp in employees:
+        if emp.telegram_id:
+            try:
+                await bot.send_message(emp.telegram_id, text)
+            except Exception as e:
+                print(f"Ошибка отправки консьержу {emp.telegram_id}: {e}")
+
+async def notify_team_with_button(team: Team, text: str, task_id: int):
+    """Отправить уведомление команде с кнопкой 'Взять'"""
+    if not bot:
+        return
+    employees = await get_all_employees(team=team, active=True)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take_from_list:{task_id}")]
+        ]
+    )
+    for emp in employees:
+        if emp.telegram_id:
+            try:
+                await bot.send_message(emp.telegram_id, text, reply_markup=keyboard)
+            except Exception as e:
+                print(f"Ошибка отправки уведомления {emp.telegram_id}: {e}")

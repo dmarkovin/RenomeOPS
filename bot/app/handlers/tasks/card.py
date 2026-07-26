@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
+from datetime import datetime, timedelta
 
 from app.services.tasks.service import (
     get_task,
@@ -15,7 +16,9 @@ from app.services.tasks.service import (
 from app.services.employees.service import get_employee
 from app.database.models import UserRole, TaskStatus
 from app.keyboards.task_actions import task_actions_keyboard, get_task_status_emoji
-from app.services.notification_service import notify_user, notify_admins
+from app.keyboards.waiting import waiting_time_keyboard
+from app.services.notification_service import notify_user, notify_admins, notify_concierges
+from app.states.tasks.waiting import TaskWaiting
 
 router = Router()
 
@@ -51,8 +54,11 @@ async def show_task_card(callback: CallbackQuery):
         f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
         f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
     )
+    if task.wait_until:
+        text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
     if task.closed_at:
         text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
+
     await callback.message.edit_text(
         text,
         reply_markup=task_actions_keyboard(task, employee),
@@ -113,15 +119,18 @@ async def change_task_status(callback: CallbackQuery):
     else:
         await callback.answer("У вас нет прав", show_alert=True)
         return
+
+    # Если статус меняется на CLOSED или IN_PROGRESS, комментарий не обязателен
     task = await change_status(task_id, new_status, employee.id)
     if not task:
         await callback.answer("Ошибка изменения статуса", show_alert=True)
         return
     await callback.answer(f"✅ Статус изменён на {new_status.value}")
+
     if new_status == TaskStatus.CHECKING:
-        await notify_admins(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}")
+        await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}")
     elif new_status == TaskStatus.CLOSED:
-        await notify_admins(f"✅ Задача #{task_id} закрыта. Проверил: {employee.full_name}")
+        await notify_concierges(f"✅ Задача #{task_id} закрыта. Проверил: {employee.full_name}")
     await show_task_card(callback)
 
 @router.callback_query(F.data.startswith("task_comment:"))
@@ -206,4 +215,49 @@ async def finish_photo_upload(message: Message, state: FSMContext):
     for file_id in photos:
         await add_photo(task_id, employee.id, file_id)
     await message.answer(f"✅ Добавлено {len(photos)} фото к задаче #{task_id}.")
+    await state.clear()
+
+@router.callback_query(F.data.startswith("task_wait:"))
+async def start_wait(callback: CallbackQuery, state: FSMContext):
+    task_id = int(callback.data.split(":")[1])
+    employee = await get_employee(callback.from_user.id)
+    task = await get_task(task_id)
+    if not employee or task.assigned_to != employee.id:
+        await callback.answer("Вы не исполнитель этой задачи", show_alert=True)
+        return
+    await state.update_data(task_id=task_id)
+    await callback.message.edit_text("Выберите срок ожидания:", reply_markup=waiting_time_keyboard(task_id))
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("wait_time:"))
+async def waiting_time_selected(callback: CallbackQuery, state: FSMContext):
+    _, task_id_str, hours_str = callback.data.split(":")
+    task_id = int(task_id_str)
+    hours = int(hours_str)
+    await state.update_data(task_id=task_id, hours=hours)
+    await state.set_state(TaskWaiting.comment)
+    await callback.message.edit_text("Введите комментарий (обязательно):")
+    await callback.answer()
+
+@router.message(TaskWaiting.comment)
+async def process_wait_comment(message: Message, state: FSMContext):
+    data = await state.get_data()
+    task_id = data.get("task_id")
+    hours = data.get("hours")
+    comment = message.text.strip()
+    if not comment:
+        await message.answer("Комментарий обязателен. Введите текст:")
+        return
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Ошибка")
+        await state.clear()
+        return
+    wait_until = datetime.utcnow() + timedelta(hours=hours)
+    task = await change_status(task_id, TaskStatus.WAITING, employee.id, comment, wait_until)
+    if task:
+        await message.answer(f"✅ Задача отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}")
+        await notify_concierges(f"⏳ Задача #{task_id} отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}. Комментарий: {comment}")
+    else:
+        await message.answer("❌ Ошибка")
     await state.clear()

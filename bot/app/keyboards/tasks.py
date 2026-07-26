@@ -2,7 +2,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import TaskStatus, UserRole
 from typing import List
 
-
 def get_task_status_emoji(status: TaskStatus) -> str:
     emoji_map = {
         TaskStatus.CREATED: "🟡",
@@ -10,16 +9,22 @@ def get_task_status_emoji(status: TaskStatus) -> str:
         TaskStatus.IN_PROGRESS: "🟠",
         TaskStatus.CHECKING: "🟣",
         TaskStatus.CLOSED: "✅",
+        TaskStatus.WAITING: "⏳",
     }
     return emoji_map.get(status, "⚪")
 
-
-def task_list_keyboard(tasks: List, page: int, total_pages: int) -> InlineKeyboardMarkup:
+def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str = "open") -> InlineKeyboardMarkup:
     buttons = []
     for task in tasks[:10]:
         status_emoji = get_task_status_emoji(task.status)
         text = f"{status_emoji} #{task.id} {task.title[:25]}"
-        buttons.append([InlineKeyboardButton(text=text, callback_data=f"task:{task.id}")])
+        if list_type == "team" and task.assigned_to is None:
+            buttons.append([
+                InlineKeyboardButton(text=text, callback_data=f"task:{task.id}"),
+                InlineKeyboardButton(text="📥 Взять", callback_data=f"task_take_from_list:{task.id}"),
+            ])
+        else:
+            buttons.append([InlineKeyboardButton(text=text, callback_data=f"task:{task.id}")])
 
     nav_buttons = []
     if page > 1:
@@ -30,15 +35,15 @@ def task_list_keyboard(tasks: List, page: int, total_pages: int) -> InlineKeyboa
     if nav_buttons:
         buttons.append(nav_buttons)
 
-    buttons.append([InlineKeyboardButton(text="⬅️ В главное меню", callback_data="tasks_back")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="tasks_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 
 def tasks_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
     if role in (UserRole.ADMIN, UserRole.DIRECTOR):
         buttons = [
             [KeyboardButton(text="➕ Создать заявку")],
             [KeyboardButton(text="📋 Список заявок")],
+            [KeyboardButton(text="🔍 Поиск по заявкам")],
             [KeyboardButton(text="📦 Архив")],
             [KeyboardButton(text="⬅️ Назад")]
         ]
@@ -46,13 +51,16 @@ def tasks_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
         buttons = [
             [KeyboardButton(text="➕ Создать заявку")],
             [KeyboardButton(text="📋 Список заявок")],
+            [KeyboardButton(text="🔍 Поиск по заявкам")],
             [KeyboardButton(text="📋 Мои задачи")],
+            [KeyboardButton(text="📋 Ожидают проверки")],
             [KeyboardButton(text="📦 Архив")],
             [KeyboardButton(text="⬅️ Назад")]
         ]
     else:
         buttons = [
             [KeyboardButton(text="📋 Мои задачи")],
+            [KeyboardButton(text="📋 Новые задачи")],
             [KeyboardButton(text="📦 Архив")],
             [KeyboardButton(text="⬅️ Назад")]
         ]

@@ -7,6 +7,7 @@ from .services import router as services_router
 from .reception.deliveries import router as deliveries_router
 
 routers = [
+    documents_router,
     start_router,
     menu_router,
     tasks_router,

@@ -69,7 +69,12 @@ async def assign_to_team(callback: CallbackQuery):
     if not task:
         await callback.answer("Ошибка назначения", show_alert=True)
         return
-    await notify_team(team, f"📢 Новая задача #{task_id} назначена на вашу команду.\nНазвание: {task.title}")
+
+    # Уведомление команде
+        # Отправляем уведомление команде с кнопкой "Взять"
+        from app.services.notification_service import notify_team_with_button
+        await notify_team_with_button(team, f"📢 Новая задача #{task_id} назначена на вашу команду.\nНазвание: {task.title}", task_id)
+
     await callback.message.delete()
     await callback.message.answer(
         f"✅ Задача #{task_id} назначена на команду {team.value}.",
@@ -221,3 +226,4 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.delete()
     await callback.answer("Действие отменено")
+# (добавим импорт InlineKeyboardButton в начале файла, если нет)

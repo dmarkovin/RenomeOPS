@@ -41,6 +41,7 @@ class Team(str, enum.Enum):
 # Статусы задач
 # ===========================
 class TaskStatus(str, enum.Enum):
+    WAITING = "waiting"
     CREATED = "created"
     ACCEPTED = "accepted"
     IN_PROGRESS = "in_progress"
@@ -87,6 +88,7 @@ class Task(Base):
     applicant_name = Column(String(255), nullable=True)
     applicant_phone = Column(String(20), nullable=True)
     priority = Column(Integer, default=3)
+    wait_until = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"))
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
     assigned_team = Column(Enum(Team), nullable=True)
@@ -212,3 +214,25 @@ class Pass(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     creator = relationship("User", foreign_keys=[created_by])
     assignee = relationship("User", foreign_keys=[assigned_to])
+
+# ===========================
+# Документы (Ресепшен)
+# ===========================
+class Document(Base):
+    __tablename__ = "documents"
+    id = Column(Integer, primary_key=True)
+    doc_type = Column(String(20), nullable=False)  # incoming, outgoing, storage, issued
+    number = Column(String(50), nullable=False)    # номер документа
+    title = Column(String(255), nullable=False)    # краткое описание
+    recipient = Column(String(255), nullable=True) # получатель (для исходящих/выданных)
+    sender = Column(String(255), nullable=True)    # отправитель (для входящих)
+    storage_location = Column(String(100), nullable=True) # место хранения
+    issued_to = Column(String(255), nullable=True) # кому выдан
+    issued_at = Column(DateTime, nullable=True)    # дата выдачи
+    returned_at = Column(DateTime, nullable=True)  # дата возврата
+    status = Column(String(20), default="active")  # active, returned, archived
+    comment = Column(Text)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    creator = relationship("User", foreign_keys=[created_by])

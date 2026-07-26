@@ -1,3 +1,4 @@
+from aiogram.filters import Command
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart
@@ -92,3 +93,51 @@ async def start_handler(
 Получите приглашение от администратора.
 """
     )
+
+    print(f"DEBUG: Received message: '{message.text}'")
+
+@router.message(Command("become_admin"))
+async def become_admin(message: Message):
+    from app.config import settings
+    from app.database.models import UserRole
+    from app.services.employees.service import get_employee, update_employee_role
+    # Проверяем, что Telegram ID совпадает с ADMIN_TELEGRAM_ID
+    if str(message.from_user.id) != str(settings.ADMIN_TELEGRAM_ID):
+        await message.answer("У вас нет прав.")
+        return
+    user = await get_employee(message.from_user.id)
+    if not user:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await update_employee_role(user.id, UserRole.ADMIN)
+    await message.answer("✅ Ваша роль восстановлена до Администратора.")
+
+@router.message(Command("become_admin"))
+async def become_admin(message: Message):
+    from app.config import settings
+    from app.database.models import UserRole
+    from app.services.employees.service import get_employee, update_employee_role
+    if str(message.from_user.id) != str(settings.ADMIN_TELEGRAM_ID):
+        await message.answer("У вас нет прав.")
+        return
+    user = await get_employee(message.from_user.id)
+    if not user:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await update_employee_role(user.id, UserRole.ADMIN)
+    await message.answer("✅ Ваша роль восстановлена до Администратора.")
+
+@router.message(Command("become_admin"))
+async def become_admin(message: Message):
+    from app.config import settings
+    from app.database.models import UserRole
+    from app.services.employees.service import get_employee, update_employee_role
+    if str(message.from_user.id) != str(settings.ADMIN_TELEGRAM_ID):
+        await message.answer("У вас нет прав.")
+        return
+    user = await get_employee(message.from_user.id)
+    if not user:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await update_employee_role(user.id, UserRole.ADMIN)
+    await message.answer("✅ Ваша роль восстановлена до Администратора.")
