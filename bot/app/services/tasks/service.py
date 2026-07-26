@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import select, and_, or_, func, cast, String
 from sqlalchemy.orm import selectinload
 
 from app.database import AsyncSessionLocal
@@ -106,7 +106,7 @@ async def get_open_tasks(limit: int = 20, offset: int = 0) -> List[Task]:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(Task)
-            .where(Task.status != TaskStatus.CLOSED)
+            .where(cast(Task.status, String) != TaskStatus.CLOSED.value)
             .order_by(Task.priority.desc(), Task.created_at.desc())
             .limit(limit)
             .offset(offset)
@@ -132,7 +132,7 @@ async def get_tasks_for_employee(
             )
         )
         if status:
-            query = query.where(Task.status == status)
+            query = query.where(cast(Task.status, String) == status.value)
         query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
         query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
         result = await db.execute(query)
@@ -142,7 +142,7 @@ async def get_tasks_for_employee(
 async def count_open_tasks() -> int:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(func.count()).select_from(Task).where(Task.status != TaskStatus.CLOSED)
+            select(func.count()).select_from(Task).where(cast(Task.status, String) != TaskStatus.CLOSED.value)
         )
         return result.scalar()
 
@@ -159,7 +159,7 @@ async def count_tasks_for_employee(user_id: int, status: Optional[TaskStatus] = 
             )
         )
         if status:
-            query = query.where(Task.status == status)
+            query = query.where(cast(Task.status, String) == status.value)
         result = await db.execute(query)
         return result.scalar()
 
@@ -432,7 +432,7 @@ async def get_tasks_by_status(status: TaskStatus, limit: int = 20, offset: int =
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(Task)
-            .where(Task.status == status)
+            .where(cast(Task.status, String) == status.value)
             .order_by(Task.created_at.desc())
             .limit(limit)
             .offset(offset)
@@ -444,64 +444,6 @@ async def get_tasks_by_status(status: TaskStatus, limit: int = 20, offset: int =
 async def count_tasks_by_status(status: TaskStatus) -> int:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(func.count()).select_from(Task).where(Task.status == status)
-        )
-        return result.scalar()
-
-# ==========================
-# Архив (закрытые задачи)
-# ==========================
-async def get_tasks_by_status(status: TaskStatus, limit: int = 20, offset: int = 0) -> List[Task]:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Task)
-            .where(Task.status == status)
-            .order_by(Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-            .options(selectinload(Task.creator), selectinload(Task.assignee))
-        )
-        return result.scalars().all()
-
-async def count_tasks_by_status(status: TaskStatus) -> int:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(func.count()).select_from(Task).where(Task.status == status)
-        )
-        return result.scalar()
-
-async def get_teams_with_members() -> List[dict]:
-    async with AsyncSessionLocal() as db:
-        teams = [Team.TEAM_TECH, Team.TEAM_CLEANING, Team.TEAM_SECURITY, Team.TEAM_CONCIERGE]
-        result = []
-        for team in teams:
-            count_query = select(func.count()).select_from(User).where(
-                User.team == team,
-                User.active == True
-            )
-            count = await db.execute(count_query)
-            cnt = count.scalar()
-            result.append({"team": team, "members": cnt})
-        return result
-
-# ==========================
-# Архив (закрытые задачи)
-# ==========================
-async def get_tasks_by_status(status: TaskStatus, limit: int = 20, offset: int = 0) -> List[Task]:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Task)
-            .where(Task.status == status)
-            .order_by(Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-            .options(selectinload(Task.creator), selectinload(Task.assignee))
-        )
-        return result.scalars().all()
-
-async def count_tasks_by_status(status: TaskStatus) -> int:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(func.count()).select_from(Task).where(Task.status == status)
+            select(func.count()).select_from(Task).where(cast(Task.status, String) == status.value)
         )
         return result.scalar()

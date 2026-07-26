@@ -227,3 +227,17 @@ async def update_employee_team(user_id: int, new_team: Optional[Team]) -> Option
         await db.commit()
         await db.refresh(user)
         return user
+
+def get_default_team_for_role(role: UserRole) -> Optional[Team]:
+    """Возвращает команду по умолчанию для роли"""
+    if role == UserRole.TECHNICIAN:
+        return Team.TEAM_TECH
+    elif role == UserRole.CLEANER:
+        return Team.TEAM_CLEANING
+    elif role == UserRole.SECURITY:
+        return Team.TEAM_SECURITY
+    elif role == UserRole.CONCIERGE:
+        return Team.TEAM_CONCIERGE
+    else:
+        # ADMIN, DIRECTOR – команда не требуется
+        return None

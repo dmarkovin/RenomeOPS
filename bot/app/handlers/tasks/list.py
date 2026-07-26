@@ -12,11 +12,14 @@ from app.services.tasks.service import (
 )
 from app.database.models import UserRole, TaskStatus
 from app.keyboards.tasks import task_list_keyboard, get_task_status_emoji
+from app.keyboards.tasks import tasks_menu_keyboard
 
 router = Router()
 
 @router.message(F.text == "📋 Список заявок")
 async def show_all_open_tasks(message: Message, page: int = 1):
+    print("DEBUG: show_all_open_tasks called")
+    print("DEBUG: show_all_open_tasks called")
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
@@ -48,6 +51,7 @@ async def show_all_open_tasks(message: Message, page: int = 1):
 
 @router.message(F.text == "📋 Мои заявки")
 async def show_my_tasks(message: Message, page: int = 1):
+    print("DEBUG: show_my_tasks called")
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
@@ -129,3 +133,52 @@ async def paginate_tasks(callback: CallbackQuery):
 async def back_to_main(callback: CallbackQuery):
     await callback.message.delete()
     await callback.answer()
+
+@router.message(F.text == "📋 Заявки")
+async def tasks_menu(message: Message):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
+
+@router.message(F.text == "⬅️ Назад")
+async def back_to_main_from_tasks(message: Message):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Возврат в меню.")
+        return
+    from app.keyboards.main_menu import main_menu_keyboard
+    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
+
+@router.message(F.text == "📋 Мои задачи")
+async def show_my_tasks(message: Message, page: int = 1):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+
+    limit = 10
+    offset = (page - 1) * limit
+    tasks = await get_tasks_for_employee(employee.id, limit=limit, offset=offset)
+    total = await count_tasks_for_employee(employee.id)
+    total_pages = (total + limit - 1) // limit
+
+    if not tasks:
+        await message.answer("Нет задач для вас.")
+        return
+
+    text = f"📋 Мои задачи (стр. {page}/{total_pages}):\n\n"
+    for task in tasks:
+        status_emoji = get_task_status_emoji(task.status)
+        assignee_name = task.assignee.full_name if task.assignee else "не назначен"
+        text += f"{status_emoji} #{task.id} **{task.title[:30]}**\n"
+        text += f"   Приоритет: {task.priority} | Создал: {task.creator.full_name if task.creator else '—'}"
+        text += f" | Исполнитель: {assignee_name}\n\n"
+
+    await message.answer(
+        text,
+        reply_markup=task_list_keyboard(tasks, page, total_pages),
+        parse_mode="HTML",
+    )
+print("DEBUG: list.py loaded")
