@@ -174,3 +174,14 @@ async def delete_employee(user_id: int) -> bool:
             await db.commit()
             return True
         return False
+
+async def update_employee_role(user_id: int, new_role: UserRole) -> Optional[User]:
+    """Изменить роль сотрудника"""
+    async with AsyncSessionLocal() as db:
+        user = await db.get(User, user_id)
+        if not user:
+            return None
+        user.role = new_role
+        await db.commit()
+        await db.refresh(user)
+        return user

@@ -8,11 +8,10 @@ from app.keyboards.employees.create import role_keyboard, team_keyboard, confirm
 from app.keyboards.employees.admin import employees_admin_menu
 from app.database.models import UserRole, Team
 from app.utils.invite import generate_invite_link
-from app.services.notification_service import notify_admin
+from app.services.notification_service import notify_admins
 
 router = Router()
 
-# Универсальный обработчик отмены – срабатывает на любом состоянии
 @router.message(F.text == "❌ Отмена")
 async def cancel_anywhere(message: Message, state: FSMContext):
     await state.clear()
@@ -24,7 +23,6 @@ async def start_create_employee(message: Message, state: FSMContext):
     if not admin or admin.role != UserRole.ADMIN:
         await message.answer("У вас нет прав.")
         return
-
     await state.clear()
     await state.set_state(EmployeeRegistration.full_name)
     await message.answer("Введите ФИО нового сотрудника:")
@@ -43,7 +41,7 @@ async def process_full_name(message: Message, state: FSMContext):
 async def process_phone(message: Message, state: FSMContext):
     phone = message.text.strip()
     if not phone:
-        await message.answer("Номер телефона не может быть пустым. Попробуйте снова.")
+        await message.answer("Номер телефона не может быть пустым.")
         return
     await state.update_data(phone=phone)
     await state.set_state(EmployeeRegistration.role)
@@ -62,7 +60,6 @@ async def process_role(message: Message, state: FSMContext):
     if message.text not in role_map:
         await message.answer("Пожалуйста, выберите роль с помощью кнопок.")
         return
-
     role = role_map[message.text]
     await state.update_data(role=role)
 
@@ -84,7 +81,6 @@ async def process_team(message: Message, state: FSMContext):
     if message.text not in team_map:
         await message.answer("Пожалуйста, выберите команду с помощью кнопок.")
         return
-
     team = team_map[message.text]
     await state.update_data(team=team)
     await show_confirmation(message, state)
@@ -95,15 +91,15 @@ async def show_confirmation(message: Message, state: FSMContext):
     phone = data.get("phone")
     role = data.get("role")
     team = data.get("team")
-
     text = (
         f"📝 Проверьте данные:\n\n"
         f"👤 ФИО: {full_name}\n"
         f"📞 Телефон: {phone}\n"
         f"🎯 Роль: {role.value if role else '—'}\n"
-        f"👥 Команда: {team.value if team else '—'}\n\n"
-        f"Подтвердите создание сотрудника."
     )
+    if team:
+        text += f"👥 Команда: {team.value}\n"
+    text += "\nПодтвердите создание сотрудника."
     await state.set_state(EmployeeRegistration.confirm)
     await message.answer(text, reply_markup=confirm_keyboard())
 
@@ -114,7 +110,6 @@ async def confirm_create_employee(message: Message, state: FSMContext):
     phone = data.get("phone")
     role = data.get("role")
     team = data.get("team")
-
     try:
         employee = await create_employee(
             full_name=full_name,
@@ -123,7 +118,6 @@ async def confirm_create_employee(message: Message, state: FSMContext):
             team=team,
         )
         invite_link = generate_invite_link(employee.invite_code)
-
         await message.answer(
             f"✅ Сотрудник успешно создан!\n\n"
             f"👤 ФИО: {employee.full_name}\n"
@@ -134,15 +128,11 @@ async def confirm_create_employee(message: Message, state: FSMContext):
             f"Отправьте эту ссылку сотруднику.",
             reply_markup=employees_admin_menu()
         )
-
-        await notify_admin(f"Новый сотрудник создан: {employee.full_name} ({employee.role.value})")
+        await notify_admins(f"Новый сотрудник создан: {employee.full_name} ({employee.role.value})")
         await state.clear()
-
     except Exception as e:
         await message.answer(f"❌ Ошибка при создании сотрудника: {str(e)}")
-        # Очищаем состояние, чтобы можно было начать заново
         await state.clear()
-        # Показываем меню сотрудников
         await message.answer("Попробуйте снова.", reply_markup=employees_admin_menu())
 
 @router.message(EmployeeRegistration.confirm, F.text == "❌ Отмена")

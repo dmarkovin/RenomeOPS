@@ -24,11 +24,56 @@ async def create_task(
     title: str,
     description: str,
     created_by: int,
-    building: str = None,
-    apartment: str = None,
+    building: int = None,
+    entrance: int = None,
+    floor: int = None,
+    apartment: int = None,
+    location_type: str = None,
+    parking_level: int = None,
+    parking_spot: int = None,
+    cellar: int = None,
     priority: int = 3,
-    photo_ids: List[str] = None,
+    photo_ids: List[str] = None
 ) -> Task:
+    async with AsyncSessionLocal() as db:
+        task = Task(
+            title=title,
+            description=description,
+            created_by=created_by,
+            building=building,
+            entrance=entrance,
+            floor=floor,
+            apartment=apartment,
+            location_type=location_type,
+            parking_level=parking_level,
+            parking_spot=parking_spot,
+            cellar=cellar,
+            priority=priority,
+            status=TaskStatus.CREATED,
+        )
+        db.add(task)
+        await db.flush()
+
+        if photo_ids:
+            for file_id in photo_ids:
+                photo = TaskPhoto(
+                    task_id=task.id,
+                    telegram_file_id=file_id,
+                    uploaded_by=created_by,
+                )
+                db.add(photo)
+
+        history = TaskHistory(
+            task_id=task.id,
+            user_id=created_by,
+            action="CREATED",
+            description=f"Задача создана: {title}",
+        )
+        db.add(history)
+        await db.commit()
+        await db.refresh(task)
+        return task
+
     async with AsyncSessionLocal() as db:
         task = Task(
             title=title,

@@ -17,7 +17,6 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
-
 async def main() -> None:
     logging.info("Initializing database...")
     await init_db()
@@ -30,15 +29,11 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
 
-    # Передаём экземпляр бота в сервис уведомлений
     set_bot(bot)
 
     dp = Dispatcher()
-
-    # Подключаем middleware для сессий БД
     dp.update.middleware(DatabaseMiddleware())
 
-    # Регистрируем все роутеры из единого списка
     for router in routers:
         dp.include_router(router)
 
@@ -50,7 +45,6 @@ async def main() -> None:
     finally:
         await close_db()
         logging.info("Bot stopped.")
-
 
 if __name__ == "__main__":
     try:

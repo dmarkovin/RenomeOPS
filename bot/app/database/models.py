@@ -1,5 +1,4 @@
 from datetime import datetime
-
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -10,27 +9,21 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    JSON,
+    Numeric,
 )
-
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import relationship
-
+from sqlalchemy.orm import declarative_base, relationship
 import enum
 
-
 Base = declarative_base()
-
 
 # ===========================
 # Роли сотрудников
 # ===========================
-
 class UserRole(str, enum.Enum):
-
     ADMIN = "ADMIN"
     DIRECTOR = "DIRECTOR"
     CONCIERGE = "CONCIERGE"
-
     TECHNICIAN = "TECHNICIAN"
     CLEANER = "CLEANER"
     SECURITY = "SECURITY"
@@ -38,306 +31,155 @@ class UserRole(str, enum.Enum):
 # ===========================
 # Команды
 # ===========================
-
 class Team(str, enum.Enum):
     TEAM_TECH = "TEAM_TECH"
     TEAM_CLEANING = "TEAM_CLEANING"
     TEAM_SECURITY = "TEAM_SECURITY"
 
-
 # ===========================
 # Статусы задач
 # ===========================
-
 class TaskStatus(str, enum.Enum):
     CREATED = "created"
-
     ACCEPTED = "accepted"
-
     IN_PROGRESS = "in_progress"
-
     CHECKING = "checking"
-
     CLOSED = "closed"
-
 
 # ===========================
 # Пользователь
 # ===========================
-
 class User(Base):
-
     __tablename__ = "users"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    telegram_id = Column(BigInteger, unique=True, nullable=True)
+    invite_code = Column(String(64), unique=True, nullable=False)
+    username = Column(String(100))
+    full_name = Column(String(255), nullable=False)
+    phone = Column(String(20), nullable=True)
+    role = Column(Enum(UserRole), nullable=False)
+    team = Column(Enum(Team), nullable=True)
+    active = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    registered_at = Column(DateTime, nullable=True)
 
-    id = Column(
-        Integer,
-        primary_key=True,
-        autoincrement=True
-    )
-
-    telegram_id = Column(
-        BigInteger,
-        unique=True,
-        nullable=True
-    )
-
-    invite_code = Column(
-        String(64),
-        unique=True,
-        nullable=False
-    )
-
-    username = Column(
-        String(100)
-    )
-
-    full_name = Column(
-        String(255),
-        nullable=False
-    )
-    
-    phone = Column(
-    String(50),
-    nullable=True
-    )
-
-    role = Column(
-        Enum(UserRole),
-        nullable=False
-    )
-
-    team = Column(
-        Enum(Team),
-        nullable=True
-    )
-
-    active = Column(
-        Boolean,
-        default=False,
-        nullable=False
-    )
-
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )
-
-    registered_at = Column(
-        DateTime,
-        nullable=True
-    )
 # ===========================
 # Задача
 # ===========================
-
 class Task(Base):
-
     __tablename__ = "tasks"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    status = Column(Enum(TaskStatus), default=TaskStatus.CREATED, nullable=False)
+    # Локация
+    building = Column(Integer, nullable=True)           # 1 или 2
+    entrance = Column(Integer, nullable=True)          # подъезд
+    floor = Column(Integer, nullable=True)             # этаж
+    apartment = Column(Integer, nullable=True)         # квартира
+    location_type = Column(String(50), nullable=True)  # apartment, common_area, elevator, etc.
+    parking_level = Column(Integer, nullable=True)     # -1 или -2
+    parking_spot = Column(Integer, nullable=True)      # номер машиноместа
+    cellar = Column(Integer, nullable=True)            # номер келлера
+    priority = Column(Integer, default=3)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_team = Column(Enum(Team), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    closed_at = Column(DateTime, nullable=True)
 
-    id = Column(
-        Integer,
-        primary_key=True,
-        autoincrement=True
-    )
-
-    title = Column(
-        String(255),
-        nullable=False
-    )
-
-    description = Column(
-        Text
-    )
-
-    status = Column(
-        Enum(TaskStatus),
-        default=TaskStatus.CREATED,
-        nullable=False
-    )
-
-    building = Column(
-        String(20)
-    )
-
-    apartment = Column(
-        String(20)
-    )
-
-    priority = Column(
-        Integer,
-        default=3
-    )
-
-    created_by = Column(
-        Integer,
-        ForeignKey("users.id")
-    )
-
-    assigned_to = Column(
-        Integer,
-    ForeignKey("users.id"),
-    nullable=True
-    )
-    assigned_team = Column(
-        Enum(Team),
-        nullable=True
-    )
-
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )
-
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow
-    )
-
-    closed_at = Column(
-        DateTime,
-        nullable=True
-    )
-
-    creator = relationship(
-        "User",
-        foreign_keys=[created_by]
-    )
-
-    assignee = relationship(
-        "User",
-        foreign_keys=[assigned_to]
-    )
-
-    comments = relationship(
-        "Comment",
-        back_populates="task",
-        cascade="all, delete-orphan"
-    )
-
-    history = relationship(
-        "TaskHistory",
-        back_populates="task",
-        cascade="all, delete-orphan"
-    )
-
-    photos = relationship(
-        "TaskPhoto",
-        back_populates="task",
-        cascade="all, delete-orphan"
-    )
-
+    creator = relationship("User", foreign_keys=[created_by])
+    assignee = relationship("User", foreign_keys=[assigned_to])
+    comments = relationship("Comment", back_populates="task", cascade="all, delete-orphan")
+    history = relationship("TaskHistory", back_populates="task", cascade="all, delete-orphan")
+    photos = relationship("TaskPhoto", back_populates="task", cascade="all, delete-orphan")
 
 # ===========================
 # Комментарии
 # ===========================
-
 class Comment(Base):
-
     __tablename__ = "comments"
-
-    id = Column(
-        Integer,
-        primary_key=True
-    )
-
-    task_id = Column(
-        ForeignKey("tasks.id")
-    )
-
-    author_id = Column(
-        ForeignKey("users.id")
-    )
-
-    text = Column(
-        Text,
-        nullable=False
-    )
-
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )
-
-    task = relationship(
-        "Task",
-        back_populates="comments"
-    )
-
+    id = Column(Integer, primary_key=True)
+    task_id = Column(ForeignKey("tasks.id"))
+    author_id = Column(ForeignKey("users.id"))
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    task = relationship("Task", back_populates="comments")
+    author = relationship("User")
 
 # ===========================
 # Фото
 # ===========================
-
 class TaskPhoto(Base):
-
     __tablename__ = "task_photos"
-
-    id = Column(
-        Integer,
-        primary_key=True
-    )
-
-    task_id = Column(
-        ForeignKey("tasks.id")
-    )
-
-    telegram_file_id = Column(
-        String(255),
-        nullable=False
-    )
-
-    uploaded_by = Column(
-        ForeignKey("users.id")
-    )
-
-    uploaded_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )
-
-    task = relationship(
-        "Task",
-        back_populates="photos"
-    )
-
+    id = Column(Integer, primary_key=True)
+    task_id = Column(ForeignKey("tasks.id"))
+    telegram_file_id = Column(String(255), nullable=False)
+    uploaded_by = Column(ForeignKey("users.id"))
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    task = relationship("Task", back_populates="photos")
 
 # ===========================
 # История изменений
 # ===========================
-
 class TaskHistory(Base):
-
     __tablename__ = "task_history"
+    id = Column(Integer, primary_key=True)
+    task_id = Column(ForeignKey("tasks.id"))
+    action = Column(String(100), nullable=False)
+    description = Column(Text)
+    user_id = Column(ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    task = relationship("Task", back_populates="history")
+    user = relationship("User", foreign_keys=[user_id])
 
-    id = Column(
-        Integer,
-        primary_key=True
-    )
+# ===========================
+# Платные услуги
+# ===========================
+class Service(Base):
+    __tablename__ = "services"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    price = Column(Numeric(10, 2), nullable=False)
+    category = Column(String(100))
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-    task_id = Column(
-        ForeignKey("tasks.id")
-    )
+class ServiceOrder(Base):
+    __tablename__ = "service_orders"
+    id = Column(Integer, primary_key=True)
+    service_id = Column(Integer, ForeignKey("services.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    status = Column(String(20), default="pending")  # pending, paid, completed, cancelled
+    building = Column(Integer, nullable=True)
+    entrance = Column(Integer, nullable=True)
+    floor = Column(Integer, nullable=True)
+    apartment = Column(Integer, nullable=True)
+    parking_floor = Column(Integer, nullable=True)
+    parking_spot = Column(Integer, nullable=True)
+    cellar = Column(Integer, nullable=True)
+    comment = Column(Text)
+    photo_ids = Column(JSON, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    service = relationship("Service")
+    user = relationship("User")
 
-    action = Column(
-        String(100),
-        nullable=False
-    )
-
-    description = Column(
-        Text
-    )
-
-    user_id = Column(
-        ForeignKey("users.id")
-    )
-
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )
-
-    task = relationship(
-        "Task",
-        back_populates="history"
-    )
+# ===========================
+# Доставка (Ресепшен)
+# ===========================
+class Delivery(Base):
+    __tablename__ = "deliveries"
+    id = Column(Integer, primary_key=True)
+    recipient = Column(String(255), nullable=False)
+    apartment = Column(Integer, nullable=True)
+    courier_service = Column(String(255), nullable=True)
+    comment = Column(Text)
+    photo_ids = Column(JSON, default=list)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    status = Column(String(20), default="pending")  # pending, received, completed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    creator = relationship("User", foreign_keys=[created_by])

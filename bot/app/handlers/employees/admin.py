@@ -10,31 +10,30 @@ from app.services.employees.service import (
     activate_employee_by_admin,
     delete_employee,
     get_employee,
+    update_employee_role,
 )
 from app.keyboards.employees.admin import employees_admin_menu
 from app.keyboards.employees.list import employee_list_keyboard, employee_card_keyboard
+from app.keyboards.employees.roles import role_selection_keyboard
 from app.database.models import UserRole
 from app.keyboards.admin import admin_keyboard
+import logging
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 # ===== Главное меню администратора =====
 @router.message(F.text == "👥 Сотрудники")
 async def employees_menu(message: Message):
-    """Главное меню управления сотрудниками"""
     admin = await get_employee(message.from_user.id)
     if not admin or admin.role != UserRole.ADMIN:
         await message.answer("У вас нет прав.")
         return
-    await message.answer(
-        "👥 Управление сотрудниками:",
-        reply_markup=employees_admin_menu()
-    )
+    await message.answer("👥 Управление сотрудниками:", reply_markup=employees_admin_menu())
 
 # ===== Список сотрудников =====
 @router.message(F.text == "📋 Список сотрудников")
 async def list_employees(message: Message, page: int = 1):
-    """Показать список сотрудников с пагинацией"""
     admin = await get_employee(message.from_user.id)
     if not admin or admin.role != UserRole.ADMIN:
         await message.answer("У вас нет прав.")
@@ -55,12 +54,9 @@ async def list_employees(message: Message, page: int = 1):
         status = "✅ Активен" if emp.active else "❌ Неактивен"
         text += f"ID: {emp.id} | {emp.full_name} | {emp.role.value} | {status}\n"
 
-    await message.answer(
-        text,
-        reply_markup=employee_list_keyboard(employees, page, total_pages)
-    )
+    await message.answer(text, reply_markup=employee_list_keyboard(employees, page, total_pages))
 
-# ===== Пагинация в списке =====
+# ===== Пагинация =====
 @router.callback_query(F.data.startswith("emp_page:"))
 async def paginate_employees(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
@@ -80,10 +76,7 @@ async def paginate_employees(callback: CallbackQuery):
         status = "✅ Активен" if emp.active else "❌ Неактивен"
         text += f"ID: {emp.id} | {emp.full_name} | {emp.role.value} | {status}\n"
 
-    await callback.message.edit_text(
-        text,
-        reply_markup=employee_list_keyboard(employees, page, total_pages)
-    )
+    await callback.message.edit_text(text, reply_markup=employee_list_keyboard(employees, page, total_pages))
     await callback.answer()
 
 # ===== Карточка сотрудника =====
@@ -107,13 +100,10 @@ async def show_employee_card(callback: CallbackQuery):
         f"Приглашение: {emp.invite_code}\n"
         f"Зарегистрирован: {emp.registered_at.strftime('%d.%m.%Y %H:%M') if emp.registered_at else '—'}"
     )
-    await callback.message.edit_text(
-        text,
-        reply_markup=employee_card_keyboard(emp.id, emp.active)
-    )
+    await callback.message.edit_text(text, reply_markup=employee_card_keyboard(emp.id, emp.active))
     await callback.answer()
 
-# ===== Блокировка сотрудника =====
+# ===== Блокировка =====
 @router.callback_query(F.data.startswith("emp_block:"))
 async def block_employee_callback(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
@@ -129,7 +119,7 @@ async def block_employee_callback(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-# ===== Активация сотрудника =====
+# ===== Активация =====
 @router.callback_query(F.data.startswith("emp_activate:"))
 async def activate_employee_callback(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
@@ -145,7 +135,7 @@ async def activate_employee_callback(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-# ===== Удаление сотрудника =====
+# ===== Удаление =====
 @router.callback_query(F.data.startswith("emp_delete:"))
 async def delete_employee_callback(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
@@ -160,6 +150,51 @@ async def delete_employee_callback(callback: CallbackQuery):
         await callback.message.edit_text("Сотрудник удалён.")
     else:
         await callback.answer("Ошибка", show_alert=True)
+
+# ===== Смена роли =====
+@router.callback_query(F.data.startswith("emp_change_role:"))
+async def change_role_start(callback: CallbackQuery):
+    user_id = int(callback.data.split(":")[1])
+    logger.info(f"Change role request for user {user_id} from {callback.from_user.id}")
+    admin = await get_employee(callback.from_user.id)
+    if not admin:
+        logger.error(f"Admin not found for telegram_id {callback.from_user.id}")
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
+        return
+    if admin.role != UserRole.ADMIN:
+        logger.error(f"User {admin.id} has role {admin.role}, not ADMIN")
+        await callback.answer("Нет прав (роль не ADMIN)", show_alert=True)
+        return
+
+    emp = await get_employee_by_id(user_id)
+    if not emp:
+        await callback.answer("Сотрудник не найден", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"Выберите новую роль для {emp.full_name}:",
+        reply_markup=role_selection_keyboard(user_id)
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("emp_set_role:"))
+async def set_role(callback: CallbackQuery):
+    _, user_id_str, role_str = callback.data.split(":")
+    user_id = int(user_id_str)
+    new_role = UserRole(role_str)
+
+    admin = await get_employee(callback.from_user.id)
+    if not admin or admin.role != UserRole.ADMIN:
+        await callback.answer("Нет прав", show_alert=True)
+        return
+
+    emp = await update_employee_role(user_id, new_role)
+    if not emp:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    await callback.answer(f"✅ Роль изменена на {new_role.value}", show_alert=True)
+    await show_employee_card(callback)
 
 # ===== Возврат к списку =====
 @router.callback_query(F.data == "emp_back")
@@ -177,7 +212,7 @@ async def back_to_admin_menu(message: Message):
     else:
         await message.answer("Возврат...")
 
-# ===== Заглушки для нереализованных функций =====
+# ===== Заглушки =====
 @router.message(F.text == "🔍 Поиск")
 async def search_employees(message: Message):
     await message.answer("🔍 Функция поиска в разработке.")
@@ -189,3 +224,40 @@ async def activate_employee(message: Message):
 @router.message(F.text == "🚫 Заблокировать")
 async def block_employee(message: Message):
     await message.answer("🚫 Функция блокировки через список сотрудников. Откройте карточку сотрудника и нажмите 'Заблокировать'.")
+
+# Импортируем состояние
+from app.states.employees.search import EmployeeSearch
+from app.services.employees.service import get_all_employees
+
+@router.message(F.text == "🔍 Поиск")
+async def start_search(message: Message, state: FSMContext):
+    admin = await get_employee(message.from_user.id)
+    if not admin or admin.role != UserRole.ADMIN:
+        await message.answer("Нет прав.")
+        return
+    await state.set_state(EmployeeSearch.query)
+    await message.answer("Введите ФИО или телефон для поиска:")
+
+@router.message(EmployeeSearch.query)
+async def process_search(message: Message, state: FSMContext):
+    query = message.text.strip()
+    if len(query) < 2:
+        await message.answer("Введите минимум 2 символа.")
+        return
+    employees = await get_all_employees(search=query)
+    if not employees:
+        await message.answer("Ничего не найдено.")
+        await state.clear()
+        return
+    text = "🔍 Результаты поиска:\n\n"
+    for emp in employees:
+        status = "✅" if emp.active else "❌"
+        text += f"{status} {emp.full_name} (ID: {emp.id}) | {emp.role.value}\n"
+    await message.answer(text)
+    await state.clear()
+
+@router.callback_query(F.data == "emp_search")
+async def search_from_list(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    await start_search(callback.message, state)
+    await callback.answer()
