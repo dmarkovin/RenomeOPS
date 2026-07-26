@@ -1,6 +1,5 @@
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import StatesGroup, State
 
-
-class TransferTask(StatesGroup):
-
+class TaskTransfer(StatesGroup):
+    select_employee = State()
     comment = State()

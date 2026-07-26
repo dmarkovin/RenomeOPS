@@ -7,6 +7,7 @@ from .technician import technician_keyboard
 from .cleaning import cleaning_keyboard
 from .security import security_keyboard
 
+
 def main_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
     if role == UserRole.ADMIN:
         return admin_keyboard()
@@ -21,7 +22,6 @@ def main_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
     elif role == UserRole.SECURITY:
         return security_keyboard()
     else:
-        # fallback – простая клавиатура с одной кнопкой
         from aiogram.types import KeyboardButton
         return ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="📋 Меню")]],
