@@ -1,36 +1,14 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-
-def technician_keyboard():
-
+def technician_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-
         keyboard=[
-
             [
-                KeyboardButton(
-                    text="📋 Мои задачи"
-                )
+                KeyboardButton(text="📋 Заявки"),
             ],
-
             [
-                KeyboardButton(
-                    text="📷 Фотоотчет"
-                ),
-
-                KeyboardButton(
-                    text="📊 Отчет"
-                )
+                KeyboardButton(text="👤 Профиль"),
             ],
-
-            [
-                KeyboardButton(
-                    text="👤 Профиль"
-                )
-            ]
-
         ],
-
         resize_keyboard=True
-
     )

@@ -1,53 +1,42 @@
-from aiogram.types import (
-    ReplyKeyboardMarkup,
-    KeyboardButton
-)
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 
-def employee_roles_keyboard():
-
+def role_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура выбора роли"""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [
-                KeyboardButton(
-                    text="👨‍Управляющий"
-                )
-            ],
-            [
-                KeyboardButton(
-                    text="🛎 Консьерж"
-                )
-            ],
-            [
-                KeyboardButton(
-                    text="🔧 Техник"
-                )
-            ],
-            [
-                KeyboardButton(
-                    text="🧹 Клининг"
-                )
-            ],
-            [
-                KeyboardButton(
-                    text="🛡 Охрана"
-                )
-            ]
+            [KeyboardButton(text="👑 ADMIN")],
+            [KeyboardButton(text="👨‍💼 DIRECTOR")],
+            [KeyboardButton(text="🛎 CONCIERGE")],
+            [KeyboardButton(text="🔧 TECHNICIAN")],
+            [KeyboardButton(text="🧹 CLEANER")],
+            [KeyboardButton(text="🛡 SECURITY")],
+            [KeyboardButton(text="❌ Отмена")],
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
     )
 
 
-
-def employee_create_keyboard():
-
+def team_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура выбора команды (для ролей, у которых есть команды)"""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [
-                KeyboardButton(
-                    text="❌ Отмена"
-                )
-            ]
+            [KeyboardButton(text="🔧 TEAM_TECH")],
+            [KeyboardButton(text="🧹 TEAM_CLEANING")],
+            [KeyboardButton(text="🛡 TEAM_SECURITY")],
+            [KeyboardButton(text="🏢 ADMINISTRATION")],
+            [KeyboardButton(text="❌ Отмена")],
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
+    )
+
+
+def confirm_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура подтверждения создания"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✅ Да, создать")],
+            [KeyboardButton(text="❌ Отмена")],
+        ],
+        resize_keyboard=True,
     )

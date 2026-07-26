@@ -1,12 +1,9 @@
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import StatesGroup, State
 
 
-class EmployeeCreateState(StatesGroup):
-
-    full_name = State()
-
-    phone = State()
-
-    role = State()
-
-    team = State()
+class EmployeeRegistration(StatesGroup):
+    full_name = State()   # ФИО
+    phone = State()       # телефон
+    role = State()        # выбор роли
+    team = State()        # выбор команды (если применимо)
+    confirm = State()     # подтверждение перед созданием

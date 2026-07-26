@@ -1,44 +1,15 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-
-def security_keyboard():
-
+def security_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-
         keyboard=[
-
             [
-                KeyboardButton(
-                    text="🚪 Пропуска"
-                )
+                KeyboardButton(text="📋 Мои заявки"),
+                KeyboardButton(text="📦 Архив"),
             ],
-
             [
-                KeyboardButton(
-                    text="👥 Посетители"
-                )
+                KeyboardButton(text="👤 Профиль"),
             ],
-
-            [
-                KeyboardButton(
-                    text="📋 Обходы"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="📊 Отчеты"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="👤 Профиль"
-                )
-            ]
-
         ],
-
         resize_keyboard=True
-
     )

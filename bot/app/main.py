@@ -1,91 +1,59 @@
 import asyncio
+import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from app.config import settings
-
-from app.database import (
-    init_db,
-    close_db,
-)
-
-from app.handlers.start import router as start_router
-from app.handlers.menu import router as menu_router
-
-# сотрудники
-from app.handlers.employees.admin import (
-    router as employees_admin_router
-)
-
-from app.handlers.employees.create import (
-    router as employees_create_router
-)
-
-
+from app.database import init_db, close_db
 from app.middlewares.db import DatabaseMiddleware
+from app.services.bootstrap import create_first_admin
+from app.services.notification_service import set_bot
+from app.handlers import routers
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 
 
-
-async def main():
-
-    print("CALL INIT DATABASE")
-
+async def main() -> None:
+    logging.info("Initializing database...")
     await init_db()
 
+    logging.info("Creating first admin (if not exists)...")
+    await create_first_admin()
 
     bot = Bot(
-        token=settings.BOT_TOKEN
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
 
+    # Передаём экземпляр бота в сервис уведомлений
+    set_bot(bot)
 
     dp = Dispatcher()
 
+    # Подключаем middleware для сессий БД
+    dp.update.middleware(DatabaseMiddleware())
 
-    dp.update.middleware(
-        DatabaseMiddleware()
-    )
+    # Регистрируем все роутеры из единого списка
+    for router in routers:
+        dp.include_router(router)
 
-
-    # =====================
-    # ROUTERS
-    # =====================
-
-    dp.include_router(
-        start_router
-    )
-
-    dp.include_router(
-        menu_router
-    )
-
-    # админ сотрудники
-    dp.include_router(
-        employees_admin_router
-    )
-
-    # создание сотрудника
-    dp.include_router(
-        employees_create_router
-    )
-
-
-    print("ROUTERS READY")
-    print("Renome OPS started")
-
+    logging.info("All routers registered successfully.")
+    logging.info("Renome OPS bot started polling...")
 
     try:
-
-        await dp.start_polling(
-            bot
-        )
-
-
+        await dp.start_polling(bot)
     finally:
-
         await close_db()
-
+        logging.info("Bot stopped.")
 
 
 if __name__ == "__main__":
-
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("Bot stopped by user.")

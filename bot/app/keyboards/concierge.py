@@ -1,75 +1,27 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-
-
-def concierge_keyboard():
-
+def concierge_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-
         keyboard=[
-
             [
-                KeyboardButton(
-                    text="📋 Заявки"
-                )
+                KeyboardButton(text="📋 Заявки"),
+                KeyboardButton(text="💳 Платные услуги"),
             ],
-
             [
-                KeyboardButton(
-                    text="💰 Платные услуги"
-                ),
-                KeyboardButton(
-                    text="📦 Доставки"
-                )
+                KeyboardButton(text="🚗 Пропуска"),
+                KeyboardButton(text="🔄 Обходы"),
             ],
-
             [
-                KeyboardButton(
-                    text="🔑 Ключи"
-                ),
-                KeyboardButton(
-                    text="📄 Документы"
-                )
+                KeyboardButton(text="📦 Посылки"),
+                KeyboardButton(text="🗝 Ключи"),
             ],
-
             [
-                KeyboardButton(
-                    text="🚪 Пропуска"
-                ),
-                KeyboardButton(
-                    text="🚶 Обходы"
-                )
+                KeyboardButton(text="📑 Документы"),
+                KeyboardButton(text="📊 Отчеты"),
             ],
-
             [
-                KeyboardButton(
-                    text="📝 Заметки"
-                ),
-                KeyboardButton(
-                    text="🔎 Поиск"
-                )
+                KeyboardButton(text="⚙ Настройки"),
             ],
-
-            [
-                KeyboardButton(
-                    text="📊 Отчеты"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="📦 Архив"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="⬅️ Назад"
-                )
-            ]
-
         ],
-
         resize_keyboard=True
-
     )
