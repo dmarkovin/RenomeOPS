@@ -9,6 +9,10 @@ def set_bot(bot_instance: Bot):
     global bot
     bot = bot_instance
 
+async def notify_admin(text: str):
+    """Отправить уведомление всем администраторам (устаревшая функция, используйте notify_admins)"""
+    await notify_admins(text)
+
 async def notify_admins(text: str):
     if not bot:
         return

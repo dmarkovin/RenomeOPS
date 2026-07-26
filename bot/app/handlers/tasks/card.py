@@ -1,6 +1,8 @@
 from aiogram import Router, F, types
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters.state import StateFilter
 
 from app.services.tasks.service import (
     get_task,
@@ -16,6 +18,12 @@ from app.keyboards.task_actions import task_actions_keyboard, get_task_status_em
 from app.services.notification_service import notify_user, notify_admins
 
 router = Router()
+
+class TaskCommentState(StatesGroup):
+    waiting_for_comment = State()
+
+class TaskPhotoState(StatesGroup):
+    waiting_for_photos = State()
 
 @router.callback_query(F.data.startswith("task:"))
 async def show_task_card(callback: CallbackQuery):
@@ -133,12 +141,12 @@ async def change_task_status(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("task_comment:"))
 async def start_comment(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
-    await state.set_state("comment_text")
+    await state.set_state(TaskCommentState.waiting_for_comment)
     await state.update_data(task_id=task_id)
     await callback.message.answer("✍️ Введите текст комментария:")
     await callback.answer()
 
-@router.message(state="comment_text")
+@router.message(StateFilter(TaskCommentState.waiting_for_comment), F.text)
 async def process_comment(message: Message, state: FSMContext):
     data = await state.get_data()
     task_id = data.get("task_id")
@@ -180,8 +188,8 @@ async def show_task_history(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("task_photo:"))
 async def start_add_photo(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
-    await state.set_state("photo_upload")
-    await state.update_data(task_id=task_id)
+    await state.set_state(TaskPhotoState.waiting_for_photos)
+    await state.update_data(task_id=task_id, photos=[])
     await callback.message.answer(
         "📷 Отправьте одно или несколько фото (после отправки нажмите Готово):",
         reply_markup=types.ReplyKeyboardMarkup(
@@ -191,7 +199,7 @@ async def start_add_photo(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-@router.message(state="photo_upload", F.photo)
+@router.message(StateFilter(TaskPhotoState.waiting_for_photos), F.photo)
 async def process_photo_upload(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
@@ -199,7 +207,7 @@ async def process_photo_upload(message: Message, state: FSMContext):
     await state.update_data(photos=photos)
     await message.answer(f"✅ Фото добавлено ({len(photos)} шт.)")
 
-@router.message(state="photo_upload", F.text == "✅ Готово")
+@router.message(StateFilter(TaskPhotoState.waiting_for_photos), F.text == "✅ Готово")
 async def finish_photo_upload(message: Message, state: FSMContext):
     data = await state.get_data()
     task_id = data.get("task_id")

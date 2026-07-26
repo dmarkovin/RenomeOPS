@@ -11,7 +11,7 @@ from app.services.tasks.service import (
     count_tasks_by_status,
 )
 from app.database.models import UserRole, TaskStatus
-from app.keyboards.task_list import task_list_keyboard, get_task_status_emoji
+from app.keyboards.tasks import task_list_keyboard, get_task_status_emoji
 
 router = Router()
 

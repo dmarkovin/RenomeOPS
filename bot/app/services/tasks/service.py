@@ -563,3 +563,22 @@ async def count_tasks_by_status(status: TaskStatus) -> int:
             select(func.count()).select_from(Task).where(Task.status == status)
         )
         return result.scalar()
+
+async def get_tasks_by_status(status: TaskStatus, limit: int = 20, offset: int = 0) -> List[Task]:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Task)
+            .where(Task.status == status)
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+            .options(selectinload(Task.creator), selectinload(Task.assignee))
+        )
+        return result.scalars().all()
+
+async def count_tasks_by_status(status: TaskStatus) -> int:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(func.count()).select_from(Task).where(Task.status == status)
+        )
+        return result.scalar()
