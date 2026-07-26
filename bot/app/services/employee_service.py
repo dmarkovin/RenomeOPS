@@ -1,93 +1,23 @@
-from app.database import get_db
+from sqlalchemy import select
 
-import random
-import string
-
-
-
-def generate_invite_code():
-
-    return (
-        "RNM-"
-        +
-        "".join(
-            random.choices(
-                string.digits,
-                k=5
-            )
-        )
-    )
-
-
-
-async def create_employee(
-    telegram_id: int | None,
-    username: str | None,
-    full_name: str,
-    phone: str | None,
-    role: str,
-    team: str | None = None,
-):
-
-    pool = await get_db()
-
-    invite_code = generate_invite_code()
-
-
-    async with pool.acquire() as conn:
-
-        employee = await conn.fetchrow(
-            """
-            INSERT INTO employees
-            (
-                telegram_id,
-                username,
-                full_name,
-                phone,
-                role,
-                team,
-                invite_code
-            )
-
-            VALUES
-            ($1,$2,$3,$4,$5,$6,$7)
-
-            RETURNING *
-            """,
-
-            telegram_id,
-            username,
-            full_name,
-            phone,
-            role,
-            team,
-            invite_code
-        )
-
-        return employee
-
-
+from app.database import AsyncSessionLocal
+from app.database.models import User
 
 
 async def get_employee(
     telegram_id: int
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-
-    async with pool.acquire() as conn:
-
-        return await conn.fetchrow(
-            """
-            SELECT *
-            FROM employees
-            WHERE telegram_id=$1
-            """,
-
-            telegram_id
+        result = await db.execute(
+            select(User)
+            .where(
+                User.telegram_id == telegram_id
+            )
         )
 
+        return result.scalar_one_or_none()
 
 
 
@@ -95,129 +25,40 @@ async def get_employee_by_invite(
     invite_code: str
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-
-    async with pool.acquire() as conn:
-
-        return await conn.fetchrow(
-            """
-            SELECT *
-            FROM employees
-            WHERE invite_code=$1
-            """,
-
-            invite_code
+        result = await db.execute(
+            select(User)
+            .where(
+                User.invite_code == invite_code
+            )
         )
 
+        return result.scalar_one_or_none()
 
 
 
 async def activate_employee(
-    employee_id: int,
+    user_id: int,
     telegram_id: int,
     username: str | None
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-
-    async with pool.acquire() as conn:
-
-        return await conn.fetchrow(
-            """
-            UPDATE employees
-
-            SET
-                telegram_id=$2,
-                username=$3,
-                invite_code=NULL
-
-            WHERE id=$1
-
-            RETURNING *
-            """,
-
-            employee_id,
-            telegram_id,
-            username
+        user = await db.get(
+            User,
+            user_id
         )
 
+        if user:
 
+            user.telegram_id = telegram_id
+            user.username = username
+            user.active = True
 
+            await db.commit()
 
-async def is_admin(
-    telegram_id: int
-):
+            await db.refresh(user)
 
-    employee = await get_employee(
-        telegram_id
-    )
-
-    if not employee:
-        return False
-
-
-    return employee["role"] == "SUPER_ADMIN"
-
-
-
-
-async def get_all_employees():
-
-    pool = await get_db()
-
-
-    async with pool.acquire() as conn:
-
-        return await conn.fetch(
-            """
-            SELECT *
-            FROM employees
-            ORDER BY created_at DESC
-            """
-        )
-# =====================================================
-# Получить сотрудников команды
-# =====================================================
-
-async def get_team_members(team: str):
-
-    pool = await get_db()
-
-    async with pool.acquire() as conn:
-
-        return await conn.fetch(
-            """
-            SELECT *
-
-            FROM employees
-
-            WHERE team=$1
-
-            ORDER BY full_name
-            """,
-            team
-        )
-
-
-# =====================================================
-# Получить сотрудника по ID
-# =====================================================
-
-async def get_employee_by_id(employee_id: int):
-
-    pool = await get_db()
-
-    async with pool.acquire() as conn:
-
-        return await conn.fetchrow(
-            """
-            SELECT *
-
-            FROM employees
-
-            WHERE id=$1
-            """,
-            employee_id
-        )
+        return user

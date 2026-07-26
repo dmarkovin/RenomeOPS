@@ -2,15 +2,7 @@ from aiogram import Router
 from aiogram.types import Message
 
 from app.services.employee_service import get_employee
-
-from app.utils.roles import (
-    SUPER_ADMIN,
-    DIRECTOR,
-    CONCIERGE,
-    TECHNICIAN,
-    CLEANING,
-    SECURITY,
-)
+from app.database.models import UserRole
 
 from app.keyboards.admin import admin_keyboard
 from app.keyboards.director import director_keyboard
@@ -19,7 +11,6 @@ from app.keyboards.technician import technician_keyboard
 from app.keyboards.cleaning import cleaning_keyboard
 from app.keyboards.security import security_keyboard
 
-
 router = Router()
 
 
@@ -27,51 +18,49 @@ async def show_main_menu(message: Message):
 
     employee = await get_employee(message.from_user.id)
 
-    if not employee:
+    if employee is None:
 
         await message.answer(
             "Вы не зарегистрированы в системе."
         )
         return
 
-    role = employee["role"]
-
-    if role == SUPER_ADMIN:
+    if employee.role == UserRole.ADMIN:
 
         await message.answer(
             "👑 Главное меню",
             reply_markup=admin_keyboard()
         )
 
-    elif role == DIRECTOR:
+    elif employee.role == UserRole.DIRECTOR:
 
         await message.answer(
             "👨‍💼 Главное меню",
             reply_markup=director_keyboard()
         )
 
-    elif role == CONCIERGE:
+    elif employee.role == UserRole.CONCIERGE:
 
         await message.answer(
             "🛎 Главное меню",
             reply_markup=concierge_keyboard()
         )
 
-    elif role == TECHNICIAN:
+    elif employee.role == UserRole.TECHNICIAN:
 
         await message.answer(
             "🔧 Главное меню",
             reply_markup=technician_keyboard()
         )
 
-    elif role == CLEANING:
+    elif employee.role == UserRole.CLEANER:
 
         await message.answer(
             "🧹 Главное меню",
             reply_markup=cleaning_keyboard()
         )
 
-    elif role == SECURITY:
+    elif employee.role == UserRole.SECURITY:
 
         await message.answer(
             "🛡 Главное меню",
@@ -81,5 +70,5 @@ async def show_main_menu(message: Message):
     else:
 
         await message.answer(
-            "Роль не определена."
+            f"Неизвестная роль: {employee.role}"
         )

@@ -1,5 +1,9 @@
+from sqlalchemy import select
+
 from app.config import ADMIN_TELEGRAM_ID
-from app.database import get_db
+from app.database import AsyncSessionLocal
+
+from app.database.models import User
 
 
 async def create_first_admin():
@@ -8,42 +12,45 @@ async def create_first_admin():
         return
 
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
 
-    async with pool.acquire() as conn:
-
-        exists = await conn.fetchrow(
-            """
-            SELECT *
-            FROM employees
-            WHERE telegram_id=$1
-            """,
-            ADMIN_TELEGRAM_ID
+        result = await db.execute(
+            select(User)
+            .where(
+                User.telegram_id == ADMIN_TELEGRAM_ID
+            )
         )
+
+
+        exists = result.scalar_one_or_none()
 
 
         if exists:
             return
 
 
-        await conn.execute(
-            """
-            INSERT INTO employees
-            (
-                telegram_id,
-                username,
-                full_name,
-                role
-            )
-            VALUES
-            ($1,$2,$3,$4)
-            """,
-            ADMIN_TELEGRAM_ID,
-            "admin",
-            "Главный администратор",
-            "SUPER_ADMIN"
+
+        admin = User(
+
+            telegram_id=ADMIN_TELEGRAM_ID,
+
+            username="admin",
+
+            full_name="Главный администратор",
+
+            role="SUPER_ADMIN",
+
+            active=True,
+
         )
+
+
+        db.add(admin)
+
+
+        await db.commit()
+
 
         print(
             "First SUPER_ADMIN created"

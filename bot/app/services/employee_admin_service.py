@@ -1,123 +1,129 @@
-from app.database import get_db
+from sqlalchemy import select, update, delete, func
+
+from app.database import AsyncSessionLocal
+
+from app.database.models import User
+
 
 
 async def get_employees(
     active_only: bool = False,
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-    async with pool.acquire() as conn:
+
+        query = select(User)
+
 
         if active_only:
 
-            return await conn.fetch(
-                """
-                SELECT *
-
-                FROM employees
-
-                WHERE is_active=TRUE
-
-                ORDER BY full_name
-                """
+            query = query.where(
+                User.active == True
             )
 
-        return await conn.fetch(
-            """
-            SELECT *
 
-            FROM employees
-
-            ORDER BY full_name
-            """
+        query = query.order_by(
+            User.full_name
         )
+
+
+        result = await db.execute(query)
+
+
+        return result.scalars().all()
+
+
 
 
 async def get_employee_by_id(
     employee_id: int,
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-    async with pool.acquire() as conn:
-
-        return await conn.fetchrow(
-            """
-            SELECT *
-
-            FROM employees
-
-            WHERE id=$1
-            """,
-            employee_id,
+        return await db.get(
+            User,
+            employee_id
         )
+
+
 
 
 async def block_employee(
     employee_id: int,
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-    async with pool.acquire() as conn:
-
-        return await conn.execute(
-            """
-            UPDATE employees
-
-            SET
-
-                is_active=FALSE,
-
-                blocked_at=NOW()
-
-            WHERE id=$1
-            """,
-            employee_id,
+        employee = await db.get(
+            User,
+            employee_id
         )
+
+
+        if employee:
+
+            employee.active = False
+
+            await db.commit()
+
+
+
+        return employee
+
+
 
 
 async def unblock_employee(
     employee_id: int,
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-    async with pool.acquire() as conn:
-
-        return await conn.execute(
-            """
-            UPDATE employees
-
-            SET
-
-                is_active=TRUE,
-
-                blocked_at=NULL
-
-            WHERE id=$1
-            """,
-            employee_id,
+        employee = await db.get(
+            User,
+            employee_id
         )
+
+
+        if employee:
+
+            employee.active = True
+
+            await db.commit()
+
+
+
+        return employee
+
+
 
 
 async def delete_employee(
     employee_id: int,
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-    async with pool.acquire() as conn:
 
-        return await conn.execute(
-            """
-            DELETE FROM employees
-
-            WHERE id=$1
-            """,
-            employee_id,
+        employee = await db.get(
+            User,
+            employee_id
         )
+
+
+        if employee:
+
+            await db.delete(employee)
+
+            await db.commit()
+
+
+
+        return employee
+
+
 
 
 async def update_employee(
@@ -134,69 +140,78 @@ async def update_employee(
 
 ):
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-    async with pool.acquire() as conn:
 
-        return await conn.fetchrow(
-            """
-            UPDATE employees
-
-            SET
-
-                full_name=$2,
-
-                phone=$3,
-
-                role=$4,
-
-                team=$5
-
-            WHERE id=$1
-
-            RETURNING *
-            """,
-            employee_id,
-            full_name,
-            phone,
-            role,
-            team,
+        employee = await db.get(
+            User,
+            employee_id
         )
+
+
+        if not employee:
+            return None
+
+
+
+        employee.full_name = full_name
+
+        employee.phone = phone
+
+        employee.role = role
+
+        employee.team = team
+
+
+
+        await db.commit()
+
+        await db.refresh(employee)
+
+
+
+        return employee
+
+
 
 
 async def employee_statistics():
 
-    pool = await get_db()
+    async with AsyncSessionLocal() as db:
 
-    async with pool.acquire() as conn:
 
-        total = await conn.fetchval(
-            """
-            SELECT COUNT(*)
+        total = await db.scalar(
 
-            FROM employees
-            """
+            select(
+                func.count(User.id)
+            )
+
         )
 
-        active = await conn.fetchval(
-            """
-            SELECT COUNT(*)
 
-            FROM employees
+        active = await db.scalar(
 
-            WHERE is_active=TRUE
-            """
+            select(
+                func.count(User.id)
+            )
+            .where(
+                User.active == True
+            )
+
         )
 
-        blocked = await conn.fetchval(
-            """
-            SELECT COUNT(*)
 
-            FROM employees
+        blocked = await db.scalar(
 
-            WHERE is_active=FALSE
-            """
+            select(
+                func.count(User.id)
+            )
+            .where(
+                User.active == False
+            )
+
         )
+
 
         return {
 

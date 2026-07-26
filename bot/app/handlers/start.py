@@ -10,7 +10,6 @@ from app.services.employee_service import (
 
 from app.handlers.menu import show_main_menu
 
-
 router = Router()
 
 
@@ -20,7 +19,15 @@ async def start_handler(
     command: CommandObject,
 ):
 
+    print(
+        "START RECEIVED:",
+        message.from_user.id
+    )
+
     telegram_id = message.from_user.id
+    print(
+        f"CHECK USER: {telegram_id}"
+    )
     username = message.from_user.username
 
     employee = await get_employee(telegram_id)
@@ -39,21 +46,27 @@ async def start_handler(
         if invited:
 
             await activate_employee(
-                invited["id"],
+
+                invited.id,
                 telegram_id,
                 username,
+
             )
 
             await message.answer(
+
                 f"""
 ✅ Регистрация завершена!
 
 Добро пожаловать,
-{invited['full_name']}
+
+<b>{invited.full_name}</b>
 """
+
             )
 
             await show_main_menu(message)
+
             return
 
     await message.answer(
