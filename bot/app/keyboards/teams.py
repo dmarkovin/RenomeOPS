@@ -8,37 +8,19 @@ def teams_keyboard():
 
             [
                 KeyboardButton(
-                    text="🔧 Техника"
+                    text="🔧 TEAM_TECH"
                 )
             ],
 
             [
                 KeyboardButton(
-                    text="🧹 Клининг"
+                    text="🧹 TEAM_CLEANING"
                 )
             ],
 
             [
                 KeyboardButton(
-                    text="🛡 Охрана"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="🛎 Консьерж Сервис"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="🏢 Администрация"
-                )
-            ],
-
-            [
-                KeyboardButton(
-                    text="❌ Отмена"
+                    text="🛡 TEAM_SECURITY"
                 )
             ]
 

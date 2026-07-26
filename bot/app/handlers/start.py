@@ -1,8 +1,8 @@
 from aiogram import Router
-from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
+from aiogram.filters import CommandStart
 
-from app.services.employee_service import (
+from app.services.employees.service import (
     get_employee,
     get_employee_by_invite,
     activate_employee,
@@ -10,13 +10,13 @@ from app.services.employee_service import (
 
 from app.handlers.menu import show_main_menu
 
+
 router = Router()
 
 
-@router.message(Command("start"))
+@router.message(CommandStart())
 async def start_handler(
-    message: Message,
-    command: CommandObject,
+    message: Message
 ):
 
     print(
@@ -24,50 +24,64 @@ async def start_handler(
         message.from_user.id
     )
 
-    telegram_id = message.from_user.id
-    print(
-        f"CHECK USER: {telegram_id}"
-    )
-    username = message.from_user.username
 
-    employee = await get_employee(telegram_id)
+    employee = await get_employee(
+        message.from_user.id
+    )
+
 
     if employee:
 
-        await show_main_menu(message)
+        await show_main_menu(
+            message
+        )
+
         return
 
-    if command.args:
 
-        invite_code = command.args.strip()
 
-        invited = await get_employee_by_invite(invite_code)
+    args = message.text.split()
 
-        if invited:
 
-            await activate_employee(
+    if len(args) > 1:
 
-                invited.id,
-                telegram_id,
-                username,
+        invite_code = args[1]
 
-            )
+
+        employee = await get_employee_by_invite(
+            invite_code
+        )
+
+
+        if employee is None:
 
             await message.answer(
-
-                f"""
-✅ Регистрация завершена!
-
-Добро пожаловать,
-
-<b>{invited.full_name}</b>
-"""
-
+                "❌ Приглашение не найдено."
             )
 
-            await show_main_menu(message)
-
             return
+
+
+
+        await activate_employee(
+            employee.id,
+            message.from_user.id,
+            message.from_user.username
+        )
+
+
+        await message.answer(
+            "✅ Вы зарегистрированы в системе."
+        )
+
+
+        await show_main_menu(
+            message
+        )
+
+        return
+
+
 
     await message.answer(
         """
@@ -75,7 +89,6 @@ async def start_handler(
 
 У вас пока нет доступа.
 
-Используйте приглашение,
-полученное от администратора.
+Получите приглашение от администратора.
 """
     )

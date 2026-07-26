@@ -95,6 +95,11 @@ class User(Base):
         String(255),
         nullable=False
     )
+    
+    phone = Column(
+    String(50),
+    nullable=True
+    )
 
     role = Column(
         Enum(UserRole),

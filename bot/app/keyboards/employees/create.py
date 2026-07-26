@@ -1,51 +1,53 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    ReplyKeyboardMarkup,
+    KeyboardButton
+)
 
 
-
-def roles_keyboard():
+def employee_roles_keyboard():
 
     return ReplyKeyboardMarkup(
-
         keyboard=[
-
             [
                 KeyboardButton(
-                    text="🏢 Администрация"
+                    text="👨‍Управляющий"
                 )
             ],
-
             [
                 KeyboardButton(
-                    text="🛎 Консьерж Сервис"
+                    text="🛎 Консьерж"
                 )
             ],
-
             [
                 KeyboardButton(
-                    text="🔧 Технический специалист"
+                    text="🔧 Техник"
                 )
             ],
-
             [
                 KeyboardButton(
-                    text="🧹 Сотрудник клининга"
+                    text="🧹 Клининг"
                 )
             ],
-
             [
                 KeyboardButton(
                     text="🛡 Охрана"
                 )
-            ],
+            ]
+        ],
+        resize_keyboard=True
+    )
 
+
+
+def employee_create_keyboard():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
             [
                 KeyboardButton(
                     text="❌ Отмена"
                 )
             ]
-
         ],
-
         resize_keyboard=True
-
     )
