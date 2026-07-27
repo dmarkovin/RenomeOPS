@@ -226,7 +226,10 @@ async def set_team(callback: CallbackQuery):
     await show_employee_card(callback)
 
 @router.callback_query(F.data == "emp_back")
-async def back_to_employees_list(callback: CallbackQuery):
+async def back_to_employees_menu(callback: CallbackQuery):
+    await callback.message.delete()
+    await callback.message.answer("👥 Управление сотрудниками:", reply_markup=employees_admin_menu())
+    await callback.answer()
     await callback.message.delete()
     await list_employees(callback.message, page=1)
     await callback.answer()
@@ -270,4 +273,11 @@ async def process_search(message: Message, state: FSMContext):
 async def search_from_list(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await start_search(callback.message, state)
+    await callback.answer()
+
+@router.callback_query(F.data == "emp_back")
+async def back_to_employees_menu(callback: CallbackQuery):
+    from app.keyboards.employees.admin import employees_admin_menu
+    await callback.message.delete()
+    await callback.message.answer("👥 Управление сотрудниками:", reply_markup=employees_admin_menu())
     await callback.answer()

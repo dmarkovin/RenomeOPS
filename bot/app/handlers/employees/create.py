@@ -2,9 +2,9 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from app.services.employees.service import create_employee, get_employee
+from app.services.employees.service import create_employee, get_employee, get_default_team_for_role
 from app.states.employees.create import EmployeeRegistration
-from app.keyboards.employees.create import role_keyboard, team_keyboard, confirm_keyboard
+from app.keyboards.employees.create import role_keyboard, confirm_keyboard
 from app.keyboards.employees.admin import employees_admin_menu
 from app.database.models import UserRole, Team
 from app.utils.invite import generate_invite_link
@@ -63,28 +63,11 @@ async def process_role(message: Message, state: FSMContext):
     role = role_map[message.text]
     await state.update_data(role=role)
 
-    # Для всех ролей, кроме ADMIN, спрашиваем команду
-    if role != UserRole.ADMIN:
-        await state.set_state(EmployeeRegistration.team)
-        await message.answer("Выберите команду для этого сотрудника:", reply_markup=team_keyboard())
-    else:
-        await state.update_data(team=None)
-        await show_confirmation(message, state)
-
-@router.message(EmployeeRegistration.team)
-async def process_team(message: Message, state: FSMContext):
-    team_map = {
-        "🔧 TEAM_TECH": Team.TEAM_TECH,
-        "🧹 TEAM_CLEANING": Team.TEAM_CLEANING,
-        "🛡 TEAM_SECURITY": Team.TEAM_SECURITY,
-        "🛎 TEAM_CONCIERGE": Team.TEAM_CONCIERGE,
-        "🏢 ADMINISTRATION": None,
-    }
-    if message.text not in team_map:
-        await message.answer("Пожалуйста, выберите команду с помощью кнопок.")
-        return
-    team = team_map[message.text]
+    # Автоматически определяем команду по роли
+    team = get_default_team_for_role(role)
     await state.update_data(team=team)
+
+    # Переходим к подтверждению
     await show_confirmation(message, state)
 
 async def show_confirmation(message: Message, state: FSMContext):

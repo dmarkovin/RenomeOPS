@@ -2,15 +2,15 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import TaskStatus, UserRole
 from typing import List
 
-def get_priority_emoji(priority) -> str:
+def get_priority_emoji(priority):
     try:
-        p = int(priority)
-    except (TypeError, ValueError):
-        p = 0
-    if p >= 5: return "🔴"
-    elif p >= 4: return "🟠"
-    elif p >= 3: return "🟡"
-    elif p >= 2: return "🟢"
+        priority = int(priority)
+    except (ValueError, TypeError):
+        return "⚪"
+    if priority >= 5: return "🔴"
+    elif priority >= 4: return "🟠"
+    elif priority >= 3: return "🟡"
+    elif priority >= 2: return "🟢"
     else: return "⚪"
 
 def get_task_status_emoji(status: TaskStatus) -> str:
@@ -24,7 +24,7 @@ def get_task_status_emoji(status: TaskStatus) -> str:
     }
     return emoji_map.get(status, "⚪")
 
-def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str = "open") -> InlineKeyboardMarkup:
+def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str = "open", current_filter: int = None) -> InlineKeyboardMarkup:
     buttons = []
     for task in tasks[:10]:
         status_emoji = get_task_status_emoji(task.status)
@@ -48,12 +48,10 @@ def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str 
     if nav_buttons:
         buttons.append(nav_buttons)
 
+    # Кнопки сортировки и фильтрации
     buttons.append([
         InlineKeyboardButton(text="📅 По дате", callback_data="task_sort:date"),
         InlineKeyboardButton(text="🔥 По приоритету", callback_data="task_sort:priority"),
-    ])
-    buttons.append([
-        InlineKeyboardButton(text="🔽 Фильтр: все", callback_data="task_filter:all"),
     ])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="tasks_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
