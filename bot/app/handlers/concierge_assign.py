@@ -1,3 +1,4 @@
+from aiogram.types import ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram import Router
 from aiogram.types import CallbackQuery

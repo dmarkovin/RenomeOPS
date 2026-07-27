@@ -1,8 +1,8 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.filters.state import StateFilter
 
 from app.services.employees.service import get_employee
 from app.services.reception.key_service import create_key, get_key, get_keys, return_key
@@ -10,7 +10,6 @@ from app.database.models import UserRole
 from app.keyboards.reception_keys import (
     key_list_keyboard, key_action_keyboard, key_main_menu_keyboard
 )
-from app.keyboards.main_menu import main_menu_keyboard
 
 router = Router()
 
@@ -31,7 +30,7 @@ async def keys_menu(message: Message, page: int = 1, status: str = None):
     limit = 10
     offset = (page - 1) * limit
     keys = await get_keys(status=status, limit=limit, offset=offset)
-    total = len(keys)  # упрощённо
+    total = len(keys)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
 
     if not keys:
@@ -44,16 +43,13 @@ async def keys_menu(message: Message, page: int = 1, status: str = None):
         text += f"{status_emoji} #{k.id} {k.key_number} – {k.recipient} ({k.status})\n"
     await message.answer(text, reply_markup=key_list_keyboard(keys, page, total_pages))
 
-
 @router.message(F.text == "📋 Список выданных")
 async def list_issued_keys(message: Message):
     await keys_menu(message, status="issued")
 
-
 @router.message(F.text == "📋 Возвращённые")
 async def list_returned_keys(message: Message):
     await keys_menu(message, status="returned")
-
 
 @router.message(F.text == "➕ Выдать ключ")
 async def start_create_key(message: Message, state: FSMContext):
@@ -63,30 +59,26 @@ async def start_create_key(message: Message, state: FSMContext):
         return
     await state.clear()
     await state.set_state(KeyCreate.key_number)
-    await message.answer("Введите номер ключа:")
-
+    await message.answer("Введите номер ключа:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(KeyCreate.key_number)
 async def process_key_number(message: Message, state: FSMContext):
     await state.update_data(key_number=message.text.strip())
     await state.set_state(KeyCreate.recipient)
-    await message.answer("Введите ФИО получателя:")
-
+    await message.answer("Введите ФИО получателя:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(KeyCreate.recipient)
 async def process_recipient(message: Message, state: FSMContext):
     await state.update_data(recipient=message.text.strip())
     await state.set_state(KeyCreate.purpose)
-    await message.answer("Введите основание (или '-' для пропуска):")
-
+    await message.answer("Введите основание (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(KeyCreate.purpose)
 async def process_purpose(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(purpose=text if text != "-" else "")
     await state.set_state(KeyCreate.comment)
-    await message.answer("Введите комментарий (или '-' для пропуска):")
-
+    await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(KeyCreate.comment)
 async def process_comment(message: Message, state: FSMContext):
@@ -102,11 +94,10 @@ async def process_comment(message: Message, state: FSMContext):
         f"Комментарий: {data.get('comment') or '—'}\n\n"
         f"Подтвердить выдачу?"
     )
-    await message.answer(text, reply_markup=types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text="✅ Да, выдать")], [types.KeyboardButton(text="❌ Отмена")]],
+    await message.answer(text, reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Да, выдать")], [KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     ))
-
 
 @router.message(KeyCreate.confirm, F.text == "✅ Да, выдать")
 async def confirm_create_key(message: Message, state: FSMContext):
@@ -130,14 +121,11 @@ async def confirm_create_key(message: Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
 
-
 @router.message(KeyCreate.confirm, F.text == "❌ Отмена")
 async def cancel_create_key(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=key_main_menu_keyboard())
 
-
-# Карточка
 @router.callback_query(F.data.startswith("key:"))
 async def show_key_card(callback: CallbackQuery):
     key_id = int(callback.data.split(":")[1])
@@ -158,7 +146,6 @@ async def show_key_card(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=key_action_keyboard(k.id, k.status))
     await callback.answer()
 
-
 @router.callback_query(F.data.startswith("key_return:"))
 async def key_return(callback: CallbackQuery):
     key_id = int(callback.data.split(":")[1])
@@ -169,13 +156,11 @@ async def key_return(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-
 @router.callback_query(F.data.startswith("key_page:"))
 async def paginate_keys(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
     await keys_menu(callback.message, page)
     await callback.answer()
-
 
 @router.callback_query(F.data == "key_back")
 async def back_to_key_menu(callback: CallbackQuery):

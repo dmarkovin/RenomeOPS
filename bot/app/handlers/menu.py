@@ -1,5 +1,6 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -13,6 +14,9 @@ from app.keyboards.employees.roles import role_selection_keyboard
 from app.services.employees.service import update_employee_role
 from app.services.settings.service import get_user_settings, update_setting
 from app.keyboards.notification_settings import notification_settings_keyboard
+from app.states.feedback import Feedback
+from app.services.tasks.service import create_task
+from app.services.employees.service import get_all_employees
 
 router = Router()
 
@@ -148,6 +152,80 @@ async def back_from_settings(message: Message):
         await message.answer("Возврат...")
         return
     await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
+
+# ========== Сообщить о проблеме ==========
+@router.message(F.text == "📢 Сообщить о проблеме")
+async def start_feedback(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await state.set_state(Feedback.text)
+    await message.answer("Опишите проблему, с которой вы столкнулись:")
+
+@router.message(Feedback.text)
+async def process_feedback_text(message: Message, state: FSMContext):
+    await state.update_data(text=message.text)
+    await state.set_state(Feedback.photo)
+    await message.answer(
+        "Пришлите скриншот (опционально) или нажмите **Готово**:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="✅ Готово")]],
+            resize_keyboard=True
+        )
+    )
+
+@router.message(Feedback.photo, F.photo)
+async def process_feedback_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("photos", [])
+    photos.append(message.photo[-1].file_id)
+    await state.update_data(photos=photos)
+    await message.answer(f"✅ Фото добавлено ({len(photos)})")
+
+@router.message(Feedback.photo, F.text == "✅ Готово")
+async def finish_feedback(message: Message, state: FSMContext):
+    data = await state.get_data()
+    text = data.get("text")
+    photos = data.get("photos", [])
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Ошибка")
+        await state.clear()
+        return
+
+    # Создаём задачу с высоким приоритетом
+    task = await create_task(
+        title=f"Проблема от {employee.full_name}",
+        description=text,
+        created_by=employee.id,
+        priority=5,
+        photo_ids=photos,
+        is_paid=False,
+        is_feedback=True
+    )
+
+    # Назначаем на всех администраторов (назначаем первому активному админу)
+    admins = await get_all_employees(role=UserRole.ADMIN, active=True)
+    if admins:
+        from app.services.tasks.service import assign_task_to_user
+        admin = admins[0]
+        await assign_task_to_user(task.id, admin.id, employee.id)
+        await notify_admins(f"📢 Создана задача о проблеме от {employee.full_name}:\n{text}")
+    else:
+        # Если админов нет, назначаем на консьержей
+        concierges = await get_all_employees(role=UserRole.CONCIERGE, active=True)
+        if concierges:
+            from app.services.tasks.service import assign_task_to_user
+            await assign_task_to_user(task.id, concierges[0].id, employee.id)
+            await notify_admins(f"📢 Создана задача о проблеме от {employee.full_name} (назначена консьержу):\n{text}")
+        else:
+            await message.answer("⚠️ Нет доступных администраторов или консьержей. Задача создана, но не назначена.")
+
+    await message.answer(f"✅ Ваше сообщение зарегистрировано как заявка #{task.id}. Администратор получил уведомление.")
+    await state.clear()
+    # Возвращаем в главное меню
+    await message.answer("Возврат в главное меню", reply_markup=main_menu_keyboard(employee.role))
 
 async def show_main_menu(message: Message):
     """Обёртка для отображения главного меню (используется в start.py)"""

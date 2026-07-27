@@ -1,15 +1,16 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from app.database.models import UserRole, TaskStatus, User
+from app.database.models import UserRole, User
 
 
-def get_task_status_emoji(status: TaskStatus) -> str:
+def get_task_status_emoji(status: str) -> str:
     emoji_map = {
-        TaskStatus.CREATED: "🟡",
-        TaskStatus.ACCEPTED: "🔵",
-        TaskStatus.IN_PROGRESS: "🟠",
-        TaskStatus.CHECKING: "🟣",
-        TaskStatus.CLOSED: "✅",
-        TaskStatus.WAITING: "⏳",
+        "created": "📌",
+        "accepted": "📋",
+        "in_progress": "⚙️",
+        "checking": "🔍",
+        "closed": "✅",
+        "waiting": "⏰",
+        "paused": "⏸️",
     }
     return emoji_map.get(status, "⚪")
 
@@ -22,34 +23,41 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
 
     # ====== Администратор, Директор, Консьерж ======
     if role in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
-        if status != TaskStatus.CLOSED:
+        if status != "closed":
             buttons.append([InlineKeyboardButton(text="👤 Назначить", callback_data=f"task_assign:{task_id}")])
 
-        if status == TaskStatus.CHECKING:
+        if status == "checking":
             buttons.append([
                 InlineKeyboardButton(text="✅ Закрыть", callback_data=f"task_status:{task_id}:close"),
                 InlineKeyboardButton(text="🔄 Вернуть на доработку", callback_data=f"task_status:{task_id}:rework"),
             ])
 
-        if status != TaskStatus.CLOSED and role in (UserRole.ADMIN, UserRole.CONCIERGE):
+        if status != "closed" and role in (UserRole.ADMIN, UserRole.CONCIERGE):
             buttons.append([InlineKeyboardButton(text="🔒 Принудительно закрыть", callback_data=f"task_status:{task_id}:close")])
 
-        if status == TaskStatus.WAITING:
+        if status == "waiting":
             buttons.append([InlineKeyboardButton(text="🔄 Вернуть в работу", callback_data=f"task_status:{task_id}:start")])
 
-    # ====== Исполнители (Техник, Клининг, Охрана) ======
-    if role in (UserRole.TECHNICIAN, UserRole.CLEANER, UserRole.SECURITY):
-        if task.assigned_team == employee.team and task.assigned_to is None:
-            buttons.append([InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take:{task_id}")])
-        elif task.assigned_to == employee.id:
-            if status == TaskStatus.CREATED or status == TaskStatus.ACCEPTED:
-                buttons.append([InlineKeyboardButton(text="✅ Принять", callback_data=f"task_status:{task_id}:accept")])
-            if status == TaskStatus.ACCEPTED:
-                buttons.append([InlineKeyboardButton(text="▶ Начать выполнение", callback_data=f"task_status:{task_id}:start")])
-            if status == TaskStatus.IN_PROGRESS:
-                buttons.append([InlineKeyboardButton(text="🔄 На проверку", callback_data=f"task_status:{task_id}:check")])
-            if status != TaskStatus.CLOSED:
-                buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
+    # ====== ВСЕ СОТРУДНИКИ (кроме ADMIN? оставим для всех) ======
+    # Кнопка "Взять в работу" доступна всем, у кого есть команда,
+    # если задача назначена на его команду и не взята (assigned_to is None)
+    if task.assigned_team == employee.team and task.assigned_to is None and employee.team is not None:
+        buttons.append([InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take:{task_id}")])
+
+    # Если пользователь является исполнителем (задача уже взята им)
+    if task.assigned_to == employee.id:
+        if status == "created" or status == "accepted":
+            buttons.append([InlineKeyboardButton(text="✅ Принять", callback_data=f"task_status:{task_id}:accept")])
+        if status == "accepted":
+            buttons.append([InlineKeyboardButton(text="▶ Начать выполнение", callback_data=f"task_status:{task_id}:start")])
+        if status == "in_progress":
+            if status == "in_progress":
+                buttons.append([InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"task_status:{task_id}:pause")])
+            if status == "paused":
+                buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_status:{task_id}:resume")])
+            buttons.append([InlineKeyboardButton(text="🔄 На проверку", callback_data=f"task_status:{task_id}:check")])
+        if status != "closed":
+            buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
 
     # ====== Добавление фото ======
     if role in (UserRole.ADMIN, UserRole.CONCIERGE) or (role in (UserRole.TECHNICIAN, UserRole.CLEANER, UserRole.SECURITY) and task.assigned_to == employee.id):
@@ -57,7 +65,7 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
 
     # ====== Общие кнопки ======
     buttons.append([
-        InlineKeyboardButton(text="💬 Комментарий", callback_data=f"task_comment_menu:{task_id}"),
+        InlineKeyboardButton(text="💬 Комментарии", callback_data=f"task_comment_menu:{task_id}"),
         InlineKeyboardButton(text="📷 Фото", callback_data=f"task_photo:{task_id}"),
     ])
     buttons.append([
@@ -66,12 +74,3 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="tasks_back")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def comment_menu_keyboard(task_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура меню комментариев"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"task_comment_list:{task_id}")],
-        [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"task_comment_add:{task_id}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task_comment_back:{task_id}")],
-    ])

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from sqlalchemy import select
 from app.database import AsyncSessionLocal
-from app.database.models import Patrol, Task, TaskStatus, User
+from app.database.models import Patrol, Task, TaskStatus, User, Team
 
 
 async def create_patrol(

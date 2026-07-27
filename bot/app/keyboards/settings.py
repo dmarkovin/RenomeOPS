@@ -5,6 +5,7 @@ def settings_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="👤 Профиль")],
         [KeyboardButton(text="🔔 Уведомления")],
+        [KeyboardButton(text="📢 Сообщить о проблеме")],
     ]
     if role == UserRole.ADMIN:
         buttons.append([KeyboardButton(text="🔄 Сменить роль")])

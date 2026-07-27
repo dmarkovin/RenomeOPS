@@ -12,9 +12,6 @@ def director_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📊 Статистика"),
             ],
             [
-                KeyboardButton(text="➕ Создать заявку"),
-            ],
-            [
                 KeyboardButton(text="⚙ Настройки"),
             ],
         ],

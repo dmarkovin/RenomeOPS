@@ -1,12 +1,13 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 
 from app.services.employees.service import create_employee, get_employee, get_default_team_for_role
 from app.states.employees.create import EmployeeRegistration
 from app.keyboards.employees.create import role_keyboard, confirm_keyboard
 from app.keyboards.employees.admin import employees_admin_menu
-from app.database.models import UserRole, Team
+from app.database.models import UserRole
 from app.utils.invite import generate_invite_link
 from app.services.notification_service import notify_admins
 
@@ -25,7 +26,7 @@ async def start_create_employee(message: Message, state: FSMContext):
         return
     await state.clear()
     await state.set_state(EmployeeRegistration.full_name)
-    await message.answer("Введите ФИО нового сотрудника:")
+    await message.answer("Введите ФИО нового сотрудника:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(EmployeeRegistration.full_name)
 async def process_full_name(message: Message, state: FSMContext):
@@ -35,7 +36,7 @@ async def process_full_name(message: Message, state: FSMContext):
         return
     await state.update_data(full_name=full_name)
     await state.set_state(EmployeeRegistration.phone)
-    await message.answer("Введите номер телефона сотрудника (в свободном формате):")
+    await message.answer("Введите номер телефона сотрудника (в свободном формате):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(EmployeeRegistration.phone)
 async def process_phone(message: Message, state: FSMContext):
@@ -62,12 +63,8 @@ async def process_role(message: Message, state: FSMContext):
         return
     role = role_map[message.text]
     await state.update_data(role=role)
-
-    # Автоматически определяем команду по роли
     team = get_default_team_for_role(role)
     await state.update_data(team=team)
-
-    # Переходим к подтверждению
     await show_confirmation(message, state)
 
 async def show_confirmation(message: Message, state: FSMContext):

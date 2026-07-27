@@ -1,5 +1,6 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -114,17 +115,6 @@ async def process_location_type(callback: CallbackQuery, state: FSMContext):
         entrance = data.get("entrance")
         floor = data.get("floor")
         apartments = get_apartments(building, entrance, floor)
-        if not apartments:
-            await callback.message.edit_text(
-                f"⚠️ На {floor}-м этаже нет квартир. Выберите другой тип локации."
-            )
-            await state.set_state(TaskCreate.select_location_type)
-            await callback.message.answer(
-                "Выберите тип локации:",
-                reply_markup=location_type_keyboard()
-            )
-            await callback.answer()
-            return
         await state.set_state(TaskCreate.select_apartment)
         await callback.message.edit_text(
             f"🏠 Выберите квартиру на этаже {floor}:",
@@ -133,9 +123,8 @@ async def process_location_type(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.message.edit_text("✅ Тип локации выбран.")
         await state.set_state(TaskCreate.enter_title)
-        await callback.message.answer("📝 Введите **название** заявки:")
+        await callback.message.answer("📝 Введите **название** заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
-
 
 @router.callback_query(StateFilter(TaskCreate.select_apartment), F.data.startswith("obj_apartment:"))
 async def process_apartment(callback: CallbackQuery, state: FSMContext):
@@ -144,7 +133,7 @@ async def process_apartment(callback: CallbackQuery, state: FSMContext):
     await state.update_data(apartment=apartment)
     await callback.message.edit_text(f"✅ Выбрана квартира {apartment}")
     await state.set_state(TaskCreate.enter_title)
-    await callback.message.answer("📝 Введите **название** заявки:")
+    await callback.message.answer("📝 Введите **название** заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
 @router.callback_query(StateFilter(TaskCreate.select_parking_floor), F.data.startswith("obj_parking_floor:"))
@@ -184,7 +173,7 @@ async def process_parking_type(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.message.edit_text("✅ Тип проблемы выбран.")
         await state.set_state(TaskCreate.enter_title)
-        await callback.message.answer("📝 Введите **название** заявки:")
+        await callback.message.answer("📝 Введите **название** заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
 @router.callback_query(StateFilter(TaskCreate.select_parking_spot), F.data.startswith("obj_parking_spot:"))
@@ -194,7 +183,7 @@ async def process_parking_spot(callback: CallbackQuery, state: FSMContext):
     await state.update_data(parking_spot=spot)
     await callback.message.edit_text(f"✅ Выбрано машиноместо {spot}")
     await state.set_state(TaskCreate.enter_title)
-    await callback.message.answer("📝 Введите **название** заявки:")
+    await callback.message.answer("📝 Введите **название** заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
 @router.callback_query(StateFilter(TaskCreate.select_cellar), F.data.startswith("obj_cellar:"))
@@ -204,7 +193,7 @@ async def process_cellar(callback: CallbackQuery, state: FSMContext):
     await state.update_data(cellar=cellar)
     await callback.message.edit_text(f"✅ Выбран келлер {cellar}")
     await state.set_state(TaskCreate.enter_title)
-    await callback.message.answer("📝 Введите **название** заявки:")
+    await callback.message.answer("📝 Введите **название** заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
 # ---------- Название и описание ----------
@@ -215,14 +204,13 @@ async def process_title(message: Message, state: FSMContext):
         return
     await state.update_data(title=message.text.strip())
     await state.set_state(TaskCreate.enter_description)
-    await message.answer("📄 Введите **описание** (или '-' для пропуска):")
+    await message.answer("📄 Введите **описание** (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(StateFilter(TaskCreate.enter_description), F.text)
 async def process_description(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(description=text if text != "-" else "")
     await state.set_state(TaskCreate.enter_applicant_type)
-    # Выбор типа заявителя
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="👤 Жилец")],
@@ -232,25 +220,23 @@ async def process_description(message: Message, state: FSMContext):
     )
     await message.answer("Кто является заявителем?", reply_markup=kb)
 
-# ---------- Заявитель ----------
 @router.message(StateFilter(TaskCreate.enter_applicant_type), F.text.in_(["👤 Жилец", "👤 Сотрудник"]))
 async def process_applicant_type(message: Message, state: FSMContext):
     app_type = "resident" if message.text == "👤 Жилец" else "employee"
     await state.update_data(applicant_type=app_type)
     await state.set_state(TaskCreate.enter_applicant_name)
-    await message.answer("Введите ФИО заявителя:", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+    await message.answer("Введите ФИО заявителя:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(StateFilter(TaskCreate.enter_applicant_name), F.text)
 async def process_applicant_name(message: Message, state: FSMContext):
     await state.update_data(applicant_name=message.text.strip())
     await state.set_state(TaskCreate.enter_applicant_phone)
-    await message.answer("Введите телефон для связи (или '-' для пропуска):")
+    await message.answer("Введите телефон для связи (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(StateFilter(TaskCreate.enter_applicant_phone), F.text)
 async def process_applicant_phone(message: Message, state: FSMContext):
     phone = message.text.strip()
     await state.update_data(applicant_phone=phone if phone != "-" else "")
-    # Переходим к выбору приоритета
     await state.set_state(TaskCreate.enter_priority)
     await message.answer("Выберите приоритет заявки:", reply_markup=priority_keyboard())
 

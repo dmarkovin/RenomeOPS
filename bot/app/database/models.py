@@ -11,6 +11,7 @@ from sqlalchemy import (
     Text,
     JSON,
     Numeric,
+    Index,
 )
 from sqlalchemy.orm import declarative_base, relationship
 import enum
@@ -36,17 +37,20 @@ class Team(str, enum.Enum):
     TEAM_CLEANING = "TEAM_CLEANING"
     TEAM_SECURITY = "TEAM_SECURITY"
     TEAM_CONCIERGE = "TEAM_CONCIERGE"
+    ADMIN_TEAM = "ADMIN_TEAM"
+    DIRECTOR_TEAM = "DIRECTOR_TEAM"
 
 # ===========================
 # Статусы задач
 # ===========================
 class TaskStatus(str, enum.Enum):
-    WAITING = "waiting"
     CREATED = "created"
     ACCEPTED = "accepted"
     IN_PROGRESS = "in_progress"
     CHECKING = "checking"
     CLOSED = "closed"
+    WAITING = "waiting"
+    PAUSED = "paused"
 
 # ===========================
 # Пользователь
@@ -73,8 +77,7 @@ class Task(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(String(255), nullable=False)
     description = Column(Text)
-    status = Column(Enum(TaskStatus), default=TaskStatus.CREATED, nullable=False)
-    # Локация
+    status = Column(String(50), default="created", nullable=False)
     building = Column(Integer, nullable=True)
     entrance = Column(Integer, nullable=True)
     floor = Column(Integer, nullable=True)
@@ -83,28 +86,34 @@ class Task(Base):
     parking_level = Column(Integer, nullable=True)
     parking_spot = Column(Integer, nullable=True)
     cellar = Column(Integer, nullable=True)
-    # Заявитель
     applicant_type = Column(String(20), nullable=True)
     applicant_name = Column(String(255), nullable=True)
     applicant_phone = Column(String(20), nullable=True)
     priority = Column(Integer, default=3)
     is_paid = Column(Boolean, default=False)
+    is_feedback = Column(Boolean, default=False)
     service_order_id = Column(Integer, ForeignKey("service_orders.id"), nullable=True)
     wait_until = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"))
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
-    assigned_team = Column(String(50), nullable=True)
-    assigned_team = Column(String(50), nullable=True)
     assigned_team = Column(Enum(Team), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
+    __table_args__ = (
+        Index("ix_tasks_status", "status"),
+        Index("ix_tasks_assigned_to", "assigned_to"),
+        Index("ix_tasks_assigned_team", "assigned_team"),
+        Index("ix_tasks_created_at", "created_at"),
+        Index("ix_tasks_is_paid", "is_paid"),
+    )
 
     creator = relationship("User", foreign_keys=[created_by])
     assignee = relationship("User", foreign_keys=[assigned_to])
     comments = relationship("Comment", back_populates="task", cascade="all, delete-orphan")
     history = relationship("TaskHistory", back_populates="task", cascade="all, delete-orphan")
     photos = relationship("TaskPhoto", back_populates="task", cascade="all, delete-orphan")
+    service_order = relationship("ServiceOrder", foreign_keys=[service_order_id])
 
 # ===========================
 # Комментарии
@@ -179,6 +188,31 @@ class ServiceOrder(Base):
     user = relationship("User")
 
 # ===========================
+# Пропуска
+# ===========================
+class Pass(Base):
+    __tablename__ = "passes"
+    id = Column(Integer, primary_key=True)
+    type = Column(String(20), nullable=False)
+    guest_name = Column(String(255), nullable=True)
+    car_number = Column(String(20), nullable=True)
+    purpose = Column(String(255), nullable=True)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    status = Column(String(20), default="active")
+    comment = Column(Text)
+    photo_ids = Column(JSON, default=list)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_team = Column(String(50), nullable=True)
+    checked_in_at = Column(DateTime, nullable=True)
+    checked_out_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    creator = relationship("User", foreign_keys=[created_by])
+    assignee = relationship("User", foreign_keys=[assigned_to])
+
+# ===========================
 # Доставка (Ресепшен)
 # ===========================
 class Delivery(Base):
@@ -191,54 +225,6 @@ class Delivery(Base):
     photo_ids = Column(JSON, default=list)
     created_by = Column(Integer, ForeignKey("users.id"))
     status = Column(String(20), default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    creator = relationship("User", foreign_keys=[created_by])
-
-# ===========================
-# Пропуска
-# ===========================
-class Pass(Base):
-    __tablename__ = "passes"
-    id = Column(Integer, primary_key=True)
-    type = Column(String(20), nullable=False)  # guest, car
-    guest_name = Column(String(255), nullable=True)  # для гостя
-    car_number = Column(String(20), nullable=True)   # для авто
-    purpose = Column(String(255), nullable=True)
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=False)
-    status = Column(String(20), default="active")  # active, used, expired
-    comment = Column(Text)
-    photo_ids = Column(JSON, default=list)
-    created_by = Column(Integer, ForeignKey("users.id"))
-    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)  # охрана
-    assigned_team = Column(String(50), nullable=True)
-    assigned_team = Column(String(50), nullable=True)
-    checked_in_at = Column(DateTime, nullable=True)
-    checked_out_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    creator = relationship("User", foreign_keys=[created_by])
-    assignee = relationship("User", foreign_keys=[assigned_to])
-
-# ===========================
-# Документы (Ресепшен)
-# ===========================
-class Document(Base):
-    __tablename__ = "documents"
-    id = Column(Integer, primary_key=True)
-    doc_type = Column(String(20), nullable=False)  # incoming, outgoing, storage, issued
-    number = Column(String(50), nullable=False)    # номер документа
-    title = Column(String(255), nullable=False)    # краткое описание
-    recipient = Column(String(255), nullable=True) # получатель (для исходящих/выданных)
-    sender = Column(String(255), nullable=True)    # отправитель (для входящих)
-    storage_location = Column(String(100), nullable=True) # место хранения
-    issued_to = Column(String(255), nullable=True) # кому выдан
-    issued_at = Column(DateTime, nullable=True)    # дата выдачи
-    returned_at = Column(DateTime, nullable=True)  # дата возврата
-    status = Column(String(20), default="active")  # active, returned, archived
-    comment = Column(Text)
-    created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     creator = relationship("User", foreign_keys=[created_by])
@@ -264,19 +250,24 @@ class Key(Base):
 # ===========================
 # Документы (Ресепшен)
 # ===========================
+class Document(Base):
+    __tablename__ = "documents"
     id = Column(Integer, primary_key=True)
-    route = Column(String(255), nullable=False)          # маршрут
-    notes = Column(Text)                                 # заметки
-    status = Column(String(20), default="active")        # active, completed
-    start_time = Column(DateTime, default=datetime.utcnow)
-    end_time = Column(DateTime, nullable=True)
+    name = Column(String(255), nullable=False)
+    doc_type = Column(String(20), nullable=False)
+    number = Column(String(50), nullable=True)
+    sender = Column(String(255), nullable=True)
+    recipient = Column(String(255), nullable=True)
+    issued_to = Column(String(255), nullable=True)
+    issued_at = Column(DateTime, nullable=True)
+    returned_at = Column(DateTime, nullable=True)
+    status = Column(String(20), default="active")
+    comment = Column(Text)
     photo_ids = Column(JSON, default=list)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)  # связь с задачей
     creator = relationship("User", foreign_keys=[created_by])
-    task = relationship("Task", foreign_keys=[task_id])
 
 # ===========================
 # Обходы (охрана)
@@ -298,38 +289,19 @@ class Patrol(Base):
     task = relationship("Task", foreign_keys=[task_id])
 
 # ===========================
-# Платные услуги
-# ===========================
-
-# ===========================
 # Настройки уведомлений пользователя
 # ===========================
 class UserSettings(Base):
     __tablename__ = "user_settings"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
-    # Типы уведомлений (по умолчанию все включены)
-    notify_task_assigned = Column(Boolean, default=True)      # назначение задачи
-    notify_task_mentioned = Column(Boolean, default=True)     # упоминание в комментарии
-    notify_task_status_changed = Column(Boolean, default=True) # смена статуса
-    notify_task_comment = Column(Boolean, default=True)       # новый комментарий
-    notify_task_closed = Column(Boolean, default=True)        # закрытие задачи
-    notify_new_task_team = Column(Boolean, default=True)      # новая задача на команду
-    notify_checking = Column(Boolean, default=True)           # задача на проверке
-    notify_admin = Column(Boolean, default=True)              # общие админ-уведомления
+    notify_task_assigned = Column(Boolean, default=True)
+    notify_task_mentioned = Column(Boolean, default=True)
+    notify_task_status_changed = Column(Boolean, default=True)
+    notify_task_comment = Column(Boolean, default=True)
+    notify_task_closed = Column(Boolean, default=True)
+    notify_new_task_team = Column(Boolean, default=True)
+    notify_checking = Column(Boolean, default=True)
+    notify_admin = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    user = relationship("User", foreign_keys=[user_id])
-
-# ===========================
-# История пропусков
-# ===========================
-class PassHistory(Base):
-    __tablename__ = "pass_history"
-    id = Column(Integer, primary_key=True)
-    pass_id = Column(Integer, ForeignKey("passes.id"), nullable=False)
-    action = Column(String(50), nullable=False)  # created, checkin, checkout, closed, completed
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    comment = Column(Text, nullable=True)
-    pass_ref = relationship("Pass", foreign_keys=[pass_id])
     user = relationship("User", foreign_keys=[user_id])

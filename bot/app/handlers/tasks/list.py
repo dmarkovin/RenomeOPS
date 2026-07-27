@@ -1,5 +1,6 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 
 from app.services.employees.service import get_employee
@@ -20,17 +21,34 @@ from app.services.tasks.service import (
     count_regular_closed_tasks,
     take_task,
 )
-from app.database.models import UserRole, TaskStatus
+from app.database.models import UserRole
 from app.keyboards.tasks import (
     task_list_keyboard,
     get_task_status_emoji,
     get_priority_emoji,
+    get_priority_name,
     tasks_menu_keyboard
 )
 from app.states.tasks.context import TaskContext
 from app.states.tasks.search import TaskSearch
 
 router = Router()
+
+async def safe_delete_message(message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+def get_navigation_keyboard() -> ReplyKeyboardMarkup:
+    """Нижняя клавиатура для навигации в списках заявок"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="⬅️ Назад")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True
+    )
 
 def get_task_list_text(title: str, tasks, page, total_pages, show_assignee=True):
     if not tasks:
@@ -39,12 +57,13 @@ def get_task_list_text(title: str, tasks, page, total_pages, show_assignee=True)
     for task in tasks:
         status_emoji = get_task_status_emoji(task.status)
         priority_emoji = get_priority_emoji(task.priority)
+        priority_name = get_priority_name(task.priority)
         paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
         line = f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**"
-        if task.status == TaskStatus.WAITING and task.wait_until:
+        if task.status == "waiting" and task.wait_until:
             line += f" ⏳ до {task.wait_until.strftime('%d.%m %H:%M')}"
         text += line + "\n"
-        text += f"   Приоритет: {task.priority} | Создал: {task.creator.full_name if task.creator else '—'}"
+        text += f"   Приоритет: {priority_name} | Создал: {task.creator.full_name if task.creator else '—'}"
         if show_assignee:
             assignee_name = task.assignee.full_name if task.assignee else "не назначен"
             text += f" | Исполнитель: {assignee_name}"
@@ -83,7 +102,7 @@ async def show_list(
         show_assignee = True
 
         if list_type == "open":
-            tasks = await get_open_tasks(limit=limit, offset=offset)
+            tasks = await get_open_tasks(limit=limit, offset=offset, user_id=employee.id)
             total = await count_open_tasks()
             title = "📋 Все открытые заявки"
         elif list_type == "my":
@@ -106,25 +125,25 @@ async def show_list(
             tasks = await get_checking_tasks(limit=limit, offset=offset)
             total = await count_checking_tasks()
             title = "📋 Задачи на проверке"
-        elif list_type == "archive":
-            if employee.role in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
-                tasks = await get_tasks_by_status(TaskStatus.CLOSED, limit=limit, offset=offset)
-                total = await count_tasks_by_status(TaskStatus.CLOSED)
-                title = "📦 Архив (все закрытые заявки)"
-            else:
-                tasks = await get_tasks_for_employee(employee.id, status=TaskStatus.CLOSED, limit=limit, offset=offset)
-                total = await count_tasks_for_employee(employee.id, status=TaskStatus.CLOSED)
-                title = "📦 Архив (мои закрытые заявки)"
-                show_assignee = False
-        elif list_type == "paid_archive":
-            tasks = await get_paid_closed_tasks(limit=limit, offset=offset)
+        elif list_type == "archive_all":
+            tasks = await get_tasks_by_status("closed", limit=limit, offset=offset, user_id=employee.id)
+            total = await count_tasks_by_status("closed", user_id=employee.id)
+            title = "📦 Архив (все закрытые заявки)"
+        elif list_type == "archive_paid":
+            tasks = await get_paid_closed_tasks(limit=limit, offset=offset, user_id=employee.id)
             total = await count_paid_closed_tasks()
             title = "💰 Архив платных заявок"
             show_assignee = False
-        elif list_type == "regular_archive":
-            tasks = await get_regular_closed_tasks(limit=limit, offset=offset)
+        elif list_type == "archive_regular":
+            tasks = await get_regular_closed_tasks(limit=limit, offset=offset, user_id=employee.id)
             total = await count_regular_closed_tasks()
-            title = "📋 Архив обычных заявок"
+            title = "📋 Личные задачи"
+            show_assignee = False
+        elif list_type == "archive_feedback":
+            tasks = await get_tasks_by_status("closed", limit=limit, offset=offset, user_id=employee.id)
+            tasks = [t for t in tasks if getattr(t, 'is_feedback', False)]
+            total = len(tasks)
+            title = "📢 Обращения (проблемы)"
             show_assignee = False
 
         total_pages = (total + limit - 1) // limit if total > 0 else 1
@@ -146,25 +165,71 @@ async def show_list(
         if not tasks_page:
             text = f"{title}\n\nНет записей."
             if hasattr(target, 'message'):
-                await target.message.delete()
-                await target.message.answer(text)
+                await safe_delete_message(target.message)
+                await target.message.answer(text, reply_markup=get_navigation_keyboard())
             else:
-                await target.answer(text)
+                await target.answer(text, reply_markup=get_navigation_keyboard())
             return
 
         text = get_task_list_text(title, tasks_page, page, total_pages, show_assignee)
         reply_markup = task_list_keyboard(tasks_page, page, total_pages, list_type, filter_priority)
         if hasattr(target, 'message'):
-            await target.message.delete()
+            await safe_delete_message(target.message)
             await target.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
+            # Отправляем отдельное сообщение с навигационной клавиатурой
+            await target.message.answer("Выберите действие:", reply_markup=get_navigation_keyboard())
         else:
             await target.answer(text, reply_markup=reply_markup, parse_mode="HTML")
+            await target.answer("Выберите действие:", reply_markup=get_navigation_keyboard())
     except Exception as e:
         print(f"ERROR in show_list: {e}")
         if hasattr(target, 'answer'):
             await target.answer(f"❌ Ошибка при загрузке списка: {str(e)}", parse_mode=None)
         else:
-            await target.message.answer(f"❌ Ошибка при загрузке списка: {str(e)}")
+            await target.message.answer(f"❌ Ошибка при загрузке списка: {str(e)}", parse_mode=None)
+
+async def show_archive_menu(target, state: FSMContext):
+    if hasattr(target, 'from_user'):
+        user_id = target.from_user.id
+    elif hasattr(target, 'message') and hasattr(target.message, 'from_user'):
+        user_id = target.message.from_user.id
+    else:
+        user_id = target.from_user.id
+    employee = await get_employee(user_id)
+    if not employee:
+        if hasattr(target, 'answer'):
+            await target.answer("Вы не зарегистрированы.", show_alert=True)
+        else:
+            await target.answer("Вы не зарегистрированы.")
+        return
+    buttons = [
+        [InlineKeyboardButton(text="📋 Все закрытые", callback_data="archive_category:all")],
+        [InlineKeyboardButton(text="💰 Платные услуги", callback_data="archive_category:paid")],
+        [InlineKeyboardButton(text="📋 Личные задачи", callback_data="archive_category:regular")],
+    ]
+    if employee.role == UserRole.ADMIN:
+        buttons.append([InlineKeyboardButton(text="📢 Обращения (проблемы)", callback_data="archive_category:feedback")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="tasks_back")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    if hasattr(target, 'message'):
+        await safe_delete_message(target.message)
+        await target.message.answer("Выберите категорию архива:", reply_markup=kb)
+    else:
+        await target.answer("Выберите категорию архива:", reply_markup=kb)
+
+@router.callback_query(F.data.startswith("archive_category:"))
+async def archive_category_selected(callback: CallbackQuery, state: FSMContext):
+    category = callback.data.split(":")[1]
+    list_type_map = {
+        "all": "archive_all",
+        "paid": "archive_paid",
+        "regular": "archive_regular",
+        "feedback": "archive_feedback"
+    }
+    list_type = list_type_map.get(category, "archive_all")
+    await safe_delete_message(callback.message)
+    await show_list(callback, state, list_type, user_id=callback.from_user.id)
+    await callback.answer()
 
 @router.message(F.text == "📋 Заявки")
 async def tasks_menu(message: Message, state: FSMContext):
@@ -193,7 +258,7 @@ async def show_checking_tasks(message: Message, state: FSMContext):
 
 @router.message(F.text.startswith("📦 Архив"))
 async def show_archive(message: Message, state: FSMContext):
-    await show_list(message, state, "archive", user_id=message.from_user.id)
+    await show_archive_menu(message, state)
 
 @router.message(F.text == "📊 Статистика")
 async def show_statistics(message: Message):
@@ -206,8 +271,8 @@ async def show_statistics(message: Message):
     from app.services.employees.service import count_employees
     total_open = await count_open_tasks()
     total_checking = await count_checking_tasks()
-    total_closed = await count_tasks_by_status(TaskStatus.CLOSED)
-    total_waiting = await count_tasks_by_status(TaskStatus.WAITING)
+    total_closed = await count_tasks_by_status("closed")
+    total_waiting = await count_tasks_by_status("waiting")
     total_employees = await count_employees(active=True)
     orders = await get_all_orders(limit=1000)
     total_orders = len([o for o in orders if o.status == "pending"])
@@ -243,6 +308,22 @@ async def change_sort(callback: CallbackQuery, state: FSMContext):
     await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
     await callback.answer()
 
+@router.callback_query(F.data.startswith("task_filter:"))
+async def change_filter(callback: CallbackQuery, state: FSMContext):
+    filter_val = callback.data.split(":")[1]
+    if filter_val == "all":
+        filter_priority = None
+    else:
+        filter_priority = int(filter_val)
+    data = await state.get_data()
+    list_type = data.get("list_type", "open")
+    page = data.get("page", 1)
+    sort_by = data.get("sort_by", "date")
+    await state.update_data(filter_priority=filter_priority)
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_take_from_list:"))
 async def take_from_list(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
@@ -270,6 +351,28 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
     filter_priority = data.get("filter_priority")
     await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
+# ====== Обработчики для нижней навигационной клавиатуры ======
+@router.message(F.text == "⬅️ Назад")
+async def back_to_tasks_menu(message: Message, state: FSMContext):
+    """Возврат в меню заявок"""
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await state.clear()
+    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
+
+@router.message(F.text == "🏠 Главное меню")
+async def back_to_main_menu(message: Message, state: FSMContext):
+    """Возврат в главное меню"""
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    from app.keyboards.main_menu import main_menu_keyboard
+    await state.clear()
+    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
+
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -277,13 +380,13 @@ async def start_search(message: Message, state: FSMContext):
         await message.answer("Только для администратора и консьержа.")
         return
     await state.set_state(TaskSearch.query)
-    await message.answer("Введите текст для поиска (ID, название, исполнитель):")
+    await message.answer("Введите текст для поиска (ID, название, исполнитель):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(TaskSearch.query)
 async def process_search(message: Message, state: FSMContext):
     query = message.text.strip()
     if len(query) < 2:
-        await message.answer("Введите минимум 2 символа.")
+        await message.answer("Введите минимум 2 символа.", reply_markup=ReplyKeyboardRemove())
         return
     from app.services.tasks.service import search_tasks
     tasks = await search_tasks(query, limit=20)
@@ -295,9 +398,10 @@ async def process_search(message: Message, state: FSMContext):
     for task in tasks:
         status_emoji = get_task_status_emoji(task.status)
         priority_emoji = get_priority_emoji(task.priority)
+        priority_name = get_priority_name(task.priority)
         assignee_name = task.assignee.full_name if task.assignee else "не назначен"
         paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
         text += f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**\n"
-        text += f"   Исполнитель: {assignee_name}\n\n"
+        text += f"   Приоритет: {priority_name} | Исполнитель: {assignee_name}\n\n"
     await message.answer(text, parse_mode="HTML")
     await state.clear()

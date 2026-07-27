@@ -1,3 +1,4 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -81,7 +82,7 @@ async def start_create_document(message: Message, state: FSMContext):
         return
     await state.clear()
     await state.set_state(DocumentCreate.name)
-    await message.answer("Введите название документа:")
+    await message.answer("Введите название документа:", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(DocumentCreate.name)
@@ -113,7 +114,7 @@ async def process_type(message: Message, state: FSMContext):
         return
     await state.update_data(doc_type=type_map[message.text])
     await state.set_state(DocumentCreate.number)
-    await message.answer("Введите номер документа (или '-' для пропуска):")
+    await message.answer("Введите номер документа (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(DocumentCreate.number)
@@ -121,7 +122,7 @@ async def process_number(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(number=text if text != "-" else "")
     await state.set_state(DocumentCreate.sender)
-    await message.answer("Введите отправителя (или '-' для пропуска):")
+    await message.answer("Введите отправителя (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(DocumentCreate.sender)
@@ -129,7 +130,7 @@ async def process_sender(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(sender=text if text != "-" else "")
     await state.set_state(DocumentCreate.recipient)
-    await message.answer("Введите получателя (или '-' для пропуска):")
+    await message.answer("Введите получателя (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(DocumentCreate.recipient)
@@ -137,7 +138,7 @@ async def process_recipient(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(recipient=text if text != "-" else "")
     await state.set_state(DocumentCreate.issued_to)
-    await message.answer("Введите кому выдан (или '-' для пропуска):")
+    await message.answer("Введите кому выдан (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(DocumentCreate.issued_to)
@@ -145,7 +146,7 @@ async def process_issued_to(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(issued_to=text if text != "-" else "")
     await state.set_state(DocumentCreate.issued_at)
-    await message.answer("Введите дату выдачи (ДД.ММ.ГГГГ) или '-' для сегодня:")
+    await message.answer("Введите дату выдачи (ДД.ММ.ГГГГ) или '-' для сегодня:", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(DocumentCreate.issued_at)
@@ -162,7 +163,7 @@ async def process_issued_at(message: Message, state: FSMContext):
             return
     await state.update_data(issued_at=issued_at)
     await state.set_state(DocumentCreate.comment)
-    await message.answer("Введите комментарий (или '-' для пропуска):")
+    await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(DocumentCreate.comment)

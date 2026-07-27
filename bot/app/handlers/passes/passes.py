@@ -1,3 +1,4 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -80,21 +81,21 @@ async def process_type(message: Message, state: FSMContext):
     await state.update_data(type="guest" if text == "👤 Гость" else "car")
     await state.set_state(PassCreate.guest_name if text == "👤 Гость" else PassCreate.car_number)
     if text == "👤 Гость":
-        await message.answer("Введите имя гостя:")
+        await message.answer("Введите имя гостя:", reply_markup=ReplyKeyboardRemove())
     else:
-        await message.answer("Введите номер автомобиля:")
+        await message.answer("Введите номер автомобиля:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(PassCreate.guest_name)
 async def process_guest_name(message: Message, state: FSMContext):
     await state.update_data(guest_name=message.text.strip())
     await state.set_state(PassCreate.purpose)
-    await message.answer("Введите цель визита (или '-' для пропуска):")
+    await message.answer("Введите цель визита (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(PassCreate.car_number)
 async def process_car_number(message: Message, state: FSMContext):
     await state.update_data(car_number=message.text.strip())
     await state.set_state(PassCreate.purpose)
-    await message.answer("Введите цель визита (или '-' для пропуска):")
+    await message.answer("Введите цель визита (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(PassCreate.purpose)
 async def process_purpose(message: Message, state: FSMContext):
@@ -348,13 +349,13 @@ async def list_history(message: Message, page: int = 1):
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
     await state.set_state(PassSearch.query)
-    await message.answer("Введите текст для поиска (имя гостя, номер авто, ID):")
+    await message.answer("Введите текст для поиска (имя гостя, номер авто, ID):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(StateFilter(PassSearch.query))
 async def process_search_pass(message: Message, state: FSMContext):
     query = message.text.strip()
     if len(query) < 2:
-        await message.answer("Введите минимум 2 символа.")
+        await message.answer("Введите минимум 2 символа.", reply_markup=ReplyKeyboardRemove())
         return
     passes = await search_passes(query, limit=20)
     if not passes:

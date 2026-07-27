@@ -1,5 +1,6 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -25,20 +26,20 @@ async def start_create_service(message: Message, state: FSMContext):
         return
     await state.clear()
     await state.set_state(ServiceCreation.name)
-    await message.answer("Введите название услуги:")
+    await message.answer("Введите название услуги:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(ServiceCreation.name)
 async def service_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text.strip())
     await state.set_state(ServiceCreation.description)
-    await message.answer("Введите описание услуги (или '-' для пропуска):")
+    await message.answer("Введите описание услуги (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(ServiceCreation.description)
 async def service_description(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(description=text if text != "-" else None)
     await state.set_state(ServiceCreation.price)
-    await message.answer("Введите стоимость услуги (в рублях):")
+    await message.answer("Введите стоимость услуги (в рублях):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(ServiceCreation.price)
 async def service_price(message: Message, state: FSMContext):
@@ -47,11 +48,11 @@ async def service_price(message: Message, state: FSMContext):
         if price < 0:
             raise ValueError
     except:
-        await message.answer("❌ Введите корректную цену (положительное число).")
+        await message.answer("❌ Введите корректную цену (положительное число).", reply_markup=ReplyKeyboardRemove())
         return
     await state.update_data(price=price)
     await state.set_state(ServiceCreation.category)
-    await message.answer("Введите категорию услуги (или '-' для пропуска):")
+    await message.answer("Введите категорию услуги (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(ServiceCreation.category)
 async def service_category(message: Message, state: FSMContext):

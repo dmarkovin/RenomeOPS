@@ -1,3 +1,4 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -6,9 +7,9 @@ from aiogram.filters.state import StateFilter
 
 from app.services.employees.service import get_employee
 from app.services.patrol.service import create_patrol, get_patrol, get_patrols, complete_patrol
-from app.services.tasks.service import create_task
-from app.services.notification_service import notify_user
-from app.database.models import UserRole, TaskStatus
+from app.services.tasks.service import create_task, assign_task_to_team
+from app.services.notification_service import notify_concierges
+from app.database.models import UserRole, Team
 from app.keyboards.patrol import patrol_list_keyboard, patrol_action_keyboard, patrol_main_menu_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
 
@@ -52,14 +53,14 @@ async def start_create_patrol(message: Message, state: FSMContext):
         return
     await state.clear()
     await state.set_state(PatrolCreate.route)
-    await message.answer("Введите маршрут обхода:")
+    await message.answer("Введите маршрут обхода:", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(PatrolCreate.route)
 async def process_route(message: Message, state: FSMContext):
     await state.update_data(route=message.text.strip())
     await state.set_state(PatrolCreate.notes)
-    await message.answer("Введите заметки по обходу (или '-' для пропуска):")
+    await message.answer("Введите заметки по обходу (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(PatrolCreate.notes)
@@ -108,18 +109,17 @@ async def confirm_create(message: Message, state: FSMContext):
         await state.clear()
         return
     try:
-        # Создаём задачу (заявку) по обходу
+        # Создаём задачу для консьержей
         task = await create_task(
             title=f"Обход: {data['route']}",
             description=data.get('notes', ''),
             created_by=employee.id,
             location_type="patrol",
             priority=3,
-            photo_ids=data.get('photos', [])
+            photo_ids=data.get('photos', []),
+            is_paid=False,
+            assigned_team=Team.TEAM_CONCIERGE  # назначаем на команду консьержей
         )
-        # Назначаем задачу на самого сотрудника
-        from app.services.tasks.service import assign_task_to_user
-        await assign_task_to_user(task.id, employee.id, employee.id)
 
         # Создаём запись об обходе
         patrol = await create_patrol(
@@ -130,14 +130,18 @@ async def confirm_create(message: Message, state: FSMContext):
             task_id=task.id
         )
 
+        # Уведомляем консьержей
+        await notify_concierges(
+            f"🚶 Новый обход #{patrol.id} от {employee.full_name} создан. "
+            f"Задача #{task.id} назначена на вашу команду."
+        )
+
         await state.clear()
         await message.answer(
             f"✅ Обход #{patrol.id} создан!\n"
-            f"📋 Создана задача #{task.id} для исполнения.",
+            f"📋 Создана задача #{task.id} для консьержей.",
             reply_markup=patrol_main_menu_keyboard()
         )
-        # Уведомление (можно себе)
-        await notify_user(employee.telegram_id, f"🚶 Вы создали обход #{patrol.id}. Задача #{task.id} создана.")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
@@ -149,7 +153,6 @@ async def cancel_create(message: Message, state: FSMContext):
     await message.answer("Отменено", reply_markup=patrol_main_menu_keyboard())
 
 
-# Карточка обхода
 @router.callback_query(F.data.startswith("patrol:"))
 async def show_patrol_card(callback: CallbackQuery):
     patrol_id = int(callback.data.split(":")[1])

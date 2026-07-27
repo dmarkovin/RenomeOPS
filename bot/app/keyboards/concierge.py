@@ -12,7 +12,6 @@ def concierge_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="🔑 Ключи"),
             ],
             [
-                KeyboardButton(text="📄 Документы"),
                 KeyboardButton(text="🚗 Пропуска"),
             ],
             [

@@ -1,3 +1,4 @@
+from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -229,7 +230,7 @@ async def process_applicant_type(message: Message, state: FSMContext):
 async def process_applicant_name(message: Message, state: FSMContext):
     await state.update_data(applicant_name=message.text.strip())
     await state.set_state(ServiceOrderState.enter_applicant_phone)
-    await message.answer("Введите телефон для связи (или '-' для пропуска):")
+    await message.answer("Введите телефон для связи (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(ServiceOrderState.enter_applicant_phone)
 async def process_applicant_phone(message: Message, state: FSMContext):
