@@ -2,7 +2,6 @@ from sqlalchemy import select
 from typing import List, Optional, Dict, Any
 from app.database import AsyncSessionLocal
 from app.database.models import Service, ServiceOrder, Task, TaskStatus, TaskHistory, TaskPhoto, User, Team
-from app.services.tasks.service import create_task
 from datetime import datetime
 
 async def create_service(
@@ -63,9 +62,6 @@ async def get_service(service_id: int) -> Optional[Service]:
     async with AsyncSessionLocal() as db:
         return await db.get(Service, service_id)
 
-# ==========================
-# Заказы услуг с созданием задачи
-# ==========================
 async def create_service_order(
     service_id: int,
     user_id: int,
@@ -100,8 +96,7 @@ async def create_service_order(
         db.add(order)
         await db.flush()
 
-        # Создаём задачу
-        task = await create_task(
+        task = Task(
             title=f"Услуга: {service.name}",
             description=f"Заказ #{order.id}: {service.name}\nКомментарий: {comment or '—'}",
             created_by=user_id,
@@ -117,12 +112,31 @@ async def create_service_order(
             applicant_name=applicant_name or "Заказ услуги",
             applicant_phone=applicant_phone or "",
             priority=3,
-            photo_ids=photo_ids or [],
             is_paid=True,
             service_order_id=order.id,
             assigned_to=assigned_to,
-            assigned_team=assigned_team
+            assigned_team=assigned_team,
+            status=TaskStatus.CREATED
         )
+        db.add(task)
+        await db.flush()
+
+        if photo_ids:
+            for file_id in photo_ids:
+                photo = TaskPhoto(
+                    task_id=task.id,
+                    telegram_file_id=file_id,
+                    uploaded_by=user_id,
+                )
+                db.add(photo)
+
+        history = TaskHistory(
+            task_id=task.id,
+            user_id=user_id,
+            action="CREATED",
+            description=f"Задача создана (платная услуга): {service.name}"
+        )
+        db.add(history)
 
         await db.commit()
         await db.refresh(order)

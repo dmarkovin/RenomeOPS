@@ -87,184 +87,6 @@ async def create_task(
         await db.refresh(task)
         return task
 
-    async with AsyncSessionLocal() as db:
-        task = Task(
-            title=title,
-            description=description,
-            created_by=created_by,
-            building=building,
-            entrance=entrance,
-            floor=floor,
-            apartment=apartment,
-            location_type=location_type,
-            parking_level=parking_level,
-            parking_spot=parking_spot,
-            cellar=cellar,
-            applicant_type=applicant_type,
-            applicant_name=applicant_name,
-            applicant_phone=applicant_phone,
-            priority=priority,
-            is_paid=is_paid,
-            service_order_id=service_order_id,
-            assigned_to=assigned_to,
-            assigned_team=assigned_team,
-            status=TaskStatus.CREATED,
-        )
-        db.add(task)
-        await db.flush()
-
-        if photo_ids:
-            for file_id in photo_ids:
-                photo = TaskPhoto(
-                    task_id=task.id,
-                    telegram_file_id=file_id,
-                    uploaded_by=created_by,
-                )
-                db.add(photo)
-
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=created_by,
-            action="CREATED",
-            description=f"Задача создана: {title}" + (" (платная)" if is_paid else ""),
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
-
-    async with AsyncSessionLocal() as db:
-        task = Task(
-            title=title,
-            description=description,
-            created_by=created_by,
-            building=building,
-            entrance=entrance,
-            floor=floor,
-            apartment=apartment,
-            location_type=location_type,
-            parking_level=parking_level,
-            parking_spot=parking_spot,
-            cellar=cellar,
-            applicant_type=applicant_type,
-            applicant_name=applicant_name,
-            applicant_phone=applicant_phone,
-            priority=priority,
-            is_paid=is_paid,
-            service_order_id=service_order_id,
-            assigned_to=assigned_to,
-            assigned_team=assigned_team,
-            status=TaskStatus.CREATED,
-        )
-        db.add(task)
-        await db.flush()
-
-        if photo_ids:
-            for file_id in photo_ids:
-                photo = TaskPhoto(
-                    task_id=task.id,
-                    telegram_file_id=file_id,
-                    uploaded_by=created_by,
-                )
-                db.add(photo)
-
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=created_by,
-            action="CREATED",
-            description=f"Задача создана: {title}" + (" (платная)" if is_paid else ""),
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
-
-    async with AsyncSessionLocal() as db:
-        task = Task(
-            title=title,
-            description=description,
-            created_by=created_by,
-            building=building,
-            entrance=entrance,
-            floor=floor,
-            apartment=apartment,
-            location_type=location_type,
-            parking_level=parking_level,
-            parking_spot=parking_spot,
-            cellar=cellar,
-            applicant_type=applicant_type,
-            applicant_name=applicant_name,
-            applicant_phone=applicant_phone,
-            priority=priority,
-            is_paid=is_paid,
-            service_order_id=service_order_id,
-            status=TaskStatus.CREATED,
-        )
-        db.add(task)
-        await db.flush()
-
-        if photo_ids:
-            for file_id in photo_ids:
-                photo = TaskPhoto(
-                    task_id=task.id,
-                    telegram_file_id=file_id,
-                    uploaded_by=created_by,
-                )
-                db.add(photo)
-
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=created_by,
-            action="CREATED",
-            description=f"Задача создана: {title}" + (" (платная)" if is_paid else ""),
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
-
-    async with AsyncSessionLocal() as db:
-        task = Task(
-            title=title,
-            description=description,
-            created_by=created_by,
-            building=building,
-            entrance=entrance,
-            floor=floor,
-            apartment=apartment,
-            location_type=location_type,
-            parking_level=parking_level,
-            parking_spot=parking_spot,
-            cellar=cellar,
-            applicant_type=applicant_type,
-            applicant_name=applicant_name,
-            applicant_phone=applicant_phone,
-            priority=priority,
-            status=TaskStatus.CREATED,
-        )
-        db.add(task)
-        await db.flush()
-
-        if photo_ids:
-            for file_id in photo_ids:
-                photo = TaskPhoto(
-                    task_id=task.id,
-                    telegram_file_id=file_id,
-                    uploaded_by=created_by,
-                )
-                db.add(photo)
-
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=created_by,
-            action="CREATED",
-            description=f"Задача создана: {title}",
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
-
 
 # ==========================
 # Получить заявку с подгрузкой
@@ -307,34 +129,14 @@ async def get_tasks_for_employee(
     limit: int = 20,
     offset: int = 0,
 ) -> List[Task]:
-    """Задачи, где сотрудник является исполнителем (личные)"""
-    async with AsyncSessionLocal() as db:
-        query = select(Task).where(Task.assigned_to == user_id)
-        if status:
-            query = query.where(cast(Task.status, String) == status.value)
-        else:
-            query = query.where(cast(Task.status, String) != TaskStatus.CLOSED.value)
-        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
-        result = await db.execute(query)
-        return result.scalars().all()
-
-
-async def get_team_tasks(
-    user_id: int,
-    status: Optional[TaskStatus] = None,
-    limit: int = 20,
-    offset: int = 0,
-) -> List[Task]:
-    """Задачи, назначенные на команду, но не взятые (assigned_to IS NULL)"""
     async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
             return []
         query = select(Task).where(
-            and_(
+            or_(
+                Task.assigned_to == user_id,
                 cast(Task.assigned_team, String) == employee.team.value,
-                Task.assigned_to.is_(None)
             )
         )
         if status:
@@ -357,24 +159,13 @@ async def count_open_tasks() -> int:
 
 async def count_tasks_for_employee(user_id: int, status: Optional[TaskStatus] = None) -> int:
     async with AsyncSessionLocal() as db:
-        query = select(func.count()).select_from(Task).where(Task.assigned_to == user_id)
-        if status:
-            query = query.where(cast(Task.status, String) == status.value)
-        else:
-            query = query.where(cast(Task.status, String) != TaskStatus.CLOSED.value)
-        result = await db.execute(query)
-        return result.scalar()
-
-
-async def count_team_tasks(user_id: int, status: Optional[TaskStatus] = None) -> int:
-    async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
             return 0
         query = select(func.count()).select_from(Task).where(
-            and_(
+            or_(
+                Task.assigned_to == user_id,
                 cast(Task.assigned_team, String) == employee.team.value,
-                Task.assigned_to.is_(None)
             )
         )
         if status:
@@ -421,8 +212,7 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int) -> O
             return None
         task.assigned_to = user_id
         task.assigned_team = employee.team
-        if task.status == TaskStatus.CREATED or task.status == TaskStatus.ACCEPTED:
-            task.status = TaskStatus.IN_PROGRESS
+        if task.status == TaskStatus.CREATED:
             task.status = TaskStatus.ACCEPTED
         task.updated_at = datetime.utcnow()
         history = TaskHistory(
@@ -451,8 +241,7 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
         if task.assigned_team != employee.team or task.assigned_to is not None:
             return None
         task.assigned_to = user_id
-        if task.status == TaskStatus.CREATED or task.status == TaskStatus.ACCEPTED:
-            task.status = TaskStatus.IN_PROGRESS
+        if task.status == TaskStatus.CREATED:
             task.status = TaskStatus.ACCEPTED
         task.updated_at = datetime.utcnow()
         history = TaskHistory(
@@ -680,46 +469,6 @@ async def count_tasks_by_status(status: TaskStatus) -> int:
         )
         return result.scalar()
 
-# ==========================
-# Задачи на проверке (для консьержей)
-# ==========================
-async def get_checking_tasks(limit: int = 20, offset: int = 0) -> List[Task]:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Task)
-            .where(cast(Task.status, String) == TaskStatus.CHECKING.value)
-            .order_by(Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-            .options(selectinload(Task.creator), selectinload(Task.assignee))
-        )
-        return result.scalars().all()
-
-async def count_checking_tasks() -> int:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(func.count()).select_from(Task).where(cast(Task.status, String) == TaskStatus.CHECKING.value)
-        )
-        return result.scalar()
-
-async def search_tasks(query: str, limit: int = 20) -> List[Task]:
-    """Поиск задач по ID, названию, описанию или исполнителю"""
-    async with AsyncSessionLocal() as db:
-        # Пробуем найти по ID
-        if query.isdigit():
-            task = await db.get(Task, int(query))
-            if task:
-                return [task]
-        # Ищем по названию, описанию или исполнителю
-        stmt = select(Task).where(
-            or_(
-                Task.title.ilike(f"%{query}%"),
-                Task.description.ilike(f"%{query}%"),
-                Task.assignee.has(User.full_name.ilike(f"%{query}%"))
-            )
-        ).order_by(Task.created_at.desc()).limit(limit)
-        result = await db.execute(stmt)
-        return result.scalars().all()
 
 async def get_paid_closed_tasks(limit: int = 20, offset: int = 0) -> List[Task]:
     async with AsyncSessionLocal() as db:
@@ -738,6 +487,7 @@ async def get_paid_closed_tasks(limit: int = 20, offset: int = 0) -> List[Task]:
         )
         return result.scalars().all()
 
+
 async def count_paid_closed_tasks() -> int:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -749,6 +499,7 @@ async def count_paid_closed_tasks() -> int:
             )
         )
         return result.scalar()
+
 
 async def get_regular_closed_tasks(limit: int = 20, offset: int = 0) -> List[Task]:
     async with AsyncSessionLocal() as db:
@@ -767,6 +518,7 @@ async def get_regular_closed_tasks(limit: int = 20, offset: int = 0) -> List[Tas
         )
         return result.scalars().all()
 
+
 async def count_regular_closed_tasks() -> int:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -777,4 +529,89 @@ async def count_regular_closed_tasks() -> int:
                 )
             )
         )
+        return result.scalar()
+
+
+async def search_tasks(query: str, limit: int = 20) -> List[Task]:
+    """Поиск задач по ID, названию, описанию или исполнителю"""
+    async with AsyncSessionLocal() as db:
+        if query.isdigit():
+            task = await db.get(Task, int(query))
+            if task:
+                return [task]
+        stmt = select(Task).where(
+            or_(
+                Task.title.ilike(f"%{query}%"),
+                Task.description.ilike(f"%{query}%"),
+                Task.assignee.has(User.full_name.ilike(f"%{query}%"))
+            )
+        ).order_by(Task.created_at.desc()).limit(limit)
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+
+async def get_checking_tasks(limit: int = 20, offset: int = 0) -> List[Task]:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Task)
+            .where(cast(Task.status, String) == TaskStatus.CHECKING.value)
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+            .options(selectinload(Task.creator), selectinload(Task.assignee))
+        )
+        return result.scalars().all()
+
+
+async def count_checking_tasks() -> int:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(func.count()).select_from(Task).where(cast(Task.status, String) == TaskStatus.CHECKING.value)
+        )
+        return result.scalar()
+
+
+async def get_team_tasks(
+    user_id: int,
+    status: Optional[TaskStatus] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[Task]:
+    """Задачи, назначенные на команду, но не взятые (assigned_to IS NULL)"""
+    async with AsyncSessionLocal() as db:
+        employee = await db.get(User, user_id)
+        if not employee:
+            return []
+        query = select(Task).where(
+            and_(
+                cast(Task.assigned_team, String) == employee.team.value,
+                Task.assigned_to.is_(None)
+            )
+        )
+        if status:
+            query = query.where(cast(Task.status, String) == status.value)
+        else:
+            query = query.where(cast(Task.status, String) != TaskStatus.CLOSED.value)
+        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
+        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
+        result = await db.execute(query)
+        return result.scalars().all()
+
+
+async def count_team_tasks(user_id: int, status: Optional[TaskStatus] = None) -> int:
+    async with AsyncSessionLocal() as db:
+        employee = await db.get(User, user_id)
+        if not employee:
+            return 0
+        query = select(func.count()).select_from(Task).where(
+            and_(
+                cast(Task.assigned_team, String) == employee.team.value,
+                Task.assigned_to.is_(None)
+            )
+        )
+        if status:
+            query = query.where(cast(Task.status, String) == status.value)
+        else:
+            query = query.where(cast(Task.status, String) != TaskStatus.CLOSED.value)
+        result = await db.execute(query)
         return result.scalar()

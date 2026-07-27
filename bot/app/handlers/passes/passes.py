@@ -150,10 +150,7 @@ async def process_end_date(callback: CallbackQuery, state: FSMContext):
     await state.update_data(end_date=end_date)
     await state.set_state(PassCreate.assign_type)
     await callback.message.delete()
-    await callback.message.answer(
-        "Выберите, кому назначить пропуск:",
-        reply_markup=pass_assign_type_keyboard()
-    )
+    await callback.message.answer("Выберите, кому назначить пропуск:", reply_markup=pass_assign_type_keyboard())
     await callback.answer()
 
 @router.callback_query(StateFilter(PassCreate.select_end_date), F.data == "date_end_manual")
@@ -177,14 +174,12 @@ async def process_end_date_manual(message: Message, state: FSMContext):
         return
     await state.update_data(end_date=end_date)
     await state.set_state(PassCreate.assign_type)
-    await message.answer(
-        "Выберите, кому назначить пропуск:",
-        reply_markup=pass_assign_type_keyboard()
-    )
+    await message.answer("Выберите, кому назначить пропуск:", reply_markup=pass_assign_type_keyboard())
 
 # ---- Обработчики выбора типа назначения ----
-@router.message(PassCreate.assign_type, F.text.in_(["👥 Всей охране", "👤 Конкретному сотруднику", "⏭ Пропустить"]))
+@router.message(StateFilter(PassCreate.assign_type), F.text.in_(["👥 Всей охране", "👤 Конкретному сотруднику", "⏭ Пропустить"]))
 async def process_assign_type(message: Message, state: FSMContext):
+    print(f"DEBUG: process_assign_type called with text: {message.text}")
     text = message.text
     if text == "⏭ Пропустить":
         await state.update_data(assigned_to=None, assigned_team=None)
@@ -205,32 +200,18 @@ async def process_assign_type(message: Message, state: FSMContext):
         await message.answer("Выберите сотрудника охраны:", reply_markup=employee_selection_keyboard(employees, "pass_assign", 0))
         return
 
-@router.message(PassCreate.assign_type)
+@router.message(StateFilter(PassCreate.assign_type))
 async def invalid_assign_type(message: Message):
     await message.answer("Пожалуйста, используйте кнопки для выбора.")
 
 # ---- Обработчик выбора конкретного сотрудника ----
-@router.callback_query(StateFilter(PassCreate.assign_employee), F.data.startswith("pass_assign:"))
-async def process_assign_employee(callback: CallbackQuery, state: FSMContext):
-    print(f"DEBUG: process_assign_employee called with data: {callback.data}")
-    parts = callback.data.split(":")
-    if len(parts) != 3:
-        await callback.answer("Ошибка формата", show_alert=True)
-        return
-    _, emp_id_str, _ = parts
-    emp_id = int(emp_id_str)
-    await state.update_data(assigned_to=emp_id, assigned_team=None)
-    await callback.message.delete()
-    await callback.message.answer("✅ Охрана назначена.")
-    await state.set_state(PassCreate.comment)
-    await callback.message.answer("Введите комментарий (или - для пропуска):")
+@router.callback_query(StateFilter(PassCreate.assign_employee), F.data.startswith("pass_assign_emp:"))
+async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-
-async def process_assign_employee(callback: CallbackQuery, state: FSMContext):
-    print(f"DEBUG: process_assign_employee called with data: {callback.data}")
+    print(f"DEBUG: assign_employee_final called with data: {callback.data}")
     parts = callback.data.split(":")
     if len(parts) != 3:
-        await callback.answer("Ошибка формата", show_alert=True)
+        await callback.message.answer("Ошибка формата")
         return
     _, emp_id_str, _ = parts
     emp_id = int(emp_id_str)
@@ -239,11 +220,11 @@ async def process_assign_employee(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("✅ Охрана назначена.")
     await state.set_state(PassCreate.comment)
     await callback.message.answer("Введите комментарий (или '-' для пропуска):")
-    await callback.answer()
 
 # ---- Комментарий и подтверждение ----
-@router.message(PassCreate.comment)
+@router.message(StateFilter(PassCreate.comment), F.text)
 async def process_comment(message: Message, state: FSMContext):
+    print(f"DEBUG: process_comment called with text: {message.text}")
     text = message.text.strip()
     await state.update_data(comment=text if text != "-" else "")
     await state.set_state(PassCreate.confirm)
@@ -274,8 +255,9 @@ async def process_comment(message: Message, state: FSMContext):
         resize_keyboard=True
     ))
 
-@router.message(PassCreate.confirm, F.text == "✅ Да, создать")
+@router.message(StateFilter(PassCreate.confirm), F.text == "✅ Да, создать")
 async def confirm_create_pass(message: Message, state: FSMContext):
+    print("DEBUG: confirm_create_pass called")
     data = await state.get_data()
     employee = await get_employee(message.from_user.id)
     if not employee:
@@ -310,15 +292,10 @@ async def confirm_create_pass(message: Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
 
-@router.message(PassCreate.confirm, F.text == "❌ Отмена")
-async def cancel_create_pass(message: Message, state: FSMContext):
+@router.message(StateFilter(PassCreate.confirm), F.text == "❌ Отмена")
+async def cancel_confirm(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=pass_main_menu_keyboard())
-
-@router.message(F.text == "❌ Отмена")
-async def cancel_pass_creation(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("❌ Создание пропуска отменено", reply_markup=pass_main_menu_keyboard())
 
 # ========== Активные пропуски ==========
 @router.message(F.text == "📋 Активные пропуски")
@@ -512,9 +489,9 @@ async def back_from_pass_menu(message: Message):
 
 @router.callback_query(F.data == "cancel_action")
 async def cancel_action(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await state.clear()
     await callback.message.delete()
-    await callback.answer("Действие отменено")
     employee = await get_employee(callback.from_user.id)
     if employee:
         await callback.message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())

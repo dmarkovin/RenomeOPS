@@ -218,6 +218,13 @@ async def process_transfer_comment(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "cancel_action")
 async def cancel_action(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Сначала отвечаем, чтобы избежать таймаута
+    await state.clear()
+    await callback.message.delete()
+    employee = await get_employee(callback.from_user.id)
+    if employee:
+        await callback.message.answer("Главное меню", reply_markup=main_menu_keyboard(employee.role))
+
     await callback.answer()
     await state.clear()
     await callback.message.delete()

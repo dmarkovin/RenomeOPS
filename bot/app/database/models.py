@@ -93,6 +93,8 @@ class Task(Base):
     wait_until = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"))
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_team = Column(String(50), nullable=True)
+    assigned_team = Column(String(50), nullable=True)
     assigned_team = Column(Enum(Team), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -210,6 +212,8 @@ class Pass(Base):
     photo_ids = Column(JSON, default=list)
     created_by = Column(Integer, ForeignKey("users.id"))
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)  # охрана
+    assigned_team = Column(String(50), nullable=True)
+    assigned_team = Column(String(50), nullable=True)
     checked_in_at = Column(DateTime, nullable=True)
     checked_out_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

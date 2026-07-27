@@ -162,7 +162,7 @@ async def show_list(
     except Exception as e:
         print(f"ERROR in show_list: {e}")
         if hasattr(target, 'answer'):
-            await target.answer(f"❌ Ошибка при загрузке списка: {str(e)}")
+            await target.answer(f"❌ Ошибка при загрузке списка: {str(e)}", parse_mode=None)
         else:
             await target.message.answer(f"❌ Ошибка при загрузке списка: {str(e)}")
 

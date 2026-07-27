@@ -17,8 +17,56 @@ async def create_pass(
     photo_ids: List[str] = None,
     created_by: int = None,
     assigned_to: int = None,
-    assigned_team: Team = None
+    assigned_team: str = None
 ) -> Pass:
+    if start_date is None:
+        start_date = datetime.utcnow()
+    if end_date is None:
+        end_date = start_date.replace(hour=23, minute=59)
+    async with AsyncSessionLocal() as db:
+        p = Pass(
+            type=type,
+            guest_name=guest_name,
+            car_number=car_number,
+            purpose=purpose,
+            start_date=start_date,
+            end_date=end_date,
+            comment=comment,
+            photo_ids=photo_ids or [],
+            created_by=created_by,
+            assigned_to=assigned_to,
+            assigned_team=assigned_team,
+            status="active"
+        )
+        db.add(p)
+        await db.commit()
+        await db.refresh(p)
+        return p
+
+    if start_date is None:
+        start_date = datetime.utcnow()
+    if end_date is None:
+        end_date = start_date.replace(hour=23, minute=59)
+    async with AsyncSessionLocal() as db:
+        p = Pass(
+            type=type,
+            guest_name=guest_name,
+            car_number=car_number,
+            purpose=purpose,
+            start_date=start_date,
+            end_date=end_date,
+            comment=comment,
+            photo_ids=photo_ids or [],
+            created_by=created_by,
+            assigned_to=assigned_to,
+            assigned_team=assigned_team,
+            status="active"
+        )
+        db.add(p)
+        await db.commit()
+        await db.refresh(p)
+        return p
+
     if start_date is None:
         start_date = datetime.utcnow()
     if end_date is None:
