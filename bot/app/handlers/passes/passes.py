@@ -1,5 +1,5 @@
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -7,18 +7,18 @@ from datetime import datetime, timedelta
 
 from app.services.employees.service import get_employee, get_employee_by_id
 from app.services.passes.service import (
-    create_pass, get_pass, get_passes,
+    create_pass, get_pass, get_passes, get_pass_history, search_passes,
     check_in, check_out, update_pass_status
 )
 from app.services.tasks.service import get_available_employees
-from app.database.models import UserRole, Team
+from app.database.models import UserRole
 from app.keyboards.passes import (
     pass_list_keyboard, pass_action_keyboard, pass_main_menu_keyboard
 )
 from app.keyboards.assign import employee_selection_keyboard
 from app.keyboards.date_picker import date_selection_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
-from app.services.notification_service import notify_user, notify_team, notify_concierges, notify_security
+from app.services.notification_service import notify_user, notify_concierges, notify_security
 
 router = Router()
 
@@ -35,34 +35,20 @@ class PassCreate(StatesGroup):
     select_start_date = State()
     select_end_date = State()
 
+class PassSearch(StatesGroup):
+    query = State()
+
+# ========== Главное меню пропусков ==========
 @router.message(F.text == "🚗 Пропуска")
-async def passes_menu(message: Message, page: int = 1):
+async def passes_menu(message: Message):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
         await message.answer("У вас нет прав.")
         return
+    await message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
 
-    limit = 10
-    offset = (page - 1) * limit
-    if employee.role == UserRole.SECURITY:
-        passes = await get_passes(assigned_to=employee.id, limit=limit, offset=offset)
-    else:
-        passes = await get_passes(limit=limit, offset=offset)
-    total = len(passes)
-    total_pages = (total + limit - 1) // limit if total > 0 else 1
-
-    if not passes:
-        await message.answer("Нет пропусков.", reply_markup=pass_main_menu_keyboard())
-        return
-
-    text = "📋 Список пропусков:\n\n"
-    for p in passes:
-        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴"
-        label = p.guest_name or p.car_number or "—"
-        text += f"{status_emoji} #{p.id} {label} ({p.type}) – {p.status}\n"
-    await message.answer(text, reply_markup=pass_list_keyboard(passes, page, total_pages))
-
-@router.message(F.text == "➕ Новый пропуск")
+# ========== Создание пропуска ==========
+@router.message(F.text == "➕ Заказать пропуск")
 async def start_create_pass(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
@@ -215,7 +201,6 @@ async def process_assign_employee(callback: CallbackQuery, state: FSMContext):
 async def process_comment(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(comment=text if text != "-" else "")
-    # Переходим к подтверждению
     await state.set_state(PassCreate.confirm)
     data = await state.get_data()
     text = (
@@ -252,7 +237,7 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             start_date=data.get("start_date"),
             end_date=data.get("end_date"),
             comment=data.get("comment"),
-            photo_ids=[],  # больше не используем фото
+            photo_ids=[],
             created_by=employee.id,
             assigned_to=data.get("assigned_to")
         )
@@ -273,7 +258,79 @@ async def cancel_create_pass(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=pass_main_menu_keyboard())
 
-# Карточка пропуска
+# ========== Активные пропуски ==========
+@router.message(F.text == "📋 Активные пропуски")
+async def list_active_passes(message: Message, page: int = 1):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    limit = 10
+    offset = (page - 1) * limit
+    if employee.role == UserRole.SECURITY:
+        passes = await get_passes(assigned_to=employee.id, status='active', limit=limit, offset=offset)
+    else:
+        passes = await get_passes(status='active', limit=limit, offset=offset)
+    total = len(passes)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    if not passes:
+        await message.answer("Нет активных пропусков.")
+        return
+    text = "📋 Активные пропуски:\n\n"
+    for p in passes:
+        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴"
+        label = p.guest_name or p.car_number or "—"
+        text += f"{status_emoji} #{p.id} {label} ({p.type}) – {p.status}\n"
+    await message.answer(text, reply_markup=pass_list_keyboard(passes, page, total_pages))
+
+# ========== История пропусков ==========
+@router.message(F.text == "📜 История пропусков")
+async def list_history(message: Message, page: int = 1):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    limit = 10
+    offset = (page - 1) * limit
+    passes = await get_passes(status__in=['used', 'expired', 'completed'], limit=limit, offset=offset)
+    total = len(passes)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    if not passes:
+        await message.answer("История пуста.")
+        return
+    text = "📜 История пропусков:\n\n"
+    for p in passes:
+        status_emoji = "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
+        label = p.guest_name or p.car_number or "—"
+        text += f"{status_emoji} #{p.id} {label} ({p.type}) – {p.status}\n"
+    await message.answer(text, reply_markup=pass_list_keyboard(passes, page, total_pages))
+
+# ========== Поиск по пропускам ==========
+@router.message(F.text == "🔍 Поиск по пропускам")
+async def start_search_pass(message: Message, state: FSMContext):
+    await state.set_state(PassSearch.query)
+    await message.answer("Введите текст для поиска (имя гостя, номер авто, ID):")
+
+@router.message(StateFilter(PassSearch.query))
+async def process_search_pass(message: Message, state: FSMContext):
+    query = message.text.strip()
+    if len(query) < 2:
+        await message.answer("Введите минимум 2 символа.")
+        return
+    passes = await search_passes(query, limit=20)
+    if not passes:
+        await message.answer("Ничего не найдено.")
+        await state.clear()
+        return
+    text = "🔍 Результаты поиска по пропускам:\n\n"
+    for p in passes:
+        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
+        label = p.guest_name or p.car_number or "—"
+        text += f"{status_emoji} #{p.id} {label} ({p.type}) – {p.status}\n"
+    await message.answer(text)
+    await state.clear()
+
+# ========== Карточка пропуска ==========
 @router.callback_query(F.data.startswith("pass:"))
 async def show_pass_card(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
@@ -296,9 +353,31 @@ async def show_pass_card(callback: CallbackQuery):
         f"Выезд: {p.checked_out_at.strftime('%d.%m.%Y %H:%M') if p.checked_out_at else '—'}\n"
         f"Комментарий: {p.comment or '—'}"
     )
-    await callback.message.edit_text(text, reply_markup=pass_action_keyboard(p.id, p.status, user_role))
+    history_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{p.id}")]
+    ])
+    kb = pass_action_keyboard(p.id, p.status, user_role)
+    merged_buttons = kb.inline_keyboard + history_kb.inline_keyboard
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=merged_buttons))
     await callback.answer()
 
+@router.callback_query(F.data.startswith("pass_history:"))
+async def show_pass_history(callback: CallbackQuery):
+    pass_id = int(callback.data.split(":")[1])
+    history = await get_pass_history(pass_id)
+    if not history:
+        await callback.answer("История пуста", show_alert=True)
+        return
+    text = f"📜 История пропуска #{pass_id}:\n\n"
+    for entry in history[:10]:
+        action = entry.action
+        user = await get_employee_by_id(entry.user_id) if entry.user_id else None
+        user_name = user.full_name if user else "Система"
+        text += f"🕒 {entry.created_at.strftime('%d.%m.%Y %H:%M')} – {user_name}: {action}\n"
+    await callback.message.answer(text)
+    await callback.answer()
+
+# ========== Действия с пропуском ==========
 @router.callback_query(F.data.startswith("pass_checkin:"))
 async def pass_checkin(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
@@ -343,18 +422,31 @@ async def pass_close(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
+# ========== Пагинация и возврат ==========
 @router.callback_query(F.data.startswith("pass_page:"))
 async def paginate_passes(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
-    await passes_menu(callback.message, page)
+    await callback.message.delete()
+    await list_active_passes(callback.message, page)
     await callback.answer()
 
 @router.callback_query(F.data == "pass_back")
+async def back_to_pass_list(callback: CallbackQuery):
+    await callback.message.delete()
+    await list_active_passes(callback.message, 1)
+    await callback.answer()
+
+@router.callback_query(F.data == "pass_menu_back")
 async def back_to_pass_menu(callback: CallbackQuery):
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
-    await callback.message.answer("Меню пропусков", reply_markup=pass_main_menu_keyboard())
+    await callback.message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
     await callback.answer()
+
+@router.message(F.text == "⬅️ Назад")
+async def back_from_pass_menu(message: Message):
+    employee = await get_employee(message.from_user.id)
+    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role) if employee else None)
 
 @router.callback_query(F.data == "cancel_action")
 async def cancel_action(callback: CallbackQuery, state: FSMContext):
@@ -364,28 +456,3 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext):
     employee = await get_employee(callback.from_user.id)
     if employee:
         await callback.message.answer("Главное меню", reply_markup=main_menu_keyboard(employee.role))
-
-@router.callback_query(F.data.startswith("pass_history:"))
-async def pass_history(callback: CallbackQuery):
-    pass_id = int(callback.data.split(":")[1])
-    from app.services.passes.service import get_pass_history
-    history = await get_pass_history(pass_id)
-    if not history:
-        await callback.answer("История пуста", show_alert=True)
-        return
-    text = f"📜 История пропуска #{pass_id}:\n\n"
-    for h in history[:10]:
-        action_emoji = {
-            "created": "🟢",
-            "checkin": "✅",
-            "checkout": "🚗",
-            "status_used": "🔵",
-            "status_completed": "✅",
-            "status_expired": "🔴"
-        }.get(h.action, "📌")
-        user_name = h.user.full_name if h.user else "Система"
-        text += f"{action_emoji} {h.created_at.strftime('%d.%m.%Y %H:%M')} – {user_name}: {h.comment or h.action}\n"
-    if len(history) > 10:
-        text += "\n... и ещё записи."
-    await callback.message.answer(text, parse_mode="HTML")
-    await callback.answer()

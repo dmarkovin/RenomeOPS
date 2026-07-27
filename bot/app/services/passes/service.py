@@ -152,3 +152,29 @@ async def count_passes_by_status(status: str) -> int:
             select(func.count()).select_from(Pass).where(Pass.status == status)
         )
         return result.scalar()
+
+async def get_pass_history(pass_id: int) -> List[dict]:
+    """Получить историю действий по пропуску"""
+    async with AsyncSessionLocal() as db:
+        # В истории пропусков у нас есть таблица pass_history
+        from app.database.models import PassHistory
+        result = await db.execute(
+            select(PassHistory).where(PassHistory.pass_id == pass_id).order_by(PassHistory.created_at.desc())
+        )
+        return result.scalars().all()
+
+async def search_passes(query: str, limit: int = 20) -> List[Pass]:
+    """Поиск пропусков по ID, имени гостя, номеру авто"""
+    async with AsyncSessionLocal() as db:
+        if query.isdigit():
+            p = await db.get(Pass, int(query))
+            if p:
+                return [p]
+        stmt = select(Pass).where(
+            or_(
+                Pass.guest_name.ilike(f"%{query}%"),
+                Pass.car_number.ilike(f"%{query}%")
+            )
+        ).order_by(Pass.created_at.desc()).limit(limit)
+        result = await db.execute(stmt)
+        return result.scalars().all()

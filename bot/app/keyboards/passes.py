@@ -6,7 +6,7 @@ from typing import List
 def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> InlineKeyboardMarkup:
     buttons = []
     for p in passes[:10]:
-        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴"
+        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
         label = f"{status_emoji} #{p.id} "
         if p.type == "guest":
             label += f"{p.guest_name or 'Гость'}"
@@ -23,32 +23,32 @@ def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> Inlin
     if nav_buttons:
         buttons.append(nav_buttons)
 
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pass_back")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="pass_menu_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def pass_action_keyboard(pass_id: int, status: str, user_role: str) -> InlineKeyboardMarkup:
     buttons = []
-    # Для охраны
     if status == "active":
         buttons.append([InlineKeyboardButton(text="✅ Въезд", callback_data=f"pass_checkin:{pass_id}")])
     elif status == "used":
         buttons.append([InlineKeyboardButton(text="🚗 Выезд", callback_data=f"pass_checkout:{pass_id}")])
-    # Для консьержа/админа/директора – кнопка "Выполнено"
     if user_role in ("CONCIERGE", "ADMIN", "DIRECTOR"):
         if status not in ("completed", "expired"):
             buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"pass_complete:{pass_id}")])
     if status not in ("expired", "completed"):
         buttons.append([InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"pass_close:{pass_id}")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pass_back")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="pass_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def pass_main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Новый пропуск")],
-            [KeyboardButton(text="📋 Список пропусков")],
+            [KeyboardButton(text="➕ Заказать пропуск")],
+            [KeyboardButton(text="📋 Активные пропуски")],
+            [KeyboardButton(text="📜 История пропусков")],
+            [KeyboardButton(text="🔍 Поиск по пропускам")],
             [KeyboardButton(text="⬅️ Назад")]
         ],
         resize_keyboard=True

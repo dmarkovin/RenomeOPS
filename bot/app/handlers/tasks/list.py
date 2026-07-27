@@ -51,19 +51,29 @@ def get_task_list_text(title: str, tasks, page, total_pages, show_assignee=True)
         text += "\n\n"
     return text
 
-@router.message(F.text == "📋 Заявки")
-async def tasks_menu(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
+async def show_list(
+    target,  # Message или CallbackQuery
+    state: FSMContext,
+    list_type: str,
+    page: int = 1,
+    sort_by: str = "date",
+    filter_priority: int = None,
+    user_id: int = None
+):
+    """Универсальная функция показа списка, принимает user_id"""
+    if user_id is None:
+        if hasattr(target, 'from_user'):
+            user_id = target.from_user.id
+        else:
+            # fallback – пытаемся получить из callback
+            user_id = target.from_user.id
+    employee = await get_employee(user_id)
     if not employee:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    await state.clear()
-    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
-
-async def show_list(message: Message, state: FSMContext, list_type: str, page: int = 1, sort_by: str = "date", filter_priority: int = None):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
+        # Если пользователь не найден, отправляем сообщение (если есть возможность)
+        if hasattr(target, 'answer'):
+            await target.answer("Вы не зарегистрированы.", show_alert=True)
+        elif hasattr(target, 'message'):
+            await target.message.answer("Вы не зарегистрированы.")
         return
     limit = 10
     offset = (page - 1) * limit
@@ -88,7 +98,10 @@ async def show_list(message: Message, state: FSMContext, list_type: str, page: i
         show_assignee = False
     elif list_type == "checking":
         if employee.role != UserRole.CONCIERGE:
-            await message.answer("Только для консьержей.")
+            if hasattr(target, 'answer'):
+                await target.answer("Только для консьержей.", show_alert=True)
+            else:
+                await target.answer("Только для консьержей.")
             return
         tasks = await get_checking_tasks(limit=limit, offset=offset)
         total = await count_checking_tasks()
@@ -130,38 +143,57 @@ async def show_list(message: Message, state: FSMContext, list_type: str, page: i
     tasks_page = tasks[start:start+limit]
 
     if not tasks_page:
-        await message.answer(f"{title}\n\nНет записей.")
+        if hasattr(target, 'edit_text'):
+            await target.edit_text(f"{title}\n\nНет записей.")
+        else:
+            await target.answer(f"{title}\n\nНет записей.")
         return
 
     await state.update_data(list_type=list_type, page=page, sort_by=sort_by, filter_priority=filter_priority)
     await state.set_state(TaskContext.list_type)
 
     text = get_task_list_text(title, tasks_page, page, total_pages, show_assignee)
-    await message.answer(
-        text,
-        reply_markup=task_list_keyboard(tasks_page, page, total_pages, list_type),
-        parse_mode="HTML",
-    )
+    if hasattr(target, 'edit_text'):
+        await target.edit_text(
+            text,
+            reply_markup=task_list_keyboard(tasks_page, page, total_pages, list_type),
+            parse_mode="HTML",
+        )
+    else:
+        await target.answer(
+            text,
+            reply_markup=task_list_keyboard(tasks_page, page, total_pages, list_type),
+            parse_mode="HTML",
+        )
+
+@router.message(F.text == "📋 Заявки")
+async def tasks_menu(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await state.clear()
+    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
 
 @router.message(F.text.startswith("📋 Список заявок"))
 async def show_all_open_tasks(message: Message, state: FSMContext):
-    await show_list(message, state, "open")
+    await show_list(message, state, "open", user_id=message.from_user.id)
 
 @router.message(F.text.startswith("📋 Мои задачи"))
 async def show_my_tasks(message: Message, state: FSMContext):
-    await show_list(message, state, "my")
+    await show_list(message, state, "my", user_id=message.from_user.id)
 
 @router.message(F.text.startswith("📋 Новые задачи"))
 async def show_team_tasks(message: Message, state: FSMContext):
-    await show_list(message, state, "team")
+    await show_list(message, state, "team", user_id=message.from_user.id)
 
 @router.message(F.text.startswith("📋 Ожидают проверки"))
 async def show_checking_tasks(message: Message, state: FSMContext):
-    await show_list(message, state, "checking")
+    await show_list(message, state, "checking", user_id=message.from_user.id)
 
 @router.message(F.text.startswith("📦 Архив"))
 async def show_archive(message: Message, state: FSMContext):
-    await show_list(message, state, "archive")
+    await show_list(message, state, "archive", user_id=message.from_user.id)
 
 @router.callback_query(F.data.startswith("task_page:"))
 async def paginate_tasks(callback: CallbackQuery, state: FSMContext):
@@ -170,9 +202,7 @@ async def paginate_tasks(callback: CallbackQuery, state: FSMContext):
     list_type = data.get("list_type", "open")
     sort_by = data.get("sort_by", "date")
     filter_priority = data.get("filter_priority")
-    await callback.message.delete()
-    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
-    await callback.answer()
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
 @router.callback_query(F.data.startswith("task_sort:"))
 async def change_sort(callback: CallbackQuery, state: FSMContext):
@@ -182,9 +212,7 @@ async def change_sort(callback: CallbackQuery, state: FSMContext):
     page = data.get("page", 1)
     filter_priority = data.get("filter_priority")
     await state.update_data(sort_by=sort_by)
-    await callback.message.delete()
-    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
-    await callback.answer()
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
 @router.callback_query(F.data.startswith("task_filter:"))
 async def change_filter(callback: CallbackQuery, state: FSMContext):
@@ -198,9 +226,7 @@ async def change_filter(callback: CallbackQuery, state: FSMContext):
     page = data.get("page", 1)
     sort_by = data.get("sort_by", "date")
     await state.update_data(filter_priority=filter_priority)
-    await callback.message.delete()
-    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
-    await callback.answer()
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
 @router.callback_query(F.data.startswith("task_take_from_list:"))
 async def take_from_list(callback: CallbackQuery, state: FSMContext):
@@ -219,8 +245,7 @@ async def take_from_list(callback: CallbackQuery, state: FSMContext):
     page = data.get("page", 1)
     sort_by = data.get("sort_by", "date")
     filter_priority = data.get("filter_priority")
-    await callback.message.delete()
-    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
 @router.callback_query(F.data == "tasks_back")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
@@ -229,9 +254,7 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
     page = data.get("page", 1)
     sort_by = data.get("sort_by", "date")
     filter_priority = data.get("filter_priority")
-    await callback.message.delete()
-    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
-    await callback.answer()
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
