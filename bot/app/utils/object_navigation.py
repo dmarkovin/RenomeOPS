@@ -2,22 +2,22 @@ from typing import Dict, List, Tuple
 
 # Данные по объекту
 OBJECT_DATA = {
-    1: {  # Корпус 1
+    1: {  # Корпус 1 (Новослободская 24астр1)
         "name": "Новослободская 24астр1",
         "entrances": {
             1: {"floors": 5, "apartments_per_floor": 4, "apartment_start": 1, "apartment_end": 16}
         },
         "parking_floors": [-1],  # только -1 этаж
-        "cellars": 35,  # количество келлеров
+        "cellars": 35,
     },
-    2: {  # Корпус 2
+    2: {  # Корпус 2 (Новослободская 24астр2)
         "name": "Новослободская 24астр2",
         "entrances": {
             1: {"floors": 10, "apartments_per_floor": 4, "apartment_start": 1, "apartment_end": 34},
             2: {"floors": 10, "apartments_per_floor": 6, "apartment_start": 35, "apartment_end": 79},
             3: {"floors": 10, "apartments_per_floor": 6, "apartment_start": 80, "apartment_end": 130},
         },
-        "parking_floors": [-1, -2],  # -1 и -2 этажи
+        "parking_floors": [-1, -2],
         "cellars": 35,
     }
 }
@@ -49,10 +49,8 @@ def get_parking_floors(building_id: int) -> List[int]:
 def get_parking_spots(building_id: int, floor: int) -> List[int]:
     """Список машиномест на этаже"""
     if building_id == 1:
-        # -1 этаж: 1-114
         return list(range(1, 115))
     else:
-        # -1 этаж: 1-114, -2 этаж: 115-213
         if floor == -1:
             return list(range(1, 115))
         else:

@@ -1,3 +1,4 @@
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Router, F, types
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
@@ -157,107 +158,13 @@ async def process_comment(message: Message, state: FSMContext):
         await message.answer("❌ Ошибка добавления комментария.")
     await state.clear()
 
-@router.callback_query(F.data.startswith("task_history:"))
-async def show_task_history(callback: CallbackQuery):
-    task_id = int(callback.data.split(":")[1])
-    history = await get_task_history(task_id)
-    if not history:
-        await callback.answer("История пуста", show_alert=True)
-        return
-    text = f"📜 <b>История задачи #{task_id}</b>\n\n"
-    for entry in history[:10]:
-        user_name = entry.user.full_name if entry.user else "—"
-        text += f"🕒 {entry.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-        text += f"👤 {user_name}\n"
-        text += f"📌 {entry.action}\n"
-        text += f"📝 {entry.description}\n\n"
-    if len(history) > 10:
-        text += f"... и ещё {len(history)-10} записей."
-    await callback.message.answer(text, parse_mode="HTML")
-    await callback.answer()
 
-@router.callback_query(F.data.startswith("task_photo:"))
-async def start_add_photo(callback: CallbackQuery, state: FSMContext):
-    task_id = int(callback.data.split(":")[1])
-    await state.set_state(TaskPhotoState.waiting_for_photos)
-    await state.update_data(task_id=task_id, photos=[])
-    await callback.message.answer(
-        "📷 Отправьте одно или несколько фото (после отправки нажмите Готово):",
-        reply_markup=types.ReplyKeyboardMarkup(
-            keyboard=[[types.KeyboardButton(text="✅ Готово")]],
-            resize_keyboard=True
-        )
-    )
-    await callback.answer()
-
-@router.message(StateFilter(TaskPhotoState.waiting_for_photos), F.photo)
-async def process_photo_upload(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
-    photos.append(message.photo[-1].file_id)
-    await state.update_data(photos=photos)
-    await message.answer(f"✅ Фото добавлено ({len(photos)} шт.)")
-
-@router.message(StateFilter(TaskPhotoState.waiting_for_photos), F.text == "✅ Готово")
-async def finish_photo_upload(message: Message, state: FSMContext):
-    data = await state.get_data()
-    task_id = data.get("task_id")
-    photos = data.get("photos", [])
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка")
-        await state.clear()
-        return
-    if not photos:
-        await message.answer("Нет фото для добавления.")
-        await state.clear()
-        return
-    for file_id in photos:
-        await add_photo(task_id, employee.id, file_id)
-    await message.answer(f"✅ Добавлено {len(photos)} фото к задаче #{task_id}.")
-    await state.clear()
-
-@router.callback_query(F.data.startswith("task_wait:"))
-async def start_wait(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("task_invoice:"))
+async def task_invoice(callback: CallbackQuery):
     task_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
-    task = await get_task(task_id)
-    if not employee or task.assigned_to != employee.id:
-        await callback.answer("Вы не исполнитель этой задачи", show_alert=True)
+    if not employee or employee.role != UserRole.CONCIERGE:
+        await callback.answer("Только для консьержей.", show_alert=True)
         return
-    await state.update_data(task_id=task_id)
-    await callback.message.edit_text("Выберите срок ожидания:", reply_markup=waiting_time_keyboard(task_id))
+    await callback.message.answer("🧾 Раздел выставления счетов находится в разработке.")
     await callback.answer()
-
-@router.callback_query(F.data.startswith("wait_time:"))
-async def waiting_time_selected(callback: CallbackQuery, state: FSMContext):
-    _, task_id_str, hours_str = callback.data.split(":")
-    task_id = int(task_id_str)
-    hours = int(hours_str)
-    await state.update_data(task_id=task_id, hours=hours)
-    await state.set_state(TaskWaiting.comment)
-    await callback.message.edit_text("Введите комментарий (обязательно):")
-    await callback.answer()
-
-@router.message(TaskWaiting.comment)
-async def process_wait_comment(message: Message, state: FSMContext):
-    data = await state.get_data()
-    task_id = data.get("task_id")
-    hours = data.get("hours")
-    comment = message.text.strip()
-    if not comment:
-        await message.answer("Комментарий обязателен. Введите текст:")
-        return
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка")
-        await state.clear()
-        return
-    wait_until = datetime.utcnow() + timedelta(hours=hours)
-    task = await change_status(task_id, TaskStatus.WAITING, employee.id, comment, wait_until)
-    if task:
-        await message.answer(f"✅ Задача отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}")
-        await notify_concierges(f"⏳ Задача #{task_id} отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}. Комментарий: {comment}")
-    else:
-        await message.answer("❌ Ошибка")
-    await state.clear()

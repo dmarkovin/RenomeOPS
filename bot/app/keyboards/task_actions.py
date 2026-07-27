@@ -26,6 +26,9 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
             buttons.append([InlineKeyboardButton(text="👤 Назначить", callback_data=f"task_assign:{task_id}")])
 
         if status == TaskStatus.CHECKING:
+            # Кнопка "Выставить счет" для платных задач
+            if task.is_paid:
+                buttons.append([InlineKeyboardButton(text="💰 Выставить счет", callback_data=f"task_invoice:{task_id}")])
             buttons.append([
                 InlineKeyboardButton(text="✅ Закрыть", callback_data=f"task_status:{task_id}:close"),
                 InlineKeyboardButton(text="🔄 Вернуть на доработку", callback_data=f"task_status:{task_id}:rework"),

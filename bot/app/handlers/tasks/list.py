@@ -14,10 +14,19 @@ from app.services.tasks.service import (
     count_checking_tasks,
     get_tasks_by_status,
     count_tasks_by_status,
+    get_paid_closed_tasks,
+    count_paid_closed_tasks,
+    get_regular_closed_tasks,
+    count_regular_closed_tasks,
     take_task,
 )
 from app.database.models import UserRole, TaskStatus
-from app.keyboards.tasks import task_list_keyboard, get_task_status_emoji, tasks_menu_keyboard
+from app.keyboards.tasks import (
+    task_list_keyboard,
+    get_task_status_emoji,
+    get_priority_emoji,
+    tasks_menu_keyboard
+)
 from app.states.tasks.context import TaskContext
 from app.states.tasks.search import TaskSearch
 
@@ -29,7 +38,9 @@ def get_task_list_text(title: str, tasks, page, total_pages, show_assignee=True)
     text = f"{title} (стр. {page}/{total_pages}):\n\n"
     for task in tasks:
         status_emoji = get_task_status_emoji(task.status)
-        line = f"{status_emoji} #{task.id} **{task.title[:30]}**"
+        priority_emoji = get_priority_emoji(task.priority)
+        paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
+        line = f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**"
         if task.status == TaskStatus.WAITING and task.wait_until:
             line += f" ⏳ до {task.wait_until.strftime('%d.%m %H:%M')}"
         text += line + "\n"
@@ -49,8 +60,7 @@ async def tasks_menu(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
 
-# ===== Общая функция для отображения списка =====
-async def show_list(message: Message, state: FSMContext, list_type: str, page: int = 1):
+async def show_list(message: Message, state: FSMContext, list_type: str, page: int = 1, sort_by: str = "date", filter_priority: int = None):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
@@ -93,25 +103,46 @@ async def show_list(message: Message, state: FSMContext, list_type: str, page: i
             total = await count_tasks_for_employee(employee.id, status=TaskStatus.CLOSED)
             title = "📦 Архив (мои закрытые заявки)"
             show_assignee = False
+    elif list_type == "paid_archive":
+        tasks = await get_paid_closed_tasks(limit=limit, offset=offset)
+        total = await count_paid_closed_tasks()
+        title = "💰 Архив платных заявок"
+        show_assignee = False
+    elif list_type == "regular_archive":
+        tasks = await get_regular_closed_tasks(limit=limit, offset=offset)
+        total = await count_regular_closed_tasks()
+        title = "📋 Архив обычных заявок"
+        show_assignee = False
 
     total_pages = (total + limit - 1) // limit if total > 0 else 1
 
-    if not tasks:
+    # Применяем сортировку и фильтрацию
+    if filter_priority:
+        tasks = [t for t in tasks if t.priority == filter_priority]
+        total = len(tasks)
+    if sort_by == "priority":
+        tasks = sorted(tasks, key=lambda t: t.priority, reverse=True)
+    else:
+        tasks = sorted(tasks, key=lambda t: t.created_at, reverse=True)
+
+    # Обрезаем для пагинации
+    start = (page - 1) * limit
+    tasks_page = tasks[start:start+limit]
+
+    if not tasks_page:
         await message.answer(f"{title}\n\nНет записей.")
         return
 
-    # Сохраняем контекст
-    await state.update_data(list_type=list_type, page=page)
+    await state.update_data(list_type=list_type, page=page, sort_by=sort_by, filter_priority=filter_priority)
     await state.set_state(TaskContext.list_type)
 
-    text = get_task_list_text(title, tasks, page, total_pages, show_assignee)
+    text = get_task_list_text(title, tasks_page, page, total_pages, show_assignee)
     await message.answer(
         text,
-        reply_markup=task_list_keyboard(tasks, page, total_pages, list_type),
+        reply_markup=task_list_keyboard(tasks_page, page, total_pages, list_type),
         parse_mode="HTML",
     )
 
-# ===== Обработчики для каждой кнопки =====
 @router.message(F.text.startswith("📋 Список заявок"))
 async def show_all_open_tasks(message: Message, state: FSMContext):
     await show_list(message, state, "open")
@@ -132,15 +163,43 @@ async def show_checking_tasks(message: Message, state: FSMContext):
 async def show_archive(message: Message, state: FSMContext):
     await show_list(message, state, "archive")
 
-# ===== Пагинация =====
 @router.callback_query(F.data.startswith("task_page:"))
 async def paginate_tasks(callback: CallbackQuery, state: FSMContext):
     page = int(callback.data.split(":")[1])
     data = await state.get_data()
     list_type = data.get("list_type", "open")
-    # Пересоздаём сообщение
+    sort_by = data.get("sort_by", "date")
+    filter_priority = data.get("filter_priority")
     await callback.message.delete()
-    await show_list(callback.message, state, list_type, page)
+    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_sort:"))
+async def change_sort(callback: CallbackQuery, state: FSMContext):
+    sort_by = callback.data.split(":")[1]
+    data = await state.get_data()
+    list_type = data.get("list_type", "open")
+    page = data.get("page", 1)
+    filter_priority = data.get("filter_priority")
+    await state.update_data(sort_by=sort_by)
+    await callback.message.delete()
+    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_filter:"))
+async def change_filter(callback: CallbackQuery, state: FSMContext):
+    filter_val = callback.data.split(":")[1]
+    if filter_val == "all":
+        filter_priority = None
+    else:
+        filter_priority = int(filter_val)
+    data = await state.get_data()
+    list_type = data.get("list_type", "open")
+    page = data.get("page", 1)
+    sort_by = data.get("sort_by", "date")
+    await state.update_data(filter_priority=filter_priority)
+    await callback.message.delete()
+    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("task_take_from_list:"))
@@ -155,22 +214,25 @@ async def take_from_list(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Не удалось взять задачу", show_alert=True)
         return
     await callback.answer("✅ Задача взята в работу")
-    # Обновляем список
     data = await state.get_data()
     list_type = data.get("list_type", "team")
+    page = data.get("page", 1)
+    sort_by = data.get("sort_by", "date")
+    filter_priority = data.get("filter_priority")
     await callback.message.delete()
-    await show_list(callback.message, state, list_type, data.get("page", 1))
+    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
 
 @router.callback_query(F.data == "tasks_back")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     list_type = data.get("list_type", "open")
     page = data.get("page", 1)
+    sort_by = data.get("sort_by", "date")
+    filter_priority = data.get("filter_priority")
     await callback.message.delete()
-    await show_list(callback.message, state, list_type, page)
+    await show_list(callback.message, state, list_type, page, sort_by, filter_priority)
     await callback.answer()
 
-# ===== Поиск по заявкам =====
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -186,12 +248,6 @@ async def process_search(message: Message, state: FSMContext):
     if len(query) < 2:
         await message.answer("Введите минимум 2 символа.")
         return
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка.")
-        await state.clear()
-        return
-    # Ищем по ID, названию или исполнителю
     from app.services.tasks.service import search_tasks
     tasks = await search_tasks(query, limit=20)
     if not tasks:
@@ -201,34 +257,10 @@ async def process_search(message: Message, state: FSMContext):
     text = "🔍 Результаты поиска:\n\n"
     for task in tasks:
         status_emoji = get_task_status_emoji(task.status)
+        priority_emoji = get_priority_emoji(task.priority)
         assignee_name = task.assignee.full_name if task.assignee else "не назначен"
-        text += f"{status_emoji} #{task.id} **{task.title[:30]}**\n"
+        paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
+        text += f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**\n"
         text += f"   Исполнитель: {assignee_name}\n\n"
-    # Показываем список без пагинации (для простоты)
     await message.answer(text, parse_mode="HTML")
     await state.clear()
-
-# ===== Статистика =====
-@router.message(F.text == "📊 Статистика")
-async def show_statistics(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR):
-        await message.answer("Только для администратора и директора.")
-        return
-    from app.services.tasks.service import count_open_tasks, count_tasks_by_status, count_checking_tasks
-    total_open = await count_open_tasks()
-    total_checking = await count_checking_tasks()
-    total_closed = await count_tasks_by_status(TaskStatus.CLOSED)
-    total_waiting = await count_tasks_by_status(TaskStatus.WAITING)
-    # Количество сотрудников
-    from app.services.employees.service import count_employees
-    total_employees = await count_employees(active=True)
-    text = (
-        f"📊 **Статистика системы**\n\n"
-        f"👥 Активных сотрудников: {total_employees}\n"
-        f"📋 Открытых заявок: {total_open}\n"
-        f"⏳ Ожидают: {total_waiting}\n"
-        f"🔄 На проверке: {total_checking}\n"
-        f"✅ Закрыто: {total_closed}\n"
-    )
-    await message.answer(text, parse_mode="HTML")

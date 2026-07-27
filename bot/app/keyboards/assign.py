@@ -38,3 +38,26 @@ def employee_selection_keyboard(employees: List[User], action: str, task_id: int
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"assign_back_to_type:{task_id}")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"assign_skip:{task_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def service_team_selection_keyboard(teams: List[dict]) -> InlineKeyboardMarkup:
+    buttons = []
+    for item in teams:
+        team = item["team"]
+        members = item["members"]
+        label = f"{team.value} ({members} чел.)"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"service_team:{team.value}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="service_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def service_employee_selection_keyboard(employees: List[User]) -> InlineKeyboardMarkup:
+    buttons = []
+    for emp in employees:
+        status_emoji = "✅" if emp.active else "❌"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{status_emoji} {emp.full_name} ({emp.role.value})",
+                callback_data=f"service_emp:{emp.id}"
+            )
+        ])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="service_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

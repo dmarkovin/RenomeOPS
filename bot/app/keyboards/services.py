@@ -44,3 +44,21 @@ def service_details_keyboard(service_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="service_back")]
         ]
     )
+
+def service_executor_keyboard(employees: List, teams: List) -> InlineKeyboardMarkup:
+    """Клавиатура выбора исполнителя для платной услуги: сотрудник или команда"""
+    buttons = []
+    # Сначала команды
+    for team in teams:
+        buttons.append([InlineKeyboardButton(
+            text=f"👥 Команда {team.value}",
+            callback_data=f"service_team:{team.value}"
+        )])
+    # Затем сотрудники
+    for emp in employees:
+        buttons.append([InlineKeyboardButton(
+            text=f"👤 {emp.full_name} ({emp.role.value})",
+            callback_data=f"service_emp:{emp.id}"
+        )])
+    buttons.append([InlineKeyboardButton(text="⏭ Пропустить", callback_data="service_skip_executor")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

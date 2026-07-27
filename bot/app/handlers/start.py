@@ -141,3 +141,22 @@ async def become_admin(message: Message):
         return
     await update_employee_role(user.id, UserRole.ADMIN)
     await message.answer("✅ Ваша роль восстановлена до Администратора.")
+
+@router.message(Command("profile"))
+async def cmd_profile(message: Message):
+    from app.services.employees.service import get_employee
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    text = (
+        f"👤 **Ваш профиль**\n\n"
+        f"ФИО: {employee.full_name}\n"
+        f"Телефон: {employee.phone or '—'}\n"
+        f"Роль: {employee.role.value}\n"
+        f"Команда: {employee.team.value if employee.team else '—'}\n"
+        f"Активен: {'✅ Да' if employee.active else '❌ Нет'}\n"
+        f"Telegram ID: {employee.telegram_id or '—'}\n"
+        f"Дата регистрации: {employee.registered_at.strftime('%d.%m.%Y %H:%M') if employee.registered_at else '—'}"
+    )
+    await message.answer(text, parse_mode="HTML")

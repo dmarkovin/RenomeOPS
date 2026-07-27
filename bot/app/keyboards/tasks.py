@@ -2,6 +2,17 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import TaskStatus, UserRole
 from typing import List
 
+def get_priority_emoji(priority) -> str:
+    try:
+        p = int(priority)
+    except (TypeError, ValueError):
+        p = 0
+    if p >= 5: return "🔴"
+    elif p >= 4: return "🟠"
+    elif p >= 3: return "🟡"
+    elif p >= 2: return "🟢"
+    else: return "⚪"
+
 def get_task_status_emoji(status: TaskStatus) -> str:
     emoji_map = {
         TaskStatus.CREATED: "🟡",
@@ -17,7 +28,9 @@ def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str 
     buttons = []
     for task in tasks[:10]:
         status_emoji = get_task_status_emoji(task.status)
-        text = f"{status_emoji} #{task.id} {task.title[:25]}"
+        priority_emoji = get_priority_emoji(task.priority)
+        paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
+        text = f"{status_emoji} {priority_emoji} #{task.id} {paid_marker}{task.title[:25]}"
         if list_type == "team" and task.assigned_to is None:
             buttons.append([
                 InlineKeyboardButton(text=text, callback_data=f"task:{task.id}"),
@@ -35,6 +48,13 @@ def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str 
     if nav_buttons:
         buttons.append(nav_buttons)
 
+    buttons.append([
+        InlineKeyboardButton(text="📅 По дате", callback_data="task_sort:date"),
+        InlineKeyboardButton(text="🔥 По приоритету", callback_data="task_sort:priority"),
+    ])
+    buttons.append([
+        InlineKeyboardButton(text="🔽 Фильтр: все", callback_data="task_filter:all"),
+    ])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="tasks_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

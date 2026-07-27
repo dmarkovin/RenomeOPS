@@ -114,6 +114,17 @@ async def process_location_type(callback: CallbackQuery, state: FSMContext):
         entrance = data.get("entrance")
         floor = data.get("floor")
         apartments = get_apartments(building, entrance, floor)
+        if not apartments:
+            await callback.message.edit_text(
+                f"⚠️ На {floor}-м этаже нет квартир. Выберите другой тип локации."
+            )
+            await state.set_state(TaskCreate.select_location_type)
+            await callback.message.answer(
+                "Выберите тип локации:",
+                reply_markup=location_type_keyboard()
+            )
+            await callback.answer()
+            return
         await state.set_state(TaskCreate.select_apartment)
         await callback.message.edit_text(
             f"🏠 Выберите квартиру на этаже {floor}:",
@@ -124,6 +135,7 @@ async def process_location_type(callback: CallbackQuery, state: FSMContext):
         await state.set_state(TaskCreate.enter_title)
         await callback.message.answer("📝 Введите **название** заявки:")
     await callback.answer()
+
 
 @router.callback_query(StateFilter(TaskCreate.select_apartment), F.data.startswith("obj_apartment:"))
 async def process_apartment(callback: CallbackQuery, state: FSMContext):

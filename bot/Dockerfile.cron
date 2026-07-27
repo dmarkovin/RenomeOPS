@@ -3,21 +3,19 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
-
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
+COPY . .
 
-CMD ["python", "-u", "-m", "app.main"]
+RUN chmod +x check_waiting_tasks.py
+
 # Устанавливаем cron
 RUN apt-get update && apt-get install -y cron && rm -rf /var/lib/apt/lists/*
-
-# Добавляем скрипт проверки
-COPY check_waiting_tasks.py /app/
-RUN chmod +x /app/check_waiting_tasks.py
 
 # Добавляем задание в cron (каждые 5 минут)
 RUN echo "*/5 * * * * cd /app && /usr/local/bin/python /app/check_waiting_tasks.py >> /var/log/cron.log 2>&1" > /etc/cron.d/check_waiting
 
-# Запускаем cron и бота
-CMD cron && python -u -m app.main
+# Создаём файл лога
+RUN touch /var/log/cron.log
+
+CMD cron && tail -f /var/log/cron.log

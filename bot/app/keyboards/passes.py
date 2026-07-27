@@ -27,16 +27,19 @@ def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> Inlin
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def pass_action_keyboard(pass_id: int, status: str) -> InlineKeyboardMarkup:
+def pass_action_keyboard(pass_id: int, status: str, user_role: str) -> InlineKeyboardMarkup:
     buttons = []
+    # Для охраны
     if status == "active":
         buttons.append([InlineKeyboardButton(text="✅ Въезд", callback_data=f"pass_checkin:{pass_id}")])
     elif status == "used":
         buttons.append([InlineKeyboardButton(text="🚗 Выезд", callback_data=f"pass_checkout:{pass_id}")])
-    # Всегда можно закрыть (если не expired)
-    if status != "expired":
+    # Для консьержа/админа/директора – кнопка "Выполнено"
+    if user_role in ("CONCIERGE", "ADMIN", "DIRECTOR"):
+        if status not in ("completed", "expired"):
+            buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"pass_complete:{pass_id}")])
+    if status not in ("expired", "completed"):
         buttons.append([InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"pass_close:{pass_id}")])
-    buttons.append([InlineKeyboardButton(text="📷 Фото", callback_data=f"pass_photo:{pass_id}")])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pass_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

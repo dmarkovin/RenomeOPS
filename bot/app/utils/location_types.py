@@ -5,16 +5,14 @@ def get_location_type_name(loc_type):
         "apartment": "🏠 Квартира",
         "common_area": "🏢 Общая зона",
         "elevator": "🛗 Лифт",
-        "door": "🚪 Дверь",
-        "camera": "📹 Камера",
-        "lighting": "💡 Освещение",
-        "window": "🪟 Окно",
         "other": "📦 Другое",
         "parking_spot": "🚗 Машиноместо",
         "cellar": "📦 Келлер",
         "gate": "🚪 Ворота",
         "barrier": "🚧 Шлагбаум",
+        "lighting": "💡 Освещение",
         "water": "🚰 Водоснабжение",
+        "camera": "📹 Камера",
         "parking": "🚗 Паркинг",
     }
     return mapping.get(loc_type, loc_type)

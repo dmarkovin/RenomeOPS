@@ -3,8 +3,8 @@ from typing import List, Optional
 
 def building_keyboard() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="🏢 Строение 1", callback_data="obj_building:1")],
-        [InlineKeyboardButton(text="🏢 Строение 2", callback_data="obj_building:2")],
+        [InlineKeyboardButton(text="🏢 Корпус 1 (Новослободская 24астр1)", callback_data="obj_building:1")],
+        [InlineKeyboardButton(text="🏢 Корпус 2 (Новослободская 24астр2)", callback_data="obj_building:2")],
         [InlineKeyboardButton(text="🚗 Паркинг", callback_data="obj_parking")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")]
     ]
@@ -59,15 +59,12 @@ def cellar_keyboard(building_id: int, cellars: List[int]) -> InlineKeyboardMarku
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def location_type_keyboard(include_parking: bool = False) -> InlineKeyboardMarkup:
+# Упрощённая клавиатура выбора типа локации (только основные типы)
+def location_type_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="🏠 Квартира", callback_data="loc_type:apartment")],
         [InlineKeyboardButton(text="🏢 Общая зона", callback_data="loc_type:common_area")],
         [InlineKeyboardButton(text="🛗 Лифт", callback_data="loc_type:elevator")],
-        [InlineKeyboardButton(text="🚪 Дверь", callback_data="loc_type:door")],
-        [InlineKeyboardButton(text="📹 Камера", callback_data="loc_type:camera")],
-        [InlineKeyboardButton(text="💡 Освещение", callback_data="loc_type:lighting")],
-        [InlineKeyboardButton(text="🪟 Окно", callback_data="loc_type:window")],
         [InlineKeyboardButton(text="📦 Другое", callback_data="loc_type:other")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")]
     ]

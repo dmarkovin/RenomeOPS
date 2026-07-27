@@ -1,5 +1,5 @@
 from aiogram import Router, F, types
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -47,7 +47,7 @@ async def service_price(message: Message, state: FSMContext):
         if price < 0:
             raise ValueError
     except:
-        await message.answer("Введите корректную цену (положительное число).")
+        await message.answer("❌ Введите корректную цену (положительное число).")
         return
     await state.update_data(price=price)
     await state.set_state(ServiceCreation.category)
@@ -65,11 +65,18 @@ async def service_category(message: Message, state: FSMContext):
         f"Описание: {data['description'] or '—'}\n"
         f"Цена: {data['price']} руб.\n"
         f"Категория: {data['category'] or '—'}\n\n"
-        f"Подтвердить создание? (да/нет)"
+        f"Подтвердить создание?"
     )
-    await message.answer(text)
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✅ Да")],
+            [KeyboardButton(text="❌ Нет")],
+        ],
+        resize_keyboard=True
+    )
+    await message.answer(text, reply_markup=kb)
 
-@router.message(ServiceCreation.confirm, F.text.lower() == "да")
+@router.message(ServiceCreation.confirm, F.text == "✅ Да")
 async def confirm_create_service(message: Message, state: FSMContext):
     data = await state.get_data()
     try:
@@ -81,17 +88,17 @@ async def confirm_create_service(message: Message, state: FSMContext):
         )
         await message.answer(f"✅ Услуга '{service.name}' создана (ID: {service.id})", reply_markup=service_admin_keyboard())
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {str(e)}")
+        await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
     await state.clear()
 
-@router.message(ServiceCreation.confirm, F.text.lower() == "нет")
+@router.message(ServiceCreation.confirm, F.text == "❌ Нет")
 async def cancel_create_service(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("❌ Создание отменено", reply_markup=service_admin_keyboard())
 
 @router.message(ServiceCreation.confirm)
 async def invalid_confirm(message: Message):
-    await message.answer("Ответьте 'да' или 'нет'")
+    await message.answer("Пожалуйста, используйте кнопки.")
 
 @router.message(F.text == "📋 Список услуг")
 async def list_services(message: Message):

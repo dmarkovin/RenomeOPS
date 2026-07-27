@@ -1,3 +1,4 @@
+from app.handlers.services.user import ServiceOrderState
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -16,6 +17,9 @@ router = Router()
 
 @router.callback_query(F.data.startswith("obj_"))
 async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == ServiceOrderState.select_object:
+        return
     data = callback.data.split(":")
     action = data[0]
 

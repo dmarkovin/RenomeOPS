@@ -1,8 +1,9 @@
+from sqlalchemy import select, func
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import select, and_
+from sqlalchemy import select
 from app.database import AsyncSessionLocal
-from app.database.models import Pass, User, UserRole
+from app.database.models import Pass, PassHistory, User, UserRole
 
 
 async def create_pass(
@@ -36,6 +37,15 @@ async def create_pass(
             status="active"
         )
         db.add(p)
+        await db.flush()
+        # Добавляем запись в историю
+        history = PassHistory(
+            pass_id=p.id,
+            action="created",
+            user_id=created_by,
+            comment=f"Пропуск создан для {guest_name or car_number}"
+        )
+        db.add(history)
         await db.commit()
         await db.refresh(p)
         return p
@@ -75,12 +85,20 @@ async def update_pass_status(pass_id: int, status: str) -> Optional[Pass]:
         if status == "used":
             p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
+        # Добавляем запись в историю
+        history = PassHistory(
+            pass_id=pass_id,
+            action=f"status_{status}",
+            user_id=None,  # можно передать из вызывающей функции
+            comment=f"Статус изменён на {status}"
+        )
+        db.add(history)
         await db.commit()
         await db.refresh(p)
         return p
 
 
-async def check_in(pass_id: int) -> Optional[Pass]:
+async def check_in(pass_id: int, user_id: int = None) -> Optional[Pass]:
     async with AsyncSessionLocal() as db:
         p = await db.get(Pass, pass_id)
         if not p or p.status != "active":
@@ -88,19 +106,49 @@ async def check_in(pass_id: int) -> Optional[Pass]:
         p.status = "used"
         p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
+        history = PassHistory(
+            pass_id=pass_id,
+            action="checkin",
+            user_id=user_id,
+            comment="Въезд отмечен"
+        )
+        db.add(history)
         await db.commit()
         await db.refresh(p)
         return p
 
 
-async def check_out(pass_id: int) -> Optional[Pass]:
+async def check_out(pass_id: int, user_id: int = None) -> Optional[Pass]:
     async with AsyncSessionLocal() as db:
         p = await db.get(Pass, pass_id)
         if not p or p.status != "used":
             return None
         p.checked_out_at = datetime.utcnow()
-        # Можно оставить статус used или установить expired
         p.updated_at = datetime.utcnow()
+        history = PassHistory(
+            pass_id=pass_id,
+            action="checkout",
+            user_id=user_id,
+            comment="Выезд отмечен"
+        )
+        db.add(history)
         await db.commit()
         await db.refresh(p)
         return p
+
+
+async def get_pass_history(pass_id: int) -> List[PassHistory]:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(PassHistory)
+            .where(PassHistory.pass_id == pass_id)
+            .order_by(PassHistory.created_at.desc())
+        )
+        return result.scalars().all()
+
+async def count_passes_by_status(status: str) -> int:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(func.count()).select_from(Pass).where(Pass.status == status)
+        )
+        return result.scalar()
