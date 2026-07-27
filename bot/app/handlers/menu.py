@@ -1,6 +1,5 @@
-from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -161,7 +160,7 @@ async def start_feedback(message: Message, state: FSMContext):
         await message.answer("Вы не зарегистрированы.")
         return
     await state.set_state(Feedback.text)
-    await message.answer("Опишите проблему, с которой вы столкнулись:")
+    await message.answer("Опишите проблему, с которой вы столкнулись:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(Feedback.text)
 async def process_feedback_text(message: Message, state: FSMContext):
@@ -194,7 +193,6 @@ async def finish_feedback(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # Создаём задачу с высоким приоритетом
     task = await create_task(
         title=f"Проблема от {employee.full_name}",
         description=text,
@@ -205,7 +203,6 @@ async def finish_feedback(message: Message, state: FSMContext):
         is_feedback=True
     )
 
-    # Назначаем на всех администраторов (назначаем первому активному админу)
     admins = await get_all_employees(role=UserRole.ADMIN, active=True)
     if admins:
         from app.services.tasks.service import assign_task_to_user
@@ -213,7 +210,6 @@ async def finish_feedback(message: Message, state: FSMContext):
         await assign_task_to_user(task.id, admin.id, employee.id)
         await notify_admins(f"📢 Создана задача о проблеме от {employee.full_name}:\n{text}")
     else:
-        # Если админов нет, назначаем на консьержей
         concierges = await get_all_employees(role=UserRole.CONCIERGE, active=True)
         if concierges:
             from app.services.tasks.service import assign_task_to_user
@@ -224,11 +220,9 @@ async def finish_feedback(message: Message, state: FSMContext):
 
     await message.answer(f"✅ Ваше сообщение зарегистрировано как заявка #{task.id}. Администратор получил уведомление.")
     await state.clear()
-    # Возвращаем в главное меню
     await message.answer("Возврат в главное меню", reply_markup=main_menu_keyboard(employee.role))
 
 async def show_main_menu(message: Message):
-    """Обёртка для отображения главного меню (используется в start.py)"""
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")

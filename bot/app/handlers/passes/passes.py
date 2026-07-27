@@ -1,6 +1,5 @@
-from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -11,7 +10,7 @@ from app.services.passes.service import (
     create_pass, get_pass, get_passes, get_pass_history, search_passes,
     check_in, check_out, update_pass_status
 )
-from app.services.tasks.service import get_available_employees
+from app.services.tasks.service import get_available_employees, get_teams_with_members
 from app.database.models import UserRole, Team
 from app.keyboards.passes import (
     pass_list_keyboard, pass_action_keyboard, pass_main_menu_keyboard,
@@ -180,17 +179,16 @@ async def process_end_date_manual(message: Message, state: FSMContext):
 # ---- Обработчики выбора типа назначения ----
 @router.message(StateFilter(PassCreate.assign_type), F.text.in_(["👥 Всей охране", "👤 Конкретному сотруднику", "⏭ Пропустить"]))
 async def process_assign_type(message: Message, state: FSMContext):
-    print(f"DEBUG: process_assign_type called with text: {message.text}")
     text = message.text
     if text == "⏭ Пропустить":
         await state.update_data(assigned_to=None, assigned_team=None)
         await state.set_state(PassCreate.comment)
-        await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+        await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
         return
     if text == "👥 Всей охране":
         await state.update_data(assigned_to=None, assigned_team=Team.TEAM_SECURITY)
         await state.set_state(PassCreate.comment)
-        await message.answer("Пропуск будет назначен всей охране. Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+        await message.answer("Пропуск будет назначен всей охране. Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
         return
     if text == "👤 Конкретному сотруднику":
         employees = await get_available_employees(role=UserRole.SECURITY)
@@ -209,7 +207,6 @@ async def invalid_assign_type(message: Message):
 @router.callback_query(StateFilter(PassCreate.assign_employee), F.data.startswith("pass_assign_emp:"))
 async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    print(f"DEBUG: assign_employee_final called with data: {callback.data}")
     parts = callback.data.split(":")
     if len(parts) != 3:
         await callback.message.answer("Ошибка формата")
@@ -220,12 +217,11 @@ async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await callback.message.answer("✅ Охрана назначена.")
     await state.set_state(PassCreate.comment)
-    await callback.message.answer("Введите комментарий (или '-' для пропуска):")
+    await callback.message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 # ---- Комментарий и подтверждение ----
 @router.message(StateFilter(PassCreate.comment), F.text)
 async def process_comment(message: Message, state: FSMContext):
-    print(f"DEBUG: process_comment called with text: {message.text}")
     text = message.text.strip()
     await state.update_data(comment=text if text != "-" else "")
     await state.set_state(PassCreate.confirm)
@@ -251,14 +247,13 @@ async def process_comment(message: Message, state: FSMContext):
         f"Комментарий: {data.get('comment') or '—'}\n\n"
         f"Подтвердить создание?"
     )
-    await message.answer(text, reply_markup=types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text="✅ Да, создать")], [types.KeyboardButton(text="❌ Отмена")]],
+    await message.answer(text, reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     ))
 
 @router.message(StateFilter(PassCreate.confirm), F.text == "✅ Да, создать")
 async def confirm_create_pass(message: Message, state: FSMContext):
-    print("DEBUG: confirm_create_pass called")
     data = await state.get_data()
     employee = await get_employee(message.from_user.id)
     if not employee:
@@ -349,13 +344,13 @@ async def list_history(message: Message, page: int = 1):
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
     await state.set_state(PassSearch.query)
-    await message.answer("Введите текст для поиска (имя гостя, номер авто, ID):", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Введите текст для поиска (имя гостя, номер авто, ID):")
 
 @router.message(StateFilter(PassSearch.query))
 async def process_search_pass(message: Message, state: FSMContext):
     query = message.text.strip()
     if len(query) < 2:
-        await message.answer("Введите минимум 2 символа.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Введите минимум 2 символа.")
         return
     passes = await search_passes(query, limit=20)
     if not passes:
@@ -490,9 +485,9 @@ async def back_from_pass_menu(message: Message):
 
 @router.callback_query(F.data == "cancel_action")
 async def cancel_action(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
     await state.clear()
     await callback.message.delete()
+    await callback.answer("Действие отменено")
     employee = await get_employee(callback.from_user.id)
     if employee:
         await callback.message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())

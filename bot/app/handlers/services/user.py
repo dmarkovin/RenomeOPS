@@ -1,6 +1,5 @@
-from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -73,7 +72,6 @@ async def select_service(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ---- Обработчики выбора локации (квартира) ----
 @router.callback_query(StateFilter(ServiceOrderState.select_object), F.data.startswith("obj_building:"))
 async def process_building(callback: CallbackQuery, state: FSMContext):
     building_id = int(callback.data.split(":")[1])
@@ -144,7 +142,6 @@ async def handle_apartment_selection(callback: CallbackQuery, state: FSMContext)
     )
     await callback.answer()
 
-# ---- Обработчики паркинга ----
 @router.callback_query(StateFilter(ServiceOrderState.select_object), F.data == "obj_parking")
 async def handle_parking_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(object_type="parking")
@@ -193,7 +190,6 @@ async def handle_parking_spot(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ---- Обработчики келлеров ----
 @router.callback_query(StateFilter(ServiceOrderState.select_object), F.data.startswith("obj_cellar:"))
 async def handle_cellar_selection(callback: CallbackQuery, state: FSMContext):
     _, building_str, cellar_str = callback.data.split(":")
@@ -218,13 +214,12 @@ async def handle_cellar_selection(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ---- Заявитель ----
 @router.message(ServiceOrderState.select_applicant_type, F.text.in_(["👤 Жилец", "👤 Сотрудник"]))
 async def process_applicant_type(message: Message, state: FSMContext):
     app_type = "resident" if message.text == "👤 Жилец" else "employee"
     await state.update_data(applicant_type=app_type)
     await state.set_state(ServiceOrderState.enter_applicant_name)
-    await message.answer("Введите ФИО заявителя:", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+    await message.answer("Введите ФИО заявителя:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(ServiceOrderState.enter_applicant_name)
 async def process_applicant_name(message: Message, state: FSMContext):
@@ -236,7 +231,6 @@ async def process_applicant_name(message: Message, state: FSMContext):
 async def process_applicant_phone(message: Message, state: FSMContext):
     phone = message.text.strip()
     await state.update_data(applicant_phone=phone if phone != "-" else "")
-    # Выбор исполнителя: команда или сотрудник
     await state.set_state(ServiceOrderState.select_executor_type)
     kb = ReplyKeyboardMarkup(
         keyboard=[
@@ -254,7 +248,7 @@ async def process_executor_type(message: Message, state: FSMContext):
     if text == "⏭ Пропустить":
         await state.update_data(assigned_to=None, assigned_team=None)
         await state.set_state(ServiceOrderState.comment)
-        await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+        await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
         return
     if text == "👥 Команда":
         teams = await get_teams_with_members()
@@ -273,7 +267,6 @@ async def process_executor_type(message: Message, state: FSMContext):
         await message.answer("Выберите сотрудника:", reply_markup=service_employee_selection_keyboard(employees))
         return
 
-# ---- Обработчики выбора команды ----
 @router.callback_query(StateFilter(ServiceOrderState.select_team), F.data.startswith("service_team:"))
 async def process_service_team(callback: CallbackQuery, state: FSMContext):
     team_str = callback.data.split(":")[1]
@@ -281,20 +274,18 @@ async def process_service_team(callback: CallbackQuery, state: FSMContext):
     await state.update_data(assigned_team=team, assigned_to=None)
     await callback.message.edit_text(f"✅ Выбрана команда {team.value}")
     await state.set_state(ServiceOrderState.comment)
-    await callback.message.answer("Введите комментарий (или '-' для пропуска):")
+    await callback.message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
-# ---- Обработчики выбора сотрудника ----
 @router.callback_query(StateFilter(ServiceOrderState.select_employee), F.data.startswith("service_emp:"))
 async def process_service_employee(callback: CallbackQuery, state: FSMContext):
     emp_id = int(callback.data.split(":")[1])
     await state.update_data(assigned_to=emp_id, assigned_team=None)
     await callback.message.edit_text("✅ Выбран сотрудник")
     await state.set_state(ServiceOrderState.comment)
-    await callback.message.answer("Введите комментарий (или '-' для пропуска):")
+    await callback.message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
-# ---- Отмена при выборе исполнителя ----
 @router.callback_query(F.data == "service_cancel")
 async def service_cancel(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ServiceOrderState.select_executor_type)
@@ -310,14 +301,13 @@ async def service_cancel(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Выберите способ назначения исполнителя:", reply_markup=kb)
     await callback.answer()
 
-# ---- Комментарий, фото, подтверждение ----
 @router.message(ServiceOrderState.comment)
 async def process_comment(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(comment=text if text != "-" else "")
     await state.set_state(ServiceOrderState.photo)
-    await message.answer("🖼 Пришлите фото (опционально) или нажмите **Готово**:", reply_markup=types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text="✅ Готово")]],
+    await message.answer("🖼 Пришлите фото (опционально) или нажмите **Готово**:", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Готово")]],
         resize_keyboard=True
     ))
 
@@ -353,8 +343,8 @@ async def finish_photo(message: Message, state: FSMContext):
         f"Подтвердить создание?"
     )
     await state.set_state(ServiceOrderState.confirm)
-    await message.answer(text, reply_markup=types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text="✅ Да, создать")], [types.KeyboardButton(text="❌ Отмена")]],
+    await message.answer(text, reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     ))
 
@@ -414,15 +404,3 @@ async def show_user_orders(message: Message):
         service_name = service.name if service else "Неизвестно"
         text += f"ID: {o.id} | Услуга: {service_name} | Статус: {o.status} | {o.created_at.strftime('%d.%m.%Y %H:%M')}\n"
     await message.answer(text)
-
-@router.callback_query(F.data == "service_back")
-async def service_back(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Ошибка", show_alert=True)
-        return
-    from app.keyboards.main_menu import main_menu_keyboard
-    await callback.message.delete()
-    await callback.message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
-    await callback.answer()

@@ -1,6 +1,5 @@
-from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -44,7 +43,6 @@ async def patrol_menu(message: Message, page: int = 1):
         text += f"{status_emoji} #{p.id} {p.route} ({p.status})\n"
     await message.answer(text, reply_markup=patrol_list_keyboard(patrols, page, total_pages))
 
-
 @router.message(F.text == "➕ Новый обход")
 async def start_create_patrol(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -55,24 +53,21 @@ async def start_create_patrol(message: Message, state: FSMContext):
     await state.set_state(PatrolCreate.route)
     await message.answer("Введите маршрут обхода:", reply_markup=ReplyKeyboardRemove())
 
-
 @router.message(PatrolCreate.route)
 async def process_route(message: Message, state: FSMContext):
     await state.update_data(route=message.text.strip())
     await state.set_state(PatrolCreate.notes)
     await message.answer("Введите заметки по обходу (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-
 @router.message(PatrolCreate.notes)
 async def process_notes(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(notes=text if text != "-" else "")
     await state.set_state(PatrolCreate.photo)
-    await message.answer("🖼 Пришлите фото (опционально) или нажмите **Готово**:", reply_markup=types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text="✅ Готово")]],
+    await message.answer("🖼 Пришлите фото (опционально) или нажмите **Готово**:", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Готово")]],
         resize_keyboard=True
     ))
-
 
 @router.message(PatrolCreate.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext):
@@ -81,7 +76,6 @@ async def process_photo(message: Message, state: FSMContext):
     photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
     await message.answer(f"✅ Добавлено фото ({len(photos)})")
-
 
 @router.message(PatrolCreate.photo, F.text == "✅ Готово")
 async def finish_photo(message: Message, state: FSMContext):
@@ -94,11 +88,10 @@ async def finish_photo(message: Message, state: FSMContext):
         f"Фото: {len(data.get('photos', []))} шт.\n\n"
         f"Подтвердить создание?"
     )
-    await message.answer(text, reply_markup=types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text="✅ Да, создать")], [types.KeyboardButton(text="❌ Отмена")]],
+    await message.answer(text, reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     ))
-
 
 @router.message(PatrolCreate.confirm, F.text == "✅ Да, создать")
 async def confirm_create(message: Message, state: FSMContext):
@@ -109,7 +102,6 @@ async def confirm_create(message: Message, state: FSMContext):
         await state.clear()
         return
     try:
-        # Создаём задачу для консьержей
         task = await create_task(
             title=f"Обход: {data['route']}",
             description=data.get('notes', ''),
@@ -118,10 +110,9 @@ async def confirm_create(message: Message, state: FSMContext):
             priority=3,
             photo_ids=data.get('photos', []),
             is_paid=False,
-            assigned_team=Team.TEAM_CONCIERGE  # назначаем на команду консьержей
+            assigned_team=Team.TEAM_CONCIERGE
         )
 
-        # Создаём запись об обходе
         patrol = await create_patrol(
             route=data['route'],
             notes=data.get('notes'),
@@ -130,7 +121,6 @@ async def confirm_create(message: Message, state: FSMContext):
             task_id=task.id
         )
 
-        # Уведомляем консьержей
         await notify_concierges(
             f"🚶 Новый обход #{patrol.id} от {employee.full_name} создан. "
             f"Задача #{task.id} назначена на вашу команду."
@@ -146,12 +136,10 @@ async def confirm_create(message: Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
 
-
 @router.message(PatrolCreate.confirm, F.text == "❌ Отмена")
 async def cancel_create(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=patrol_main_menu_keyboard())
-
 
 @router.callback_query(F.data.startswith("patrol:"))
 async def show_patrol_card(callback: CallbackQuery):
@@ -172,7 +160,6 @@ async def show_patrol_card(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=patrol_action_keyboard(p.id, p.status))
     await callback.answer()
 
-
 @router.callback_query(F.data.startswith("patrol_complete:"))
 async def patrol_complete(callback: CallbackQuery):
     patrol_id = int(callback.data.split(":")[1])
@@ -183,13 +170,11 @@ async def patrol_complete(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-
 @router.callback_query(F.data.startswith("patrol_page:"))
 async def paginate_patrols(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
     await patrol_menu(callback.message, page)
     await callback.answer()
-
 
 @router.callback_query(F.data == "patrol_back")
 async def back_to_patrol_menu(callback: CallbackQuery):

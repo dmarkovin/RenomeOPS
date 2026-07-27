@@ -1,6 +1,5 @@
-from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -133,7 +132,7 @@ async def delivery_cancel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=reception_menu_keyboard())
 
-# ---- Документ (упрощённо: название, отправитель, получатель, комментарий, фото) ----
+# ---- Документ (упрощённо) ----
 @router.message(F.text == "📄 Документ")
 async def start_document(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -162,7 +161,7 @@ async def document_type(message: Message, state: FSMContext):
     doc_type = "incoming" if message.text == "📥 Входящий" else "outgoing"
     await state.update_data(type=doc_type)
     await state.set_state(DocumentCreate.sender)
-    await message.answer("Введите отправителя (или '-' для пропуска):", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+    await message.answer("Введите отправителя (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(DocumentCreate.sender)
 async def document_sender(message: Message, state: FSMContext):
