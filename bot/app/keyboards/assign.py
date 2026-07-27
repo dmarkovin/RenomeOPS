@@ -2,7 +2,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from app.database.models import User, Team
 from typing import List
 
-
 def assign_type_keyboard(task_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -11,7 +10,6 @@ def assign_type_keyboard(task_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ В меню", callback_data=f"assign_skip:{task_id}")]
         ]
     )
-
 
 def team_selection_keyboard(teams: List[dict], task_id: int) -> InlineKeyboardMarkup:
     buttons = []
@@ -24,7 +22,6 @@ def team_selection_keyboard(teams: List[dict], task_id: int) -> InlineKeyboardMa
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"assign_skip:{task_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-
 def employee_selection_keyboard(employees: List[User], action: str, task_id: int) -> InlineKeyboardMarkup:
     buttons = []
     for emp in employees:
@@ -35,8 +32,7 @@ def employee_selection_keyboard(employees: List[User], action: str, task_id: int
                 callback_data=f"{action}_emp:{emp.id}:{task_id}"
             )
         ])
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"assign_back_to_type:{task_id}")])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"assign_skip:{task_id}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_action")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def service_team_selection_keyboard(teams: List[dict]) -> InlineKeyboardMarkup:

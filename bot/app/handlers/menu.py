@@ -137,8 +137,8 @@ async def back_from_notifications(callback: CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.answer()
         return
-        await callback.message.delete()
-        await callback.message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
+    await callback.message.delete()
+    await callback.message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
     await callback.answer()
 
 @router.message(F.text == "⬅️ Назад")

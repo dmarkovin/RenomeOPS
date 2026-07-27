@@ -53,3 +53,14 @@ def pass_main_menu_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True
     )
+
+def pass_assign_type_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура выбора типа назначения для пропуска"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="👥 Всей охране")],
+            [KeyboardButton(text="👤 Конкретному сотруднику")],
+            [KeyboardButton(text="⏭ Пропустить")],
+        ],
+        resize_keyboard=True
+    )

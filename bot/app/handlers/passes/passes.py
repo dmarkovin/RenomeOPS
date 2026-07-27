@@ -1,5 +1,5 @@
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -11,14 +11,15 @@ from app.services.passes.service import (
     check_in, check_out, update_pass_status
 )
 from app.services.tasks.service import get_available_employees
-from app.database.models import UserRole
+from app.database.models import UserRole, Team
 from app.keyboards.passes import (
-    pass_list_keyboard, pass_action_keyboard, pass_main_menu_keyboard
+    pass_list_keyboard, pass_action_keyboard, pass_main_menu_keyboard,
+    pass_assign_type_keyboard
 )
 from app.keyboards.assign import employee_selection_keyboard
 from app.keyboards.date_picker import date_selection_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
-from app.services.notification_service import notify_user, notify_concierges, notify_security
+from app.services.notification_service import notify_user, notify_concierges, notify_security, notify_team
 
 router = Router()
 
@@ -29,6 +30,7 @@ class PassCreate(StatesGroup):
     purpose = State()
     start_date = State()
     end_date = State()
+    assign_type = State()
     assign_employee = State()
     comment = State()
     confirm = State()
@@ -146,15 +148,12 @@ async def process_end_date(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Дата окончания не может быть раньше даты начала.", show_alert=True)
         return
     await state.update_data(end_date=end_date)
-    employees = await get_available_employees(role=UserRole.SECURITY)
-    if employees:
-        await state.set_state(PassCreate.assign_employee)
-        await callback.message.edit_text("Выберите сотрудника охраны:", reply_markup=employee_selection_keyboard(employees, "pass_assign", 0))
-    else:
-        await state.update_data(assigned_to=None)
-        await state.set_state(PassCreate.comment)
-        await callback.message.edit_text("Нет доступных сотрудников охраны. Пропуск будет создан без назначения.")
-        await callback.message.answer("Введите комментарий (или '-' для пропуска):")
+    await state.set_state(PassCreate.assign_type)
+    await callback.message.delete()
+    await callback.message.answer(
+        "Выберите, кому назначить пропуск:",
+        reply_markup=pass_assign_type_keyboard()
+    )
     await callback.answer()
 
 @router.callback_query(StateFilter(PassCreate.select_end_date), F.data == "date_end_manual")
@@ -177,32 +176,87 @@ async def process_end_date_manual(message: Message, state: FSMContext):
         await message.answer("Дата окончания не может быть раньше даты начала.")
         return
     await state.update_data(end_date=end_date)
-    employees = await get_available_employees(role=UserRole.SECURITY)
-    if employees:
+    await state.set_state(PassCreate.assign_type)
+    await message.answer(
+        "Выберите, кому назначить пропуск:",
+        reply_markup=pass_assign_type_keyboard()
+    )
+
+# ---- Обработчики выбора типа назначения ----
+@router.message(PassCreate.assign_type, F.text.in_(["👥 Всей охране", "👤 Конкретному сотруднику", "⏭ Пропустить"]))
+async def process_assign_type(message: Message, state: FSMContext):
+    text = message.text
+    if text == "⏭ Пропустить":
+        await state.update_data(assigned_to=None, assigned_team=None)
+        await state.set_state(PassCreate.comment)
+        await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+        return
+    if text == "👥 Всей охране":
+        await state.update_data(assigned_to=None, assigned_team=Team.TEAM_SECURITY)
+        await state.set_state(PassCreate.comment)
+        await message.answer("Пропуск будет назначен всей охране. Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+        return
+    if text == "👤 Конкретному сотруднику":
+        employees = await get_available_employees(role=UserRole.SECURITY)
+        if not employees:
+            await message.answer("Нет доступных сотрудников охраны. Выберите другой вариант.")
+            return
         await state.set_state(PassCreate.assign_employee)
         await message.answer("Выберите сотрудника охраны:", reply_markup=employee_selection_keyboard(employees, "pass_assign", 0))
-    else:
-        await state.update_data(assigned_to=None)
-        await state.set_state(PassCreate.comment)
-        await message.answer("Нет доступных сотрудников охраны. Пропуск будет создан без назначения.")
-        await message.answer("Введите комментарий (или '-' для пропуска):")
+        return
 
-@router.callback_query(F.data.startswith("pass_assign:"))
+@router.message(PassCreate.assign_type)
+async def invalid_assign_type(message: Message):
+    await message.answer("Пожалуйста, используйте кнопки для выбора.")
+
+# ---- Обработчик выбора конкретного сотрудника ----
+@router.callback_query(StateFilter(PassCreate.assign_employee), F.data.startswith("pass_assign:"))
 async def process_assign_employee(callback: CallbackQuery, state: FSMContext):
-    _, emp_id_str, _ = callback.data.split(":")
+    print(f"DEBUG: process_assign_employee called with data: {callback.data}")
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("Ошибка формата", show_alert=True)
+        return
+    _, emp_id_str, _ = parts
     emp_id = int(emp_id_str)
-    await state.update_data(assigned_to=emp_id)
-    await callback.message.edit_text("✅ Охрана назначена.")
+    await state.update_data(assigned_to=emp_id, assigned_team=None)
+    await callback.message.delete()
+    await callback.message.answer("✅ Охрана назначена.")
+    await state.set_state(PassCreate.comment)
+    await callback.message.answer("Введите комментарий (или - для пропуска):")
+    await callback.answer()
+
+async def process_assign_employee(callback: CallbackQuery, state: FSMContext):
+    print(f"DEBUG: process_assign_employee called with data: {callback.data}")
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("Ошибка формата", show_alert=True)
+        return
+    _, emp_id_str, _ = parts
+    emp_id = int(emp_id_str)
+    await state.update_data(assigned_to=emp_id, assigned_team=None)
+    await callback.message.delete()
+    await callback.message.answer("✅ Охрана назначена.")
     await state.set_state(PassCreate.comment)
     await callback.message.answer("Введите комментарий (или '-' для пропуска):")
     await callback.answer()
 
+# ---- Комментарий и подтверждение ----
 @router.message(PassCreate.comment)
 async def process_comment(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(comment=text if text != "-" else "")
     await state.set_state(PassCreate.confirm)
     data = await state.get_data()
+    assigned_to = data.get('assigned_to')
+    assigned_team = data.get('assigned_team')
+    if assigned_to:
+        assignee = await get_employee_by_id(assigned_to)
+        executor_text = assignee.full_name if assignee else "назначен"
+    elif assigned_team:
+        executor_text = f"команда {assigned_team.value}"
+    else:
+        executor_text = "не назначен"
     text = (
         f"📝 Проверьте данные пропуска:\n\n"
         f"Тип: {data.get('type')}\n"
@@ -211,7 +265,7 @@ async def process_comment(message: Message, state: FSMContext):
         f"Цель: {data.get('purpose') or '—'}\n"
         f"Начало: {data.get('start_date').strftime('%d.%m.%Y') if data.get('start_date') else '—'}\n"
         f"Окончание: {data.get('end_date').strftime('%d.%m.%Y') if data.get('end_date') else '—'}\n"
-        f"Охрана: {data.get('assigned_to') or 'не назначена'}\n"
+        f"Исполнитель: {executor_text}\n"
         f"Комментарий: {data.get('comment') or '—'}\n\n"
         f"Подтвердить создание?"
     )
@@ -239,13 +293,16 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             comment=data.get("comment"),
             photo_ids=[],
             created_by=employee.id,
-            assigned_to=data.get("assigned_to")
+            assigned_to=data.get("assigned_to"),
+            assigned_team=data.get("assigned_team")
         )
         await state.clear()
         if p.assigned_to:
             guard = await get_employee_by_id(p.assigned_to)
             if guard and guard.telegram_id:
                 await notify_user(guard.telegram_id, f"🪪 Вам назначен пропуск #{p.id}.")
+        elif p.assigned_team:
+            await notify_team(p.assigned_team, f"🪪 Новый пропуск #{p.id} назначен на вашу команду.")
         await notify_concierges(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await notify_security(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await message.answer(f"✅ Пропуск #{p.id} создан!", reply_markup=pass_main_menu_keyboard())
@@ -257,6 +314,11 @@ async def confirm_create_pass(message: Message, state: FSMContext):
 async def cancel_create_pass(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=pass_main_menu_keyboard())
+
+@router.message(F.text == "❌ Отмена")
+async def cancel_pass_creation(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Создание пропуска отменено", reply_markup=pass_main_menu_keyboard())
 
 # ========== Активные пропуски ==========
 @router.message(F.text == "📋 Активные пропуски")
@@ -455,4 +517,4 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Действие отменено")
     employee = await get_employee(callback.from_user.id)
     if employee:
-        await callback.message.answer("Главное меню", reply_markup=main_menu_keyboard(employee.role))
+        await callback.message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())

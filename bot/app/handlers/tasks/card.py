@@ -83,7 +83,9 @@ async def take_task_callback(callback: CallbackQuery):
     await notify_admins(f"📢 Сотрудник {employee.full_name} взял задачу #{task_id} в работу.")
 
 @router.callback_query(F.data.startswith("task_status:"))
+@router.callback_query(F.data.startswith("task_status:"))
 async def change_task_status(callback: CallbackQuery):
+    await callback.answer()  # Сразу отвечаем, чтобы избежать таймаута
     parts = callback.data.split(":")
     task_id = int(parts[1])
     status_str = parts[2]
@@ -120,21 +122,17 @@ async def change_task_status(callback: CallbackQuery):
     else:
         await callback.answer("У вас нет прав", show_alert=True)
         return
-
-    # Если статус меняется на CLOSED или IN_PROGRESS, комментарий не обязателен
     task = await change_status(task_id, new_status, employee.id)
     if not task:
         await callback.answer("Ошибка изменения статуса", show_alert=True)
         return
     await callback.answer(f"✅ Статус изменён на {new_status.value}")
-
     if new_status == TaskStatus.CHECKING:
         await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}")
     elif new_status == TaskStatus.CLOSED:
         await notify_concierges(f"✅ Задача #{task_id} закрыта. Проверил: {employee.full_name}")
     await show_task_card(callback)
 
-@router.callback_query(F.data.startswith("task_comment:"))
 async def start_comment(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
     await state.set_state(TaskCommentState.waiting_for_comment)
@@ -167,4 +165,37 @@ async def task_invoice(callback: CallbackQuery):
         await callback.answer("Только для консьержей.", show_alert=True)
         return
     await callback.message.answer("🧾 Раздел выставления счетов находится в разработке.")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_photo_view:"))
+async def view_task_photo(callback: CallbackQuery, state: FSMContext):
+    """Показать конкретное фото по индексу"""
+    parts = callback.data.split(":")
+    task_id = int(parts[1])
+    index = int(parts[2])
+    task = await get_task(task_id)
+    if not task or not task.photos:
+        await callback.answer("Нет фото", show_alert=True)
+        return
+    if index >= len(task.photos):
+        await callback.answer("Фото не найдено", show_alert=True)
+        return
+    photo = task.photos[index]
+    # Клавиатура для навигации
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task_photo_back:{task_id}")]
+    ])
+    await callback.message.delete()
+    await callback.message.answer_photo(
+        photo.telegram_file_id,
+        caption=f"📷 Фото {index+1}/{len(task.photos)}",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_photo_back:"))
+async def back_to_task_photos(callback: CallbackQuery):
+    """Вернуться к выбору фото"""
+    task_id = int(callback.data.split(":")[1])
+    await show_task_card(callback)  # переиспользуем существующий показ карточки
     await callback.answer()
