@@ -28,11 +28,11 @@ class PassCreate(StatesGroup):
     guest_name = State()
     car_number = State()
     purpose = State()
+    apartment = State()
     start_date = State()
     end_date = State()
     assign_type = State()
     assign_employee = State()
-    comment = State()
     confirm = State()
     select_start_date = State()
     select_end_date = State()
@@ -100,6 +100,14 @@ async def process_car_number(message: Message, state: FSMContext):
 async def process_purpose(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(purpose=text if text != "-" else "")
+    await state.set_state(PassCreate.apartment)
+    await message.answer("Введите номер квартиры (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
+
+@router.message(PassCreate.apartment)
+async def process_apartment(message: Message, state: FSMContext):
+    text = message.text.strip()
+    apartment = int(text) if text.isdigit() else None
+    await state.update_data(apartment=apartment)
     await state.set_state(PassCreate.select_start_date)
     await message.answer("Выберите дату начала действия пропуска:", reply_markup=date_selection_keyboard("start"))
 
@@ -182,13 +190,63 @@ async def process_assign_type(message: Message, state: FSMContext):
     text = message.text
     if text == "⏭ Пропустить":
         await state.update_data(assigned_to=None, assigned_team=None)
-        await state.set_state(PassCreate.comment)
-        await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(PassCreate.confirm)
+        data = await state.get_data()
+        assigned_to = data.get('assigned_to')
+        assigned_team = data.get('assigned_team')
+        if assigned_to:
+            assignee = await get_employee_by_id(assigned_to)
+            executor_text = assignee.full_name if assignee else "назначен"
+        elif assigned_team:
+            executor_text = f"команда {assigned_team.value}"
+        else:
+            executor_text = "не назначен"
+        text = (
+            f"📝 Проверьте данные пропуска:\n\n"
+            f"Тип: {data.get('type')}\n"
+            f"Гость: {data.get('guest_name') or '—'}\n"
+            f"Авто: {data.get('car_number') or '—'}\n"
+            f"Квартира: {data.get('apartment') or '—'}\n"
+            f"Цель: {data.get('purpose') or '—'}\n"
+            f"Начало: {data.get('start_date').strftime('%d.%m.%Y') if data.get('start_date') else '—'}\n"
+            f"Окончание: {data.get('end_date').strftime('%d.%m.%Y') if data.get('end_date') else '—'}\n"
+            f"Исполнитель: {executor_text}\n\n"
+            f"Подтвердить создание?"
+        )
+        await message.answer(text, reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
+            resize_keyboard=True
+        ))
         return
     if text == "👥 Всей охране":
         await state.update_data(assigned_to=None, assigned_team=Team.TEAM_SECURITY)
-        await state.set_state(PassCreate.comment)
-        await message.answer("Пропуск будет назначен всей охране. Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(PassCreate.confirm)
+        data = await state.get_data()
+        assigned_to = data.get('assigned_to')
+        assigned_team = data.get('assigned_team')
+        if assigned_to:
+            assignee = await get_employee_by_id(assigned_to)
+            executor_text = assignee.full_name if assignee else "назначен"
+        elif assigned_team:
+            executor_text = f"команда {assigned_team.value}"
+        else:
+            executor_text = "не назначен"
+        text = (
+            f"📝 Проверьте данные пропуска:\n\n"
+            f"Тип: {data.get('type')}\n"
+            f"Гость: {data.get('guest_name') or '—'}\n"
+            f"Авто: {data.get('car_number') or '—'}\n"
+            f"Квартира: {data.get('apartment') or '—'}\n"
+            f"Цель: {data.get('purpose') or '—'}\n"
+            f"Начало: {data.get('start_date').strftime('%d.%m.%Y') if data.get('start_date') else '—'}\n"
+            f"Окончание: {data.get('end_date').strftime('%d.%m.%Y') if data.get('end_date') else '—'}\n"
+            f"Исполнитель: {executor_text}\n\n"
+            f"Подтвердить создание?"
+        )
+        await message.answer(text, reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
+            resize_keyboard=True
+        ))
         return
     if text == "👤 Конкретному сотруднику":
         employees = await get_available_employees(role=UserRole.SECURITY)
@@ -216,14 +274,6 @@ async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
     await state.update_data(assigned_to=emp_id, assigned_team=None)
     await callback.message.delete()
     await callback.message.answer("✅ Охрана назначена.")
-    await state.set_state(PassCreate.comment)
-    await callback.message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
-
-# ---- Комментарий и подтверждение ----
-@router.message(StateFilter(PassCreate.comment), F.text)
-async def process_comment(message: Message, state: FSMContext):
-    text = message.text.strip()
-    await state.update_data(comment=text if text != "-" else "")
     await state.set_state(PassCreate.confirm)
     data = await state.get_data()
     assigned_to = data.get('assigned_to')
@@ -240,18 +290,19 @@ async def process_comment(message: Message, state: FSMContext):
         f"Тип: {data.get('type')}\n"
         f"Гость: {data.get('guest_name') or '—'}\n"
         f"Авто: {data.get('car_number') or '—'}\n"
+        f"Квартира: {data.get('apartment') or '—'}\n"
         f"Цель: {data.get('purpose') or '—'}\n"
         f"Начало: {data.get('start_date').strftime('%d.%m.%Y') if data.get('start_date') else '—'}\n"
         f"Окончание: {data.get('end_date').strftime('%d.%m.%Y') if data.get('end_date') else '—'}\n"
-        f"Исполнитель: {executor_text}\n"
-        f"Комментарий: {data.get('comment') or '—'}\n\n"
+        f"Иисполнитель: {executor_text}\n\n"
         f"Подтвердить создание?"
     )
-    await message.answer(text, reply_markup=ReplyKeyboardMarkup(
+    await callback.message.answer(text, reply_markup=ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     ))
 
+# ---- Подтверждение ----
 @router.message(StateFilter(PassCreate.confirm), F.text == "✅ Да, создать")
 async def confirm_create_pass(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -265,10 +316,11 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             type=data.get("type"),
             guest_name=data.get("guest_name"),
             car_number=data.get("car_number"),
+            apartment=data.get("apartment"),
             purpose=data.get("purpose"),
             start_date=data.get("start_date"),
             end_date=data.get("end_date"),
-            comment=data.get("comment"),
+            comment="",
             photo_ids=[],
             created_by=employee.id,
             assigned_to=data.get("assigned_to"),
@@ -380,6 +432,7 @@ async def show_pass_card(callback: CallbackQuery):
         f"Тип: {p.type}\n"
         f"Гость: {p.guest_name or '—'}\n"
         f"Авто: {p.car_number or '—'}\n"
+        f"Квартира: {p.apartment or '—'}\n"
         f"Цель: {p.purpose or '—'}\n"
         f"Начало: {p.start_date.strftime('%d.%m.%Y %H:%M')}\n"
         f"Окончание: {p.end_date.strftime('%d.%m.%Y %H:%M')}\n"

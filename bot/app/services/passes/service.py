@@ -9,15 +9,15 @@ async def create_pass(
     type: str,
     guest_name: str = None,
     car_number: str = None,
-    purpose: str = None,
     apartment: int = None,
+    purpose: str = None,
     start_date: datetime = None,
     end_date: datetime = None,
     comment: str = "",
     photo_ids: List[str] = None,
     created_by: int = None,
     assigned_to: int = None,
-    assigned_team: Team = None
+    assigned_team: str = None
 ) -> Pass:
     if start_date is None:
         start_date = datetime.utcnow()
@@ -28,8 +28,8 @@ async def create_pass(
             type=type,
             guest_name=guest_name,
             car_number=car_number,
-            purpose=purpose,
             apartment=apartment,
+            purpose=purpose,
             start_date=start_date,
             end_date=end_date,
             comment=comment,
@@ -52,8 +52,9 @@ async def get_pass(pass_id: int) -> Optional[Pass]:
 
 async def get_passes(
     assigned_to: Optional[int] = None,
+    assigned_team: Optional[str] = None,
     status: Optional[str] = None,
-    status__in: List[str] = None,
+    status__in: Optional[List[str]] = None,
     limit: int = 20,
     offset: int = 0
 ) -> List[Pass]:
@@ -61,6 +62,8 @@ async def get_passes(
         query = select(Pass).order_by(Pass.created_at.desc())
         if assigned_to:
             query = query.where(Pass.assigned_to == assigned_to)
+        if assigned_team:
+            query = query.where(Pass.assigned_team == assigned_team)
         if status:
             query = query.where(Pass.status == status)
         if status__in:
@@ -76,8 +79,6 @@ async def update_pass_status(pass_id: int, status: str) -> Optional[Pass]:
         if not p:
             return None
         p.status = status
-        if status == "used":
-            p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(p)
@@ -109,11 +110,6 @@ async def check_out(pass_id: int) -> Optional[Pass]:
         return p
 
 
-async def get_pass_history(pass_id: int) -> List[dict]:
-    # упрощённая история
-    return []
-
-
 async def search_passes(query: str, limit: int = 20) -> List[Pass]:
     async with AsyncSessionLocal() as db:
         if query.isdigit():
@@ -128,3 +124,8 @@ async def search_passes(query: str, limit: int = 20) -> List[Pass]:
         ).order_by(Pass.created_at.desc()).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all()
+
+
+async def get_pass_history(pass_id: int) -> List:
+    # Заглушка, т.к. модели PassHistory пока нет
+    return []

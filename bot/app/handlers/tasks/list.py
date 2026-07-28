@@ -1,4 +1,3 @@
-from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -41,7 +40,6 @@ async def safe_delete_message(message):
         pass
 
 def get_navigation_keyboard() -> ReplyKeyboardMarkup:
-    """Нижняя клавиатура для навигации в списках заявок"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="⬅️ Назад")],
@@ -176,7 +174,6 @@ async def show_list(
         if hasattr(target, 'message'):
             await safe_delete_message(target.message)
             await target.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
-            # Отправляем отдельное сообщение с навигационной клавиатурой
             await target.message.answer("Выберите действие:", reply_markup=get_navigation_keyboard())
         else:
             await target.answer(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -297,52 +294,6 @@ async def paginate_tasks(callback: CallbackQuery, state: FSMContext):
     await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
     await callback.answer()
 
-@router.callback_query(F.data.startswith("task_sort:"))
-async def change_sort(callback: CallbackQuery, state: FSMContext):
-    sort_by = callback.data.split(":")[1]
-    data = await state.get_data()
-    list_type = data.get("list_type", "open")
-    page = data.get("page", 1)
-    filter_priority = data.get("filter_priority")
-    await state.update_data(sort_by=sort_by)
-    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("task_filter:"))
-async def change_filter(callback: CallbackQuery, state: FSMContext):
-    filter_val = callback.data.split(":")[1]
-    if filter_val == "all":
-        filter_priority = None
-    else:
-        filter_priority = int(filter_val)
-    data = await state.get_data()
-    list_type = data.get("list_type", "open")
-    page = data.get("page", 1)
-    sort_by = data.get("sort_by", "date")
-    await state.update_data(filter_priority=filter_priority)
-    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("task_take_from_list:"))
-async def take_from_list(callback: CallbackQuery, state: FSMContext):
-    task_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Ошибка", show_alert=True)
-        return
-    task = await take_task(task_id, employee.id)
-    if not task:
-        await callback.answer("Не удалось взять задачу", show_alert=True)
-        return
-    await callback.answer("✅ Задача взята в работу")
-    data = await state.get_data()
-    list_type = data.get("list_type", "team")
-    page = data.get("page", 1)
-    sort_by = data.get("sort_by", "date")
-    filter_priority = data.get("filter_priority")
-    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
-
-@router.callback_query(F.data == "tasks_back")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     list_type = data.get("list_type", "open")
@@ -351,28 +302,6 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
     filter_priority = data.get("filter_priority")
     await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
-# ====== Обработчики для нижней навигационной клавиатуры ======
-@router.message(F.text == "⬅️ Назад")
-async def back_to_tasks_menu(message: Message, state: FSMContext):
-    """Возврат в меню заявок"""
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    await state.clear()
-    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
-
-@router.message(F.text == "🏠 Главное меню")
-async def back_to_main_menu(message: Message, state: FSMContext):
-    """Возврат в главное меню"""
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    from app.keyboards.main_menu import main_menu_keyboard
-    await state.clear()
-    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
-
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -380,13 +309,13 @@ async def start_search(message: Message, state: FSMContext):
         await message.answer("Только для администратора и консьержа.")
         return
     await state.set_state(TaskSearch.query)
-    await message.answer("Введите текст для поиска (ID, название, исполнитель):", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Введите текст для поиска (ID, название, исполнитель):")
 
 @router.message(TaskSearch.query)
 async def process_search(message: Message, state: FSMContext):
     query = message.text.strip()
     if len(query) < 2:
-        await message.answer("Введите минимум 2 символа.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Введите минимум 2 символа.")
         return
     from app.services.tasks.service import search_tasks
     tasks = await search_tasks(query, limit=20)

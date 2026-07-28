@@ -1,4 +1,3 @@
-from aiogram.types import ReplyKeyboardRemove
 from .create import router as create_router
 from .list import router as list_router
 from .card import router as card_router
