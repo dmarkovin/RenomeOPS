@@ -22,7 +22,6 @@ from app.keyboards.employees.teams import team_selection_keyboard
 from app.database.models import UserRole, Team
 from app.keyboards.admin import admin_keyboard
 from app.states.employees.search import EmployeeSearch
-from app.states.employees.role_change import RoleChange
 
 router = Router()
 
@@ -167,9 +166,9 @@ async def delete_employee_callback(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-# ===== Смена роли (автоматически меняет команду) =====
+# ===== Смена роли (мгновенно, без заявки) =====
 @router.callback_query(F.data.startswith("emp_change_role:"))
-async def change_role_start(callback: CallbackQuery, state: FSMContext):
+async def change_role_start(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
     admin = await get_employee(callback.from_user.id)
     if not admin or admin.role != UserRole.ADMIN:
@@ -179,59 +178,41 @@ async def change_role_start(callback: CallbackQuery, state: FSMContext):
     if not emp:
         await callback.answer("Сотрудник не найден", show_alert=True)
         return
-    await state.set_state(RoleChange.select_role)
-    await state.update_data(user_id=user_id)
     await callback.message.edit_text(
         f"Выберите новую роль для {emp.full_name}:",
         reply_markup=role_selection_keyboard(user_id)
     )
     await callback.answer()
 
-@router.callback_query(F.data.startswith("emp_set_role:"), StateFilter(RoleChange.select_role))
-async def set_role_with_reason(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("emp_set_role:"))
+async def set_role(callback: CallbackQuery):
     _, user_id_str, role_str = callback.data.split(":")
     user_id = int(user_id_str)
     new_role = UserRole(role_str)
-    await state.update_data(new_role=new_role)
-    await state.set_state(RoleChange.reason)
-    await callback.message.edit_text("Введите обоснование для смены роли:")
-    await callback.answer()
 
-@router.message(StateFilter(RoleChange.reason), F.text)
-async def process_role_change_reason(message: Message, state: FSMContext):
-    reason = message.text
-    data = await state.get_data()
-    user_id = data.get("user_id")
-    new_role = data.get("new_role")
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка")
-        await state.clear()
+    admin = await get_employee(callback.from_user.id)
+    if not admin or admin.role != UserRole.ADMIN:
+        await callback.answer("Нет прав", show_alert=True)
         return
 
-    # Создаём задачу для администратора
-    from app.services.tasks.service import create_task, assign_task_to_user
-    from app.services.employees.service import get_all_employees
-    from app.services.notification_service import notify_admins
+    # Мгновенно меняем роль
+    emp = await update_employee_role(user_id, new_role)
+    if not emp:
+        await callback.answer("Ошибка", show_alert=True)
+        return
 
-    task = await create_task(
-        title=f"Запрос на смену роли для {employee.full_name}",
-        description=f"Пользователь {employee.full_name} запросил смену роли на {new_role.value}.\nОбоснование: {reason}",
-        created_by=employee.id,
-        priority=4,
-        is_feedback=True
-    )
-
-    admins = await get_all_employees(role=UserRole.ADMIN, active=True)
-    if admins:
-        admin = admins[0]
-        await assign_task_to_user(task.id, admin.id, employee.id)
-        await notify_admins(f"📢 Запрос на смену роли от {employee.full_name}:\n{reason}")
-        await message.answer(f"✅ Запрос на смену роли отправлен администратору. Задача #{task.id} создана.")
+    # Автоматически меняем команду на дефолтную для этой роли
+    default_team = get_default_team_for_role(new_role)
+    if default_team:
+        emp = await update_employee_team(user_id, default_team)
     else:
-        await message.answer("⚠️ Нет доступных администраторов. Запрос не назначен.")
+        emp = await update_employee_team(user_id, None)
 
-    await state.clear()
+    await callback.answer(
+        f"✅ Роль изменена на {new_role.value}, команда установлена автоматически.",
+        show_alert=True
+    )
+    await show_employee_card(callback)
 
 # ===== Смена команды (вручную) =====
 @router.callback_query(F.data.startswith("emp_change_team:"))

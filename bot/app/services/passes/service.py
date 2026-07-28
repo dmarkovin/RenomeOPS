@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import List, Optional
-from sqlalchemy import select, or_
+from typing import List, Optional, Union
+from sqlalchemy import select, or_, func
 from app.database import AsyncSessionLocal
-from app.database.models import Pass, User, Team
+from app.database.models import Pass, User, UserRole, Team
 
 
 async def create_pass(
@@ -51,26 +51,32 @@ async def get_pass(pass_id: int) -> Optional[Pass]:
 
 
 async def get_passes(
-    assigned_to: Optional[int] = None,
-    assigned_team: Optional[str] = None,
-    status: Optional[str] = None,
-    status__in: Optional[List[str]] = None,
+    status: Union[str, List[str]] = None,
     limit: int = 20,
     offset: int = 0
 ) -> List[Pass]:
     async with AsyncSessionLocal() as db:
         query = select(Pass).order_by(Pass.created_at.desc())
-        if assigned_to:
-            query = query.where(Pass.assigned_to == assigned_to)
-        if assigned_team:
-            query = query.where(Pass.assigned_team == assigned_team)
         if status:
-            query = query.where(Pass.status == status)
-        if status__in:
-            query = query.where(Pass.status.in_(status__in))
+            if isinstance(status, list):
+                query = query.where(Pass.status.in_(status))
+            else:
+                query = query.where(Pass.status == status)
         query = query.limit(limit).offset(offset)
         result = await db.execute(query)
         return result.scalars().all()
+
+
+async def count_passes_by_status(status: Union[str, List[str]] = None) -> int:
+    async with AsyncSessionLocal() as db:
+        query = select(func.count()).select_from(Pass)
+        if status:
+            if isinstance(status, list):
+                query = query.where(Pass.status.in_(status))
+            else:
+                query = query.where(Pass.status == status)
+        result = await db.execute(query)
+        return result.scalar()
 
 
 async def update_pass_status(pass_id: int, status: str) -> Optional[Pass]:
@@ -79,6 +85,8 @@ async def update_pass_status(pass_id: int, status: str) -> Optional[Pass]:
         if not p:
             return None
         p.status = status
+        if status == "used":
+            p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(p)
@@ -86,16 +94,7 @@ async def update_pass_status(pass_id: int, status: str) -> Optional[Pass]:
 
 
 async def check_in(pass_id: int) -> Optional[Pass]:
-    async with AsyncSessionLocal() as db:
-        p = await db.get(Pass, pass_id)
-        if not p or p.status != "active":
-            return None
-        p.status = "used"
-        p.checked_in_at = datetime.utcnow()
-        p.updated_at = datetime.utcnow()
-        await db.commit()
-        await db.refresh(p)
-        return p
+    return await update_pass_status(pass_id, "used")
 
 
 async def check_out(pass_id: int) -> Optional[Pass]:
@@ -110,22 +109,26 @@ async def check_out(pass_id: int) -> Optional[Pass]:
         return p
 
 
+async def get_pass_history(pass_id: int) -> List[dict]:
+    """Заглушка — возвращает список действий (можно расширить)"""
+    # В реальности нужна таблица pass_history, но пока вернём пустой список
+    return []
+
+
 async def search_passes(query: str, limit: int = 20) -> List[Pass]:
     async with AsyncSessionLocal() as db:
         if query.isdigit():
+            # поиск по ID
             p = await db.get(Pass, int(query))
             if p:
                 return [p]
         stmt = select(Pass).where(
             or_(
                 Pass.guest_name.ilike(f"%{query}%"),
-                Pass.car_number.ilike(f"%{query}%")
+                Pass.car_number.ilike(f"%{query}%"),
+                Pass.purpose.ilike(f"%{query}%"),
+                Pass.apartment == (int(query) if query.isdigit() else None),
             )
         ).order_by(Pass.created_at.desc()).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all()
-
-
-async def get_pass_history(pass_id: int) -> List:
-    # Заглушка, т.к. модели PassHistory пока нет
-    return []

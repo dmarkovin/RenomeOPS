@@ -8,9 +8,9 @@ from datetime import datetime, timedelta
 from app.services.employees.service import get_employee, get_employee_by_id
 from app.services.passes.service import (
     create_pass, get_pass, get_passes, get_pass_history, search_passes,
-    check_in, check_out, update_pass_status
+    check_in, check_out, update_pass_status, count_passes_by_status
 )
-from app.services.tasks.service import get_available_employees, get_teams_with_members
+from app.services.tasks.service import get_available_employees
 from app.database.models import UserRole, Team
 from app.keyboards.passes import (
     pass_list_keyboard, pass_action_keyboard, pass_main_menu_keyboard,
@@ -27,8 +27,8 @@ class PassCreate(StatesGroup):
     type = State()
     guest_name = State()
     car_number = State()
-    purpose = State()
     apartment = State()
+    purpose = State()
     start_date = State()
     end_date = State()
     assign_type = State()
@@ -53,7 +53,7 @@ async def passes_menu(message: Message):
 @router.message(F.text == "➕ Заказать пропуск")
 async def start_create_pass(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
         await message.answer("Нет прав.")
         return
     await state.clear()
@@ -87,12 +87,22 @@ async def process_type(message: Message, state: FSMContext):
 @router.message(PassCreate.guest_name)
 async def process_guest_name(message: Message, state: FSMContext):
     await state.update_data(guest_name=message.text.strip())
-    await state.set_state(PassCreate.purpose)
-    await message.answer("Введите цель визита (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(PassCreate.apartment)
+    await message.answer("Введите номер квартиры (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
 @router.message(PassCreate.car_number)
 async def process_car_number(message: Message, state: FSMContext):
     await state.update_data(car_number=message.text.strip())
+    await state.set_state(PassCreate.apartment)
+    await message.answer("Введите номер квартиры (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
+
+@router.message(PassCreate.apartment)
+async def process_apartment(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if text.isdigit():
+        await state.update_data(apartment=int(text))
+    else:
+        await state.update_data(apartment=None)
     await state.set_state(PassCreate.purpose)
     await message.answer("Введите цель визита (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
@@ -100,14 +110,6 @@ async def process_car_number(message: Message, state: FSMContext):
 async def process_purpose(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(purpose=text if text != "-" else "")
-    await state.set_state(PassCreate.apartment)
-    await message.answer("Введите номер квартиры (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
-
-@router.message(PassCreate.apartment)
-async def process_apartment(message: Message, state: FSMContext):
-    text = message.text.strip()
-    apartment = int(text) if text.isdigit() else None
-    await state.update_data(apartment=apartment)
     await state.set_state(PassCreate.select_start_date)
     await message.answer("Выберите дату начала действия пропуска:", reply_markup=date_selection_keyboard("start"))
 
@@ -191,62 +193,12 @@ async def process_assign_type(message: Message, state: FSMContext):
     if text == "⏭ Пропустить":
         await state.update_data(assigned_to=None, assigned_team=None)
         await state.set_state(PassCreate.confirm)
-        data = await state.get_data()
-        assigned_to = data.get('assigned_to')
-        assigned_team = data.get('assigned_team')
-        if assigned_to:
-            assignee = await get_employee_by_id(assigned_to)
-            executor_text = assignee.full_name if assignee else "назначен"
-        elif assigned_team:
-            executor_text = f"команда {assigned_team.value}"
-        else:
-            executor_text = "не назначен"
-        text = (
-            f"📝 Проверьте данные пропуска:\n\n"
-            f"Тип: {data.get('type')}\n"
-            f"Гость: {data.get('guest_name') or '—'}\n"
-            f"Авто: {data.get('car_number') or '—'}\n"
-            f"Квартира: {data.get('apartment') or '—'}\n"
-            f"Цель: {data.get('purpose') or '—'}\n"
-            f"Начало: {data.get('start_date').strftime('%d.%m.%Y') if data.get('start_date') else '—'}\n"
-            f"Окончание: {data.get('end_date').strftime('%d.%m.%Y') if data.get('end_date') else '—'}\n"
-            f"Исполнитель: {executor_text}\n\n"
-            f"Подтвердить создание?"
-        )
-        await message.answer(text, reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
-            resize_keyboard=True
-        ))
+        await show_confirmation(message, state)
         return
     if text == "👥 Всей охране":
         await state.update_data(assigned_to=None, assigned_team=Team.TEAM_SECURITY)
         await state.set_state(PassCreate.confirm)
-        data = await state.get_data()
-        assigned_to = data.get('assigned_to')
-        assigned_team = data.get('assigned_team')
-        if assigned_to:
-            assignee = await get_employee_by_id(assigned_to)
-            executor_text = assignee.full_name if assignee else "назначен"
-        elif assigned_team:
-            executor_text = f"команда {assigned_team.value}"
-        else:
-            executor_text = "не назначен"
-        text = (
-            f"📝 Проверьте данные пропуска:\n\n"
-            f"Тип: {data.get('type')}\n"
-            f"Гость: {data.get('guest_name') or '—'}\n"
-            f"Авто: {data.get('car_number') or '—'}\n"
-            f"Квартира: {data.get('apartment') or '—'}\n"
-            f"Цель: {data.get('purpose') or '—'}\n"
-            f"Начало: {data.get('start_date').strftime('%d.%m.%Y') if data.get('start_date') else '—'}\n"
-            f"Окончание: {data.get('end_date').strftime('%d.%m.%Y') if data.get('end_date') else '—'}\n"
-            f"Исполнитель: {executor_text}\n\n"
-            f"Подтвердить создание?"
-        )
-        await message.answer(text, reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
-            resize_keyboard=True
-        ))
+        await show_confirmation(message, state)
         return
     if text == "👤 Конкретному сотруднику":
         employees = await get_available_employees(role=UserRole.SECURITY)
@@ -264,7 +216,6 @@ async def invalid_assign_type(message: Message):
 # ---- Обработчик выбора конкретного сотрудника ----
 @router.callback_query(StateFilter(PassCreate.assign_employee), F.data.startswith("pass_assign_emp:"))
 async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
     parts = callback.data.split(":")
     if len(parts) != 3:
         await callback.message.answer("Ошибка формата")
@@ -275,6 +226,10 @@ async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await callback.message.answer("✅ Охрана назначена.")
     await state.set_state(PassCreate.confirm)
+    await show_confirmation(callback.message, state)
+    await callback.answer()
+
+async def show_confirmation(message: Message, state: FSMContext):
     data = await state.get_data()
     assigned_to = data.get('assigned_to')
     assigned_team = data.get('assigned_team')
@@ -294,15 +249,14 @@ async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
         f"Цель: {data.get('purpose') or '—'}\n"
         f"Начало: {data.get('start_date').strftime('%d.%m.%Y') if data.get('start_date') else '—'}\n"
         f"Окончание: {data.get('end_date').strftime('%d.%m.%Y') if data.get('end_date') else '—'}\n"
-        f"Иисполнитель: {executor_text}\n\n"
+        f"Исполнитель: {executor_text}\n"
         f"Подтвердить создание?"
     )
-    await callback.message.answer(text, reply_markup=ReplyKeyboardMarkup(
+    await message.answer(text, reply_markup=ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     ))
 
-# ---- Подтверждение ----
 @router.message(StateFilter(PassCreate.confirm), F.text == "✅ Да, создать")
 async def confirm_create_pass(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -320,7 +274,7 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             purpose=data.get("purpose"),
             start_date=data.get("start_date"),
             end_date=data.get("end_date"),
-            comment="",
+            comment="",  # комментарий убран
             photo_ids=[],
             created_by=employee.id,
             assigned_to=data.get("assigned_to"),
@@ -345,7 +299,7 @@ async def cancel_confirm(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=pass_main_menu_keyboard())
 
-# ========== Активные пропуски ==========
+# ========== Активные пропуска (все) ==========
 @router.message(F.text == "📋 Активные пропуски")
 async def list_active_passes(message: Message, page: int = 1):
     employee = await get_employee(message.from_user.id)
@@ -354,21 +308,32 @@ async def list_active_passes(message: Message, page: int = 1):
         return
     limit = 10
     offset = (page - 1) * limit
-    if employee.role == UserRole.SECURITY:
-        passes = await get_passes(assigned_to=employee.id, status='active', limit=limit, offset=offset)
-    else:
-        passes = await get_passes(status='active', limit=limit, offset=offset)
+    # Получаем все активные пропуска (без фильтра по assigned_to)
+    passes = await get_passes(status="active", limit=1000, offset=0)
     total = len(passes)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
-    if not passes:
+    # Обрезаем для текущей страницы
+    start = (page - 1) * limit
+    passes_page = passes[start:start+limit]
+
+    if not passes_page:
         await message.answer("Нет активных пропусков.")
         return
-    text = "📋 Активные пропуски:\n\n"
-    for p in passes:
+
+    text = f"📋 Активные пропуски (стр. {page}/{total_pages}):\n\n"
+    for p in passes_page:
         status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴"
-        label = p.guest_name or p.car_number or "—"
-        text += f"{status_emoji} #{p.id} {label} ({p.type}) – {p.status}\n"
-    await message.answer(text, reply_markup=pass_list_keyboard(passes, page, total_pages))
+        # Формируем заголовок: статус #ID тип квартира цель
+        label = f"{status_emoji} #{p.id} "
+        if p.type == "guest":
+            label += f"Гость: {p.guest_name or '—'}"
+        else:
+            label += f"Авто: {p.car_number or '—'}"
+        if p.apartment:
+            label += f" | кв.{p.apartment}"
+        label += f" | {p.purpose or '—'}"
+        text += f"{label}\n"
+    await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
 
 # ========== История пропусков ==========
 @router.message(F.text == "📜 История пропусков")
@@ -379,24 +344,35 @@ async def list_history(message: Message, page: int = 1):
         return
     limit = 10
     offset = (page - 1) * limit
-    passes = await get_passes(status__in=['used', 'expired', 'completed'], limit=limit, offset=offset)
+    passes = await get_passes(status=['used', 'expired', 'completed'], limit=1000, offset=0)
     total = len(passes)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
-    if not passes:
+    start = (page - 1) * limit
+    passes_page = passes[start:start+limit]
+
+    if not passes_page:
         await message.answer("История пуста.")
         return
-    text = "📜 История пропусков:\n\n"
-    for p in passes:
+
+    text = "📜 История пропусков (стр. {page}/{total_pages}):\n\n"
+    for p in passes_page:
         status_emoji = "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
-        label = p.guest_name or p.car_number or "—"
-        text += f"{status_emoji} #{p.id} {label} ({p.type}) – {p.status}\n"
-    await message.answer(text, reply_markup=pass_list_keyboard(passes, page, total_pages))
+        label = f"{status_emoji} #{p.id} "
+        if p.type == "guest":
+            label += f"Гость: {p.guest_name or '—'}"
+        else:
+            label += f"Авто: {p.car_number or '—'}"
+        if p.apartment:
+            label += f" | кв.{p.apartment}"
+        label += f" | {p.purpose or '—'}"
+        text += f"{label}\n"
+    await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
 
 # ========== Поиск по пропускам ==========
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
     await state.set_state(PassSearch.query)
-    await message.answer("Введите текст для поиска (имя гостя, номер авто, ID):")
+    await message.answer("Введите текст для поиска (имя гостя, номер авто, квартира, ID):")
 
 @router.message(StateFilter(PassSearch.query))
 async def process_search_pass(message: Message, state: FSMContext):
@@ -412,8 +388,15 @@ async def process_search_pass(message: Message, state: FSMContext):
     text = "🔍 Результаты поиска по пропускам:\n\n"
     for p in passes:
         status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
-        label = p.guest_name or p.car_number or "—"
-        text += f"{status_emoji} #{p.id} {label} ({p.type}) – {p.status}\n"
+        label = f"{status_emoji} #{p.id} "
+        if p.type == "guest":
+            label += f"Гость: {p.guest_name or '—'}"
+        else:
+            label += f"Авто: {p.car_number or '—'}"
+        if p.apartment:
+            label += f" | кв.{p.apartment}"
+        label += f" | {p.purpose or '—'}"
+        text += f"{label}\n"
     await message.answer(text)
     await state.clear()
 
@@ -458,10 +441,10 @@ async def show_pass_history(callback: CallbackQuery):
         return
     text = f"📜 История пропуска #{pass_id}:\n\n"
     for entry in history[:10]:
-        action = entry.action
-        user = await get_employee_by_id(entry.user_id) if entry.user_id else None
-        user_name = user.full_name if user else "Система"
-        text += f"🕒 {entry.created_at.strftime('%d.%m.%Y %H:%M')} – {user_name}: {action}\n"
+        action = entry.get("action", "—")
+        user_name = entry.get("user", "Система")
+        created_at = entry.get("created_at", datetime.utcnow())
+        text += f"🕒 {created_at.strftime('%d.%m.%Y %H:%M')} – {user_name}: {action}\n"
     await callback.message.answer(text)
     await callback.answer()
 
@@ -515,6 +498,8 @@ async def pass_close(callback: CallbackQuery):
 async def paginate_passes(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
     await callback.message.delete()
+    # Определяем, из какого списка пришли (активные или история)
+    # Для простоты будем открывать активные, но можно сохранять в состоянии
     await list_active_passes(callback.message, page)
     await callback.answer()
 
@@ -534,7 +519,10 @@ async def back_to_pass_menu(callback: CallbackQuery):
 @router.message(F.text == "⬅️ Назад")
 async def back_from_pass_menu(message: Message):
     employee = await get_employee(message.from_user.id)
-    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role) if employee else None)
+    if employee:
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
+    else:
+        await message.answer("Возврат...")
 
 @router.callback_query(F.data == "cancel_action")
 async def cancel_action(callback: CallbackQuery, state: FSMContext):

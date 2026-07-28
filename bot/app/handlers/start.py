@@ -129,11 +129,10 @@ async def cmd_profile(message: Message):
     )
     await message.answer(text, parse_mode="HTML")
 
-@router.message(Command("become_admin"))
 async def become_admin(message: Message):
     from app.config import settings
-    from app.database.models import UserRole
-    from app.services.employees.service import get_employee, update_employee_role
+    from app.database.models import UserRole, Team
+    from app.services.employees.service import get_employee, update_employee_role, update_employee_team
     if message.from_user.id not in settings.ADMIN_TELEGRAM_IDS:
         await message.answer("У вас нет прав.")
         return
@@ -142,7 +141,8 @@ async def become_admin(message: Message):
         await message.answer("Вы не зарегистрированы.")
         return
     await update_employee_role(user.id, UserRole.ADMIN)
-    await message.answer("✅ Ваша роль восстановлена до Администратора.")
+    await update_employee_team(user.id, Team.ADMIN_TEAM)
+    await message.answer("✅ Ваша роль восстановлена до Администратора, команда установлена как ADMIN_TEAM.")
 
 @router.message(Command("become_admin"))
 async def become_admin(message: Message):

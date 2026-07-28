@@ -93,24 +93,21 @@ async def show_list(
                 await target.answer("Вы не зарегистрированы.")
             return
         limit = 10
-        offset = (page - 1) * limit
         title = ""
         tasks = []
-        total = 0
         show_assignee = True
 
+        # Получаем все задачи без пагинации (используем большой лимит)
+        # Чтобы избежать двойной обрезки, будем пагинировать в памяти
         if list_type == "open":
-            tasks = await get_open_tasks(limit=limit, offset=offset, user_id=employee.id)
-            total = await count_open_tasks()
+            tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
         elif list_type == "my":
-            tasks = await get_tasks_for_employee(employee.id, limit=limit, offset=offset)
-            total = await count_tasks_for_employee(employee.id)
+            tasks = await get_tasks_for_employee(employee.id, limit=1000, offset=0)
             title = "📋 Мои задачи"
             show_assignee = False
         elif list_type == "team":
-            tasks = await get_team_tasks(employee.id, limit=limit, offset=offset)
-            total = await count_team_tasks(employee.id)
+            tasks = await get_team_tasks(employee.id, limit=1000, offset=0)
             title = "📋 Новые задачи"
             show_assignee = False
         elif list_type == "checking":
@@ -120,40 +117,39 @@ async def show_list(
                 else:
                     await target.answer("Только для консьержей.")
                 return
-            tasks = await get_checking_tasks(limit=limit, offset=offset)
-            total = await count_checking_tasks()
+            tasks = await get_checking_tasks(limit=1000, offset=0)
             title = "📋 Задачи на проверке"
         elif list_type == "archive_all":
-            tasks = await get_tasks_by_status("closed", limit=limit, offset=offset, user_id=employee.id)
-            total = await count_tasks_by_status("closed", user_id=employee.id)
+            tasks = await get_tasks_by_status("closed", limit=1000, offset=0, user_id=employee.id)
             title = "📦 Архив (все закрытые заявки)"
         elif list_type == "archive_paid":
-            tasks = await get_paid_closed_tasks(limit=limit, offset=offset, user_id=employee.id)
-            total = await count_paid_closed_tasks()
+            tasks = await get_paid_closed_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "💰 Архив платных заявок"
             show_assignee = False
         elif list_type == "archive_regular":
-            tasks = await get_regular_closed_tasks(limit=limit, offset=offset, user_id=employee.id)
-            total = await count_regular_closed_tasks()
+            tasks = await get_regular_closed_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Личные задачи"
             show_assignee = False
         elif list_type == "archive_feedback":
-            tasks = await get_tasks_by_status("closed", limit=limit, offset=offset, user_id=employee.id)
+            tasks = await get_tasks_by_status("closed", limit=1000, offset=0, user_id=employee.id)
             tasks = [t for t in tasks if getattr(t, 'is_feedback', False)]
-            total = len(tasks)
             title = "📢 Обращения (проблемы)"
             show_assignee = False
 
-        total_pages = (total + limit - 1) // limit if total > 0 else 1
-
-        if filter_priority:
+        # Фильтрация по приоритету (если указана)
+        if filter_priority is not None:
             tasks = [t for t in tasks if t.priority == filter_priority]
-            total = len(tasks)
+
+        # Сортировка
         if sort_by == "priority":
             tasks = sorted(tasks, key=lambda t: t.priority, reverse=True)
         else:
             tasks = sorted(tasks, key=lambda t: t.created_at, reverse=True)
 
+        total = len(tasks)
+        total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+        # Обрезаем для текущей страницы
         start = (page - 1) * limit
         tasks_page = tasks[start:start+limit]
 
@@ -294,6 +290,52 @@ async def paginate_tasks(callback: CallbackQuery, state: FSMContext):
     await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
     await callback.answer()
 
+@router.callback_query(F.data.startswith("task_sort:"))
+async def change_sort(callback: CallbackQuery, state: FSMContext):
+    sort_by = callback.data.split(":")[1]
+    data = await state.get_data()
+    list_type = data.get("list_type", "open")
+    page = data.get("page", 1)
+    filter_priority = data.get("filter_priority")
+    await state.update_data(sort_by=sort_by)
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_filter:"))
+async def change_filter(callback: CallbackQuery, state: FSMContext):
+    filter_val = callback.data.split(":")[1]
+    if filter_val == "all":
+        filter_priority = None
+    else:
+        filter_priority = int(filter_val)
+    data = await state.get_data()
+    list_type = data.get("list_type", "open")
+    page = data.get("page", 1)
+    sort_by = data.get("sort_by", "date")
+    await state.update_data(filter_priority=filter_priority)
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_take_from_list:"))
+async def take_from_list(callback: CallbackQuery, state: FSMContext):
+    task_id = int(callback.data.split(":")[1])
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    task = await take_task(task_id, employee.id)
+    if not task:
+        await callback.answer("Не удалось взять задачу", show_alert=True)
+        return
+    await callback.answer("✅ Задача взята в работу")
+    data = await state.get_data()
+    list_type = data.get("list_type", "team")
+    page = data.get("page", 1)
+    sort_by = data.get("sort_by", "date")
+    filter_priority = data.get("filter_priority")
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+
+@router.callback_query(F.data == "tasks_back")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     list_type = data.get("list_type", "open")
@@ -301,6 +343,25 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
     sort_by = data.get("sort_by", "date")
     filter_priority = data.get("filter_priority")
     await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+
+@router.message(F.text == "⬅️ Назад")
+async def back_to_tasks_menu(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await state.clear()
+    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
+
+@router.message(F.text == "🏠 Главное меню")
+async def back_to_main_menu(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    from app.keyboards.main_menu import main_menu_keyboard
+    await state.clear()
+    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
 
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):

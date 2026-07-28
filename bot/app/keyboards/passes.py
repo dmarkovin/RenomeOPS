@@ -12,6 +12,10 @@ def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> Inlin
             label += f"{p.guest_name or 'Гость'}"
         else:
             label += f"{p.car_number or 'Авто'}"
+        if p.apartment:
+            label += f" | кв.{p.apartment}"
+        if p.purpose:
+            label += f" | {p.purpose[:20]}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"pass:{p.id}")])
 
     nav_buttons = []
@@ -56,6 +60,7 @@ def pass_main_menu_keyboard() -> ReplyKeyboardMarkup:
 
 
 def pass_assign_type_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура выбора типа назначения для пропуска"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="👥 Всей охране")],
