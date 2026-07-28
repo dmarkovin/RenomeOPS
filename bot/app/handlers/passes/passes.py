@@ -28,6 +28,7 @@ class PassCreate(StatesGroup):
     guest_name = State()
     car_number = State()
     purpose = State()
+    apartment = State()
     start_date = State()
     end_date = State()
     assign_type = State()
@@ -100,6 +101,21 @@ async def process_car_number(message: Message, state: FSMContext):
 async def process_purpose(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(purpose=text if text != "-" else "")
+    await state.set_state(PassCreate.apartment)
+    await message.answer("Введите номер квартиры (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
+
+@router.message(PassCreate.apartment)
+async def process_apartment(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if text == "-":
+        await state.update_data(apartment=None)
+    else:
+        try:
+            apartment = int(text)
+            await state.update_data(apartment=apartment)
+        except ValueError:
+            await message.answer("Введите номер квартиры числом или '-' для пропуска.")
+            return
     await state.set_state(PassCreate.select_start_date)
     await message.answer("Выберите дату начала действия пропуска:", reply_markup=date_selection_keyboard("start"))
 
@@ -241,6 +257,7 @@ async def process_comment(message: Message, state: FSMContext):
         f"Гость: {data.get('guest_name') or '—'}\n"
         f"Авто: {data.get('car_number') or '—'}\n"
         f"Цель: {data.get('purpose') or '—'}\n"
+        f"Квартира: {data.get('apartment') or '—'}\n"
         f"Начало: {data.get('start_date').strftime('%d.%m.%Y') if data.get('start_date') else '—'}\n"
         f"Окончание: {data.get('end_date').strftime('%d.%m.%Y') if data.get('end_date') else '—'}\n"
         f"Исполнитель: {executor_text}\n"
@@ -266,6 +283,7 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             guest_name=data.get("guest_name"),
             car_number=data.get("car_number"),
             purpose=data.get("purpose"),
+            apartment=data.get("apartment"),
             start_date=data.get("start_date"),
             end_date=data.get("end_date"),
             comment=data.get("comment"),
@@ -344,7 +362,7 @@ async def list_history(message: Message, page: int = 1):
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
     await state.set_state(PassSearch.query)
-    await message.answer("Введите текст для поиска (имя гостя, номер авто, ID):")
+    await message.answer("Введите текст для поиска (имя гостя, номер авто, ID или квартира):")
 
 @router.message(StateFilter(PassSearch.query))
 async def process_search_pass(message: Message, state: FSMContext):
@@ -381,6 +399,7 @@ async def show_pass_card(callback: CallbackQuery):
         f"Гость: {p.guest_name or '—'}\n"
         f"Авто: {p.car_number or '—'}\n"
         f"Цель: {p.purpose or '—'}\n"
+        f"Квартира: {p.apartment or '—'}\n"
         f"Начало: {p.start_date.strftime('%d.%m.%Y %H:%M')}\n"
         f"Окончание: {p.end_date.strftime('%d.%m.%Y %H:%M')}\n"
         f"Статус: {p.status}\n"
@@ -405,10 +424,13 @@ async def show_pass_history(callback: CallbackQuery):
         return
     text = f"📜 История пропуска #{pass_id}:\n\n"
     for entry in history[:10]:
-        action = entry.action
-        user = await get_employee_by_id(entry.user_id) if entry.user_id else None
+        action = entry.get("action")
+        user = await get_employee_by_id(entry.get("user_id")) if entry.get("user_id") else None
         user_name = user.full_name if user else "Система"
-        text += f"🕒 {entry.created_at.strftime('%d.%m.%Y %H:%M')} – {user_name}: {action}\n"
+        text += f"🕒 {entry.get('created_at', '')} – {user_name}: {action}\n"
+        if entry.get("description"):
+            text += f"📝 {entry.get('description')}\n"
+        text += "\n"
     await callback.message.answer(text)
     await callback.answer()
 

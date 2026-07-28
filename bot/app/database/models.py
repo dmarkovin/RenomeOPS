@@ -199,6 +199,8 @@ class Pass(Base):
     type = Column(String(20), nullable=False)
     guest_name = Column(String(255), nullable=True)
     car_number = Column(String(20), nullable=True)
+    apartment = Column(Integer, nullable=True)
+    apartment = Column(Integer, nullable=True)
     purpose = Column(String(255), nullable=True)
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
