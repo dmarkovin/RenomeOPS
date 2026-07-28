@@ -2,14 +2,12 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import Key
 from typing import List
 
-
 def key_list_keyboard(keys: List[Key], page: int, total_pages: int) -> InlineKeyboardMarkup:
     buttons = []
     for k in keys[:10]:
-        status_emoji = "🔑" if k.status == "issued" else "✅" if k.status == "returned" else "🔒"
+        status_emoji = "🔑" if k.status == "issued" else "✅"
         label = f"{status_emoji} #{k.id} {k.key_number} – {k.recipient}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"key:{k.id}")])
-
     nav_buttons = []
     if page > 1:
         nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"key_page:{page-1}"))
@@ -18,22 +16,8 @@ def key_list_keyboard(keys: List[Key], page: int, total_pages: int) -> InlineKey
         nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"key_page:{page+1}"))
     if nav_buttons:
         buttons.append(nav_buttons)
-
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def key_action_keyboard(key: Key) -> InlineKeyboardMarkup:
-    buttons = []
-    if key.status == "issued":
-        buttons.append([InlineKeyboardButton(text="✅ Возвращён", callback_data=f"key_status:{key.id}:returned")])
-    if key.status != "closed":
-        buttons.append([InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"key_status:{key.id}:closed")])
-    buttons.append([InlineKeyboardButton(text="💬 Комментарий", callback_data=f"key_comment:{key.id}")])
-    buttons.append([InlineKeyboardButton(text="📷 Фото", callback_data=f"key_photo:{key.id}")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 
 def key_main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -41,7 +25,6 @@ def key_main_menu_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="➕ Выдать ключ")],
             [KeyboardButton(text="📋 Список выданных")],
             [KeyboardButton(text="📋 Возвращённые")],
-            [KeyboardButton(text="📦 Архив ключей")],
             [KeyboardButton(text="⬅️ Назад")]
         ],
         resize_keyboard=True

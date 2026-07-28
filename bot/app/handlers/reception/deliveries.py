@@ -1,14 +1,16 @@
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
 
 from app.services.employees.service import get_employee
-from app.services.reception.delivery_service import create_delivery, get_all_deliveries, get_delivery, update_delivery_status
-from app.services.reception.document_service import create_document, get_documents, get_document, update_document_status
+from app.services.reception.delivery_service import (
+    create_delivery, get_all_deliveries, get_delivery,
+    update_delivery_status, add_delivery_comment, get_delivery_history
+)
 from app.database.models import UserRole
-from app.keyboards.reception import reception_menu_keyboard, delivery_menu_keyboard, document_menu_keyboard
+from app.keyboards.reception import reception_menu_keyboard
 
 router = Router()
 
@@ -20,29 +22,20 @@ class DeliveryCreate(StatesGroup):
     photo = State()
     confirm = State()
 
-class DocumentCreate(StatesGroup):
-    name = State()
-    type = State()
-    sender = State()
-    recipient = State()
-    comment = State()
-    photo = State()
-    confirm = State()
+class DeliveryCommentState(StatesGroup):
+    waiting_for_comment = State()
 
+# ========== Главное меню ==========
 @router.message(F.text == "📦 Доставка")
 async def reception_menu(message: Message):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("У вас нет прав.")
         return
-    await message.answer("Выберите тип:", reply_markup=reception_menu_keyboard())
+    await message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
 
-# ---- Посылка ----
+# ========== Создание посылки ==========
 @router.message(F.text == "📦 Посылка")
-async def delivery_menu(message: Message):
-    await message.answer("📦 Меню посылок:", reply_markup=delivery_menu_keyboard())
-
-@router.message(F.text == "➕ Новая посылка")
 async def start_delivery(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if not employee:
@@ -52,13 +45,13 @@ async def start_delivery(message: Message, state: FSMContext):
     await state.set_state(DeliveryCreate.recipient)
     await message.answer("Введите ФИО получателя:", reply_markup=ReplyKeyboardRemove())
 
-@router.message(StateFilter(DeliveryCreate.recipient), F.text)
+@router.message(DeliveryCreate.recipient)
 async def delivery_recipient(message: Message, state: FSMContext):
     await state.update_data(recipient=message.text.strip())
     await state.set_state(DeliveryCreate.apartment)
     await message.answer("Введите номер квартиры (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-@router.message(StateFilter(DeliveryCreate.apartment), F.text)
+@router.message(DeliveryCreate.apartment)
 async def delivery_apartment(message: Message, state: FSMContext):
     text = message.text.strip()
     apartment = int(text) if text.isdigit() else None
@@ -66,14 +59,14 @@ async def delivery_apartment(message: Message, state: FSMContext):
     await state.set_state(DeliveryCreate.courier)
     await message.answer("Введите название курьерской службы (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-@router.message(StateFilter(DeliveryCreate.courier), F.text)
+@router.message(DeliveryCreate.courier)
 async def delivery_courier(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(courier=text if text != "-" else "")
     await state.set_state(DeliveryCreate.comment)
     await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-@router.message(StateFilter(DeliveryCreate.comment), F.text)
+@router.message(DeliveryCreate.comment)
 async def delivery_comment(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(comment=text if text != "-" else "")
@@ -83,7 +76,7 @@ async def delivery_comment(message: Message, state: FSMContext):
         resize_keyboard=True
     ))
 
-@router.message(StateFilter(DeliveryCreate.photo), F.photo)
+@router.message(DeliveryCreate.photo, F.photo)
 async def delivery_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
@@ -91,7 +84,7 @@ async def delivery_photo(message: Message, state: FSMContext):
     await state.update_data(photos=photos)
     await message.answer(f"✅ Добавлено фото ({len(photos)})")
 
-@router.message(StateFilter(DeliveryCreate.photo), F.text == "✅ Готово")
+@router.message(DeliveryCreate.photo, F.text == "✅ Готово")
 async def delivery_ready(message: Message, state: FSMContext):
     await state.set_state(DeliveryCreate.confirm)
     data = await state.get_data()
@@ -109,7 +102,7 @@ async def delivery_ready(message: Message, state: FSMContext):
         resize_keyboard=True
     ))
 
-@router.message(StateFilter(DeliveryCreate.confirm), F.text == "✅ Да, создать")
+@router.message(DeliveryCreate.confirm, F.text == "✅ Да, создать")
 async def delivery_confirm(message: Message, state: FSMContext):
     data = await state.get_data()
     employee = await get_employee(message.from_user.id)
@@ -127,179 +120,224 @@ async def delivery_confirm(message: Message, state: FSMContext):
             photo_ids=data.get('photos', [])
         )
         await state.clear()
-        await message.answer(f"✅ Посылка #{delivery.id} создана!", reply_markup=delivery_menu_keyboard())
+        await message.answer(f"✅ Посылка #{delivery.id} создана!", reply_markup=reception_menu_keyboard())
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
 
-@router.message(StateFilter(DeliveryCreate.confirm), F.text == "❌ Отмена")
+@router.message(DeliveryCreate.confirm, F.text == "❌ Отмена")
 async def delivery_cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("Отменено", reply_markup=delivery_menu_keyboard())
+    await message.answer("Отменено", reply_markup=reception_menu_keyboard())
 
-# ---- Документ ----
-@router.message(F.text == "📄 Документ")
-async def document_menu(message: Message):
-    await message.answer("📄 Меню документов:", reply_markup=document_menu_keyboard())
-
-@router.message(F.text == "➕ Новый документ")
-async def start_document(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка")
+# ========== Карточка посылки ==========
+@router.callback_query(F.data.startswith("delivery:"))
+async def show_delivery_card(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    delivery = await get_delivery(delivery_id)
+    if not delivery:
+        await callback.answer("Не найдено", show_alert=True)
         return
-    await state.clear()
-    await state.set_state(DocumentCreate.name)
-    await message.answer("Введите название документа:", reply_markup=ReplyKeyboardRemove())
-
-@router.message(StateFilter(DocumentCreate.name), F.text)
-async def document_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text.strip())
-    await state.set_state(DocumentCreate.type)
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📥 Входящий")],
-            [KeyboardButton(text="📤 Исходящий")],
-        ],
-        resize_keyboard=True
-    )
-    await message.answer("Выберите тип документа:", reply_markup=kb)
-
-@router.message(StateFilter(DocumentCreate.type), F.text.in_(["📥 Входящий", "📤 Исходящий"]))
-async def document_type(message: Message, state: FSMContext):
-    doc_type = "incoming" if message.text == "📥 Входящий" else "outgoing"
-    await state.update_data(type=doc_type)
-    await state.set_state(DocumentCreate.sender)
-    await message.answer("Введите отправителя (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
-
-@router.message(StateFilter(DocumentCreate.sender), F.text)
-async def document_sender(message: Message, state: FSMContext):
-    text = message.text.strip()
-    await state.update_data(sender=text if text != "-" else "")
-    await state.set_state(DocumentCreate.recipient)
-    await message.answer("Введите получателя (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
-
-@router.message(StateFilter(DocumentCreate.recipient), F.text)
-async def document_recipient(message: Message, state: FSMContext):
-    text = message.text.strip()
-    await state.update_data(recipient=text if text != "-" else "")
-    await state.set_state(DocumentCreate.comment)
-    await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
-
-@router.message(StateFilter(DocumentCreate.comment), F.text)
-async def document_comment(message: Message, state: FSMContext):
-    text = message.text.strip()
-    await state.update_data(comment=text if text != "-" else "")
-    await state.set_state(DocumentCreate.photo)
-    await message.answer("🖼 Пришлите фото (опционально) или нажмите **Готово**:", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="✅ Готово")]],
-        resize_keyboard=True
-    ))
-
-@router.message(StateFilter(DocumentCreate.photo), F.photo)
-async def document_photo(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
-    photos.append(message.photo[-1].file_id)
-    await state.update_data(photos=photos)
-    await message.answer(f"✅ Добавлено фото ({len(photos)})")
-
-@router.message(StateFilter(DocumentCreate.photo), F.text == "✅ Готово")
-async def document_ready(message: Message, state: FSMContext):
-    await state.set_state(DocumentCreate.confirm)
-    data = await state.get_data()
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    status_emoji = {
+        "pending": "🟡",
+        "received": "🔵",
+        "completed": "✅"
+    }.get(delivery.status, "⚪")
     text = (
-        f"📄 Проверьте данные:\n\n"
-        f"Название: {data['name']}\n"
-        f"Тип: {data.get('type')}\n"
-        f"Отправитель: {data.get('sender') or '—'}\n"
-        f"Получатель: {data.get('recipient') or '—'}\n"
-        f"Комментарий: {data.get('comment') or '—'}\n"
-        f"Фото: {len(data.get('photos', []))} шт.\n\n"
-        f"Подтвердить создание?"
+        f"{status_emoji} <b>Посылка #{delivery.id}</b>\n\n"
+        f"Получатель: {delivery.recipient}\n"
+        f"Квартира: {delivery.apartment or '—'}\n"
+        f"Курьер: {delivery.courier_service or '—'}\n"
+        f"Статус: {delivery.status}\n"
+        f"Комментарий: {delivery.comment or '—'}\n"
+        f"Создана: {delivery.created_at.strftime('%d.%m.%Y %H:%M')}"
     )
-    await message.answer(text, reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
-        resize_keyboard=True
-    ))
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Комментарии", callback_data=f"delivery_comment_menu:{delivery_id}")],
+        [InlineKeyboardButton(text="📷 Фото", callback_data=f"delivery_photo:{delivery_id}")],
+        [InlineKeyboardButton(text="📜 История", callback_data=f"delivery_history:{delivery_id}")],
+    ])
+    if delivery.status == "pending":
+        kb.inline_keyboard.append([InlineKeyboardButton(text="📥 Получено", callback_data=f"delivery_receive:{delivery_id}")])
+    elif delivery.status == "received":
+        kb.inline_keyboard.append([InlineKeyboardButton(text="✅ Завершить", callback_data=f"delivery_complete:{delivery_id}")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="delivery_back")])
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
 
-@router.message(StateFilter(DocumentCreate.confirm), F.text == "✅ Да, создать")
-async def document_confirm(message: Message, state: FSMContext):
-    data = await state.get_data()
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка.")
-        await state.clear()
-        return
-    try:
-        doc = await create_document(
-            name=data['name'],
-            doc_type=data.get('type'),
-            sender=data.get('sender'),
-            recipient=data.get('recipient'),
-            comment=data.get('comment'),
-            photo_ids=data.get('photos', []),
-            created_by=employee.id
-        )
-        await state.clear()
-        await message.answer(f"✅ Документ #{doc.id} создан!", reply_markup=document_menu_keyboard())
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
-        await state.clear()
-
-@router.message(StateFilter(DocumentCreate.confirm), F.text == "❌ Отмена")
-async def document_cancel(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Отменено", reply_markup=document_menu_keyboard())
-
-# ---- Список активных и архив (заглушки) ----
-@router.message(F.text == "📋 Активные посылки")
-async def list_active_deliveries(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка")
-        return
-    deliveries = await get_all_deliveries(status=None, limit=20)
-    if not deliveries:
-        await message.answer("Нет активных посылок.")
-        return
-    text = "📋 Активные посылки:\n\n"
-    for d in deliveries:
-        status_emoji = "🟡" if d.status == "pending" else "🔵" if d.status == "received" else "✅"
-        text += f"{status_emoji} #{d.id} {d.recipient} (кв.{d.apartment or '—'}) – {d.status}\n"
-    await message.answer(text, reply_markup=delivery_menu_keyboard())
-
-@router.message(F.text == "📦 Архив посылок")
-async def archive_deliveries(message: Message):
-    # можно фильтровать по статусу completed
-    await message.answer("📦 Архив посылок (в разработке)", reply_markup=delivery_menu_keyboard())
-
-@router.message(F.text == "📋 Активные документы")
-async def list_active_documents(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка")
-        return
-    docs = await get_documents(status='active', limit=20)
-    if not docs:
-        await message.answer("Нет активных документов.")
-        return
-    text = "📋 Активные документы:\n\n"
-    for d in docs:
-        type_emoji = "📥" if d.doc_type == "incoming" else "📤"
-        text += f"{type_emoji} #{d.id} {d.name} ({d.doc_type}) – {d.status}\n"
-    await message.answer(text, reply_markup=document_menu_keyboard())
-
-@router.message(F.text == "📦 Архив документов")
-async def archive_documents(message: Message):
-    await message.answer("📦 Архив документов (в разработке)", reply_markup=document_menu_keyboard())
-
-@router.message(F.text == "⬅️ Назад")
-async def back_from_reception(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if employee and employee.role == UserRole.CONCIERGE:
-        from app.keyboards.concierge import concierge_keyboard
-        await message.answer("Главное меню", reply_markup=concierge_keyboard())
+@router.callback_query(F.data.startswith("delivery_receive:"))
+async def delivery_receive(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    delivery = await update_delivery_status(delivery_id, "received")
+    if delivery:
+        await callback.answer("✅ Отмечено как получено")
+        await show_delivery_card(callback)
     else:
-        from app.keyboards.main_menu import main_menu_keyboard
-        await message.answer("Главное меню", reply_markup=main_menu_keyboard(employee.role) if employee else None)
+        await callback.answer("Ошибка", show_alert=True)
+
+@router.callback_query(F.data.startswith("delivery_complete:"))
+async def delivery_complete(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    delivery = await update_delivery_status(delivery_id, "completed")
+    if delivery:
+        await callback.answer("✅ Завершено")
+        await show_delivery_card(callback)
+    else:
+        await callback.answer("Ошибка", show_alert=True)
+
+# ========== Комментарии ==========
+@router.callback_query(F.data.startswith("delivery_comment_menu:"))
+async def delivery_comment_menu(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    await callback.message.delete()
+    await callback.message.answer(
+        "💬 Меню комментариев:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"delivery_comment_list:{delivery_id}")],
+            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"delivery_comment_add:{delivery_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delivery_comment_back:{delivery_id}")],
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("delivery_comment_list:"))
+async def delivery_comment_list(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    delivery = await get_delivery(delivery_id)
+    if not delivery:
+        await callback.answer("Не найдено", show_alert=True)
+        return
+    comments = delivery.comments or []
+    if not comments:
+        text = "💬 Комментариев пока нет."
+    else:
+        text = f"💬 <b>Комментарии к посылке #{delivery_id}</b>\n\n"
+        for c in comments[:10]:
+            user_name = c.get("author_name", "—")
+            created_at = c.get("created_at", "")
+            text += f"👤 {user_name} | {created_at}\n"
+            text += f"{c.get('text', '')}\n\n"
+    await callback.message.delete()
+    await callback.message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"delivery_comment_menu:{delivery_id}")]
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("delivery_comment_add:"))
+async def delivery_comment_add(callback: CallbackQuery, state: FSMContext):
+    delivery_id = int(callback.data.split(":")[1])
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    await state.set_state(DeliveryCommentState.waiting_for_comment)
+    await state.update_data(delivery_id=delivery_id)
+    await callback.message.delete()
+    await callback.message.answer("✍️ Введите текст комментария:")
+    await callback.answer()
+
+@router.message(StateFilter(DeliveryCommentState.waiting_for_comment), F.text)
+async def delivery_comment_process(message: Message, state: FSMContext):
+    data = await state.get_data()
+    delivery_id = data.get("delivery_id")
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Ошибка")
+        await state.clear()
+        return
+    comment = await add_delivery_comment(delivery_id, employee.id, employee.full_name, message.text)
+    if comment:
+        await message.answer("✅ Комментарий добавлен.")
+    else:
+        await message.answer("❌ Ошибка.")
+    await state.clear()
+    await message.answer(
+        "💬 Меню комментариев:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"delivery_comment_list:{delivery_id}")],
+            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"delivery_comment_add:{delivery_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delivery_comment_back:{delivery_id}")],
+        ])
+    )
+
+@router.callback_query(F.data.startswith("delivery_comment_back:"))
+async def delivery_comment_back(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    await callback.message.delete()
+    await show_delivery_card(callback)
+    await callback.answer()
+
+# ========== Фото ==========
+@router.callback_query(F.data.startswith("delivery_photo:"))
+async def delivery_photo(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    delivery = await get_delivery(delivery_id)
+    if not delivery or not delivery.photo_ids:
+        await callback.answer("Нет фото", show_alert=True)
+        return
+    await callback.message.delete()
+    for file_id in delivery.photo_ids:
+        await callback.message.answer_photo(file_id)
+    await callback.message.answer(
+        "⬅️ Назад",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delivery:{delivery_id}")]
+        ])
+    )
+    await callback.answer()
+
+# ========== История ==========
+@router.callback_query(F.data.startswith("delivery_history:"))
+async def delivery_history(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    history = await get_delivery_history(delivery_id)
+    if not history:
+        await callback.answer("История пуста", show_alert=True)
+        return
+    text = f"📜 <b>История посылки #{delivery_id}</b>\n\n"
+    for entry in history[:10]:
+        text += f"🕒 {entry.get('created_at', '')}\n"
+        text += f"👤 {entry.get('author', 'Система')}\n"
+        text += f"📌 {entry.get('action', '')}\n"
+        text += f"📝 {entry.get('description', '')}\n\n"
+    await callback.message.delete()
+    await callback.message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delivery:{delivery_id}")]
+        ])
+    )
+    await callback.answer()
+
+# ========== Архив ==========
+@router.message(F.text == "📦 Архив доставки")
+async def delivery_archive(message: Message):
+    employee = await get_employee(message.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+        await message.answer("Нет прав.")
+        return
+    deliveries = await get_all_deliveries(status="completed", limit=50)
+    if not deliveries:
+        await message.answer("Архив пуст.")
+        return
+    text = "📦 Архив посылок:\n\n"
+    for d in deliveries:
+        text += f"#{d.id} {d.recipient} ({d.status})\n"
+    await message.answer(text)
+
+# ========== Назад ==========
+@router.callback_query(F.data == "delivery_back")
+async def delivery_back(callback: CallbackQuery):
+    await callback.message.delete()
+    employee = await get_employee(callback.from_user.id)
+    await callback.message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
+    await callback.answer()

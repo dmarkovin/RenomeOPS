@@ -1,15 +1,16 @@
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
 
 from app.services.employees.service import get_employee
-from app.services.reception.key_service import create_key, get_key, get_keys, return_key
-from app.database.models import UserRole
-from app.keyboards.reception_keys import (
-    key_list_keyboard, key_action_keyboard, key_main_menu_keyboard
+from app.services.reception.key_service import (
+    create_key, get_key, get_keys, return_key,
+    add_key_comment, get_key_history
 )
+from app.database.models import UserRole
+from app.keyboards.reception_keys import key_main_menu_keyboard, key_list_keyboard
 
 router = Router()
 
@@ -20,6 +21,10 @@ class KeyCreate(StatesGroup):
     comment = State()
     confirm = State()
 
+class KeyCommentState(StatesGroup):
+    waiting_for_comment = State()
+
+# ========== Главное меню ==========
 @router.message(F.text == "🔑 Ключи")
 async def keys_menu(message: Message, page: int = 1, status: str = None):
     employee = await get_employee(message.from_user.id)
@@ -37,7 +42,7 @@ async def keys_menu(message: Message, page: int = 1, status: str = None):
         await message.answer("Нет записей.", reply_markup=key_main_menu_keyboard())
         return
 
-    text = "📋 Список ключей:\n\n"
+    text = "🔑 Список ключей:\n\n"
     for k in keys:
         status_emoji = "🔑" if k.status == "issued" else "✅"
         text += f"{status_emoji} #{k.id} {k.key_number} – {k.recipient} ({k.status})\n"
@@ -126,6 +131,7 @@ async def cancel_create_key(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=key_main_menu_keyboard())
 
+# ========== Карточка ключа ==========
 @router.callback_query(F.data.startswith("key:"))
 async def show_key_card(callback: CallbackQuery):
     key_id = int(callback.data.split(":")[1])
@@ -143,7 +149,14 @@ async def show_key_card(callback: CallbackQuery):
         f"Статус: {k.status}\n"
         f"Комментарий: {k.comment or '—'}"
     )
-    await callback.message.edit_text(text, reply_markup=key_action_keyboard(k.id, k.status))
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Комментарии", callback_data=f"key_comment_menu:{key_id}")],
+        [InlineKeyboardButton(text="📜 История", callback_data=f"key_history:{key_id}")],
+    ])
+    if k.status == "issued":
+        kb.inline_keyboard.append([InlineKeyboardButton(text="✅ Вернуть", callback_data=f"key_return:{key_id}")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back")])
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("key_return:"))
@@ -156,15 +169,127 @@ async def key_return(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
+# ========== Комментарии ==========
+@router.callback_query(F.data.startswith("key_comment_menu:"))
+async def key_comment_menu(callback: CallbackQuery):
+    key_id = int(callback.data.split(":")[1])
+    await callback.message.delete()
+    await callback.message.answer(
+        "💬 Меню комментариев:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"key_comment_list:{key_id}")],
+            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"key_comment_add:{key_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_comment_back:{key_id}")],
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("key_comment_list:"))
+async def key_comment_list(callback: CallbackQuery):
+    key_id = int(callback.data.split(":")[1])
+    k = await get_key(key_id)
+    if not k:
+        await callback.answer("Не найден", show_alert=True)
+        return
+    comments = k.comments or []
+    if not comments:
+        text = "💬 Комментариев пока нет."
+    else:
+        text = f"💬 <b>Комментарии к ключу #{key_id}</b>\n\n"
+        for c in comments[:10]:
+            user_name = c.get("author_name", "—")
+            created_at = c.get("created_at", "")
+            text += f"👤 {user_name} | {created_at}\n"
+            text += f"{c.get('text', '')}\n\n"
+    await callback.message.delete()
+    await callback.message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"key_comment_menu:{key_id}")]
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("key_comment_add:"))
+async def key_comment_add(callback: CallbackQuery, state: FSMContext):
+    key_id = int(callback.data.split(":")[1])
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    await state.set_state(KeyCommentState.waiting_for_comment)
+    await state.update_data(key_id=key_id)
+    await callback.message.delete()
+    await callback.message.answer("✍️ Введите текст комментария:")
+    await callback.answer()
+
+@router.message(StateFilter(KeyCommentState.waiting_for_comment), F.text)
+async def key_comment_process(message: Message, state: FSMContext):
+    data = await state.get_data()
+    key_id = data.get("key_id")
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Ошибка")
+        await state.clear()
+        return
+    comment = await add_key_comment(key_id, employee.id, employee.full_name, message.text)
+    if comment:
+        await message.answer("✅ Комментарий добавлен.")
+    else:
+        await message.answer("❌ Ошибка.")
+    await state.clear()
+    await message.answer(
+        "💬 Меню комментариев:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"key_comment_list:{key_id}")],
+            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"key_comment_add:{key_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_comment_back:{key_id}")],
+        ])
+    )
+
+@router.callback_query(F.data.startswith("key_comment_back:"))
+async def key_comment_back(callback: CallbackQuery):
+    key_id = int(callback.data.split(":")[1])
+    await callback.message.delete()
+    await show_key_card(callback)
+    await callback.answer()
+
+# ========== История ==========
+@router.callback_query(F.data.startswith("key_history:"))
+async def key_history(callback: CallbackQuery):
+    key_id = int(callback.data.split(":")[1])
+    history = await get_key_history(key_id)
+    if not history:
+        await callback.answer("История пуста", show_alert=True)
+        return
+    text = f"📜 <b>История ключа #{key_id}</b>\n\n"
+    for entry in history[:10]:
+        text += f"🕒 {entry.get('created_at', '')}\n"
+        text += f"👤 {entry.get('author', 'Система')}\n"
+        text += f"📌 {entry.get('action', '')}\n"
+        text += f"📝 {entry.get('description', '')}\n\n"
+    await callback.message.delete()
+    await callback.message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key:{key_id}")]
+        ])
+    )
+    await callback.answer()
+
+# ========== Пагинация ==========
 @router.callback_query(F.data.startswith("key_page:"))
 async def paginate_keys(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
     await keys_menu(callback.message, page)
     await callback.answer()
 
+# ========== Назад ==========
 @router.callback_query(F.data == "key_back")
-async def back_to_key_menu(callback: CallbackQuery):
+async def key_back(callback: CallbackQuery):
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
-    await callback.message.answer("Меню ключей", reply_markup=key_main_menu_keyboard())
+    await callback.message.answer("🔑 Меню ключей:", reply_markup=key_main_menu_keyboard())
     await callback.answer()
