@@ -1,4 +1,3 @@
-from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -99,15 +98,13 @@ async def change_task_status(callback: CallbackQuery):
     task_id = int(parts[1])
     status_str = parts[2]
     status_map = {
-        "pause": "paused",
-        "resume": "in_progress",
-        "pause": "paused",
-        "resume": "in_progress",
         "accept": "accepted",
         "start": "in_progress",
         "check": "checking",
         "close": "closed",
         "rework": "in_progress",
+        "pause": "paused",
+        "resume": "in_progress",
     }
     new_status = status_map.get(status_str)
     if not new_status:
@@ -442,7 +439,7 @@ async def process_wait_comment(message: Message, state: FSMContext):
     hours = data.get("hours")
     comment = message.text.strip()
     if not comment:
-        await message.answer("Комментарий обязателен. Введите текст:", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Комментарий обязателен. Введите текст:")
         return
     employee = await get_employee(message.from_user.id)
     if not employee:

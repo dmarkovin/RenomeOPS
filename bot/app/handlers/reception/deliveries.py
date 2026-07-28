@@ -9,6 +9,9 @@ from app.services.reception.delivery_service import (
     create_delivery, get_all_deliveries, get_delivery,
     update_delivery_status, add_delivery_comment, get_delivery_history
 )
+from app.services.reception.document_service import (
+    create_document, get_documents, get_document, update_document_status
+)
 from app.database.models import UserRole
 from app.keyboards.reception import reception_menu_keyboard
 
@@ -18,6 +21,15 @@ class DeliveryCreate(StatesGroup):
     recipient = State()
     apartment = State()
     courier = State()
+    comment = State()
+    photo = State()
+    confirm = State()
+
+class DocumentCreate(StatesGroup):
+    name = State()
+    type = State()
+    sender = State()
+    recipient = State()
     comment = State()
     photo = State()
     confirm = State()

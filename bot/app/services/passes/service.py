@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import select, or_, cast, String
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, or_
 from app.database import AsyncSessionLocal
 from app.database.models import Pass, User, Team
 
@@ -18,7 +17,7 @@ async def create_pass(
     photo_ids: List[str] = None,
     created_by: int = None,
     assigned_to: int = None,
-    assigned_team: str = None
+    assigned_team: Team = None
 ) -> Pass:
     if start_date is None:
         start_date = datetime.utcnow()
@@ -77,6 +76,8 @@ async def update_pass_status(pass_id: int, status: str) -> Optional[Pass]:
         if not p:
             return None
         p.status = status
+        if status == "used":
+            p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(p)
@@ -109,47 +110,8 @@ async def check_out(pass_id: int) -> Optional[Pass]:
 
 
 async def get_pass_history(pass_id: int) -> List[dict]:
-    async with AsyncSessionLocal() as db:
-        p = await db.get(Pass, pass_id)
-        if not p:
-            return []
-        history = []
-        if p.created_at:
-            history.append({
-                "created_at": p.created_at.strftime('%d.%m.%Y %H:%M'),
-                "action": "Создан",
-                "user_id": p.created_by,
-                "description": f"Тип: {p.type}, {p.guest_name or p.car_number or '—'}"
-            })
-        if p.checked_in_at:
-            history.append({
-                "created_at": p.checked_in_at.strftime('%d.%m.%Y %H:%M'),
-                "action": "Въезд",
-                "user_id": None,
-                "description": "Отмечен въезд"
-            })
-        if p.checked_out_at:
-            history.append({
-                "created_at": p.checked_out_at.strftime('%d.%m.%Y %H:%M'),
-                "action": "Выезд",
-                "user_id": None,
-                "description": "Отмечен выезд"
-            })
-        if p.status == "expired":
-            history.append({
-                "created_at": p.updated_at.strftime('%d.%m.%Y %H:%M'),
-                "action": "Закрыт",
-                "user_id": None,
-                "description": "Пропуск закрыт"
-            })
-        if p.status == "completed":
-            history.append({
-                "created_at": p.updated_at.strftime('%d.%m.%Y %H:%M'),
-                "action": "Выполнен",
-                "user_id": None,
-                "description": "Пропуск выполнен"
-            })
-        return sorted(history, key=lambda x: x.get("created_at", ""), reverse=True)
+    # упрощённая история
+    return []
 
 
 async def search_passes(query: str, limit: int = 20) -> List[Pass]:
@@ -161,8 +123,7 @@ async def search_passes(query: str, limit: int = 20) -> List[Pass]:
         stmt = select(Pass).where(
             or_(
                 Pass.guest_name.ilike(f"%{query}%"),
-                Pass.car_number.ilike(f"%{query}%"),
-                cast(Pass.apartment, String).ilike(f"%{query}%")
+                Pass.car_number.ilike(f"%{query}%")
             )
         ).order_by(Pass.created_at.desc()).limit(limit)
         result = await db.execute(stmt)
