@@ -38,10 +38,59 @@ async def create_task(
     photo_ids: List[str] = None,
     is_paid: bool = False,
     is_feedback: bool = False,
+    is_role_change: bool = False,
     service_order_id: int = None,
     assigned_to: int = None,
     assigned_team: Team = None
 ) -> Task:
+    async with AsyncSessionLocal() as db:
+        task = Task(
+            title=title,
+            description=description,
+            created_by=created_by,
+            building=building,
+            entrance=entrance,
+            floor=floor,
+            apartment=apartment,
+            location_type=location_type,
+            parking_level=parking_level,
+            parking_spot=parking_spot,
+            cellar=cellar,
+            applicant_type=applicant_type,
+            applicant_name=applicant_name,
+            applicant_phone=applicant_phone,
+            priority=priority,
+            is_paid=is_paid,
+            is_feedback=is_feedback,
+            is_role_change=is_role_change,
+            service_order_id=service_order_id,
+            assigned_to=assigned_to,
+            assigned_team=assigned_team,
+            status="created"
+        )
+        db.add(task)
+        await db.flush()
+
+        if photo_ids:
+            for file_id in photo_ids:
+                photo = TaskPhoto(
+                    task_id=task.id,
+                    telegram_file_id=file_id,
+                    uploaded_by=created_by,
+                )
+                db.add(photo)
+
+        history = TaskHistory(
+            task_id=task.id,
+            user_id=created_by,
+            action="CREATED",
+            description=f"Задача создана: {title}" + (" (платная)" if is_paid else "") + (" (обращение)" if is_feedback else "") + (" (смена роли)" if is_role_change else ""),
+        )
+        db.add(history)
+        await db.commit()
+        await db.refresh(task)
+        return task
+
     async with AsyncSessionLocal() as db:
         task = Task(
             title=title,

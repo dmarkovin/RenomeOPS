@@ -101,6 +101,8 @@ async def change_task_status(callback: CallbackQuery):
     status_map = {
         "pause": "paused",
         "resume": "in_progress",
+        "pause": "paused",
+        "resume": "in_progress",
         "accept": "accepted",
         "start": "in_progress",
         "check": "checking",
