@@ -20,6 +20,7 @@ from app.keyboards.assign import employee_selection_keyboard
 from app.keyboards.date_picker import date_selection_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
 from app.services.notification_service import notify_user, notify_concierges, notify_security, notify_team
+from app.database import AsyncSessionLocal
 
 router = Router()
 
@@ -274,7 +275,7 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             purpose=data.get("purpose"),
             start_date=data.get("start_date"),
             end_date=data.get("end_date"),
-            comment="",  # комментарий убран
+            comment="",
             photo_ids=[],
             created_by=employee.id,
             assigned_to=data.get("assigned_to"),
@@ -301,20 +302,18 @@ async def cancel_confirm(message: Message, state: FSMContext):
 
 # ========== Активные пропуска (все) ==========
 @router.message(F.text == "📋 Активные пропуски")
-async def list_active_passes(message: Message, page: int = 1):
+async def list_active_passes(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
         return
+    await state.update_data(pass_list_type='active', pass_page=page)
     limit = 10
-    offset = (page - 1) * limit
-    # Получаем все активные пропуска (без фильтра по assigned_to)
-    passes = await get_passes(status="active", limit=1000, offset=0)
-    total = len(passes)
+    all_passes = await get_passes(status="active", limit=1000, offset=0)
+    total = len(all_passes)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
-    # Обрезаем для текущей страницы
     start = (page - 1) * limit
-    passes_page = passes[start:start+limit]
+    passes_page = all_passes[start:start+limit]
 
     if not passes_page:
         await message.answer("Нет активных пропусков.")
@@ -323,7 +322,6 @@ async def list_active_passes(message: Message, page: int = 1):
     text = f"📋 Активные пропуски (стр. {page}/{total_pages}):\n\n"
     for p in passes_page:
         status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴"
-        # Формируем заголовок: статус #ID тип квартира цель
         label = f"{status_emoji} #{p.id} "
         if p.type == "guest":
             label += f"Гость: {p.guest_name or '—'}"
@@ -333,28 +331,31 @@ async def list_active_passes(message: Message, page: int = 1):
             label += f" | кв.{p.apartment}"
         label += f" | {p.purpose or '—'}"
         text += f"{label}\n"
-    await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
+
+    # Отправляем новое сообщение, сохраняем его ID в состоянии
+    sent = await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
+    await state.update_data(pass_message_id=sent.message_id, pass_chat_id=sent.chat.id)
 
 # ========== История пропусков ==========
 @router.message(F.text == "📜 История пропусков")
-async def list_history(message: Message, page: int = 1):
+async def list_history(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
         return
+    await state.update_data(pass_list_type='history', pass_page=page)
     limit = 10
-    offset = (page - 1) * limit
-    passes = await get_passes(status=['used', 'expired', 'completed'], limit=1000, offset=0)
-    total = len(passes)
+    all_passes = await get_passes(status=['used', 'expired', 'completed'], limit=1000, offset=0)
+    total = len(all_passes)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
     start = (page - 1) * limit
-    passes_page = passes[start:start+limit]
+    passes_page = all_passes[start:start+limit]
 
     if not passes_page:
         await message.answer("История пуста.")
         return
 
-    text = "📜 История пропусков (стр. {page}/{total_pages}):\n\n"
+    text = f"📜 История пропусков (стр. {page}/{total_pages}):\n\n"
     for p in passes_page:
         status_emoji = "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
         label = f"{status_emoji} #{p.id} "
@@ -366,7 +367,9 @@ async def list_history(message: Message, page: int = 1):
             label += f" | кв.{p.apartment}"
         label += f" | {p.purpose or '—'}"
         text += f"{label}\n"
-    await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
+
+    sent = await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
+    await state.update_data(pass_message_id=sent.message_id, pass_chat_id=sent.chat.id)
 
 # ========== Поиск по пропускам ==========
 @router.message(F.text == "🔍 Поиск по пропускам")
@@ -495,18 +498,65 @@ async def pass_close(callback: CallbackQuery):
 
 # ========== Пагинация и возврат ==========
 @router.callback_query(F.data.startswith("pass_page:"))
-async def paginate_passes(callback: CallbackQuery):
+async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
     page = int(callback.data.split(":")[1])
-    await callback.message.delete()
-    # Определяем, из какого списка пришли (активные или история)
-    # Для простоты будем открывать активные, но можно сохранять в состоянии
-    await list_active_passes(callback.message, page)
+    if page < 1:
+        page = 1
+    data = await state.get_data()
+    list_type = data.get('pass_list_type', 'active')
+    # Получаем сохранённый message_id
+    message_id = data.get('pass_message_id')
+    chat_id = data.get('pass_chat_id')
+    if not message_id or not chat_id:
+        # если нет сохранённого, используем текущий callback.message
+        message_id = callback.message.message_id
+        chat_id = callback.message.chat.id
+
+    limit = 10
+    if list_type == 'active':
+        all_items = await get_passes(status="active", limit=1000, offset=0)
+        title = "📋 Активные пропуски"
+    else:
+        all_items = await get_passes(status=['used', 'expired', 'completed'], limit=1000, offset=0)
+        title = "📜 История пропусков"
+
+    total = len(all_items)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    start = (page - 1) * limit
+    items_page = all_items[start:start+limit]
+
+    if not items_page:
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"{title}\n\nНет записей.")
+        await callback.answer()
+        return
+
+    text = f"{title} (стр. {page}/{total_pages}):\n\n"
+    for p in items_page:
+        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
+        label = f"{status_emoji} #{p.id} "
+        if p.type == "guest":
+            label += f"Гость: {p.guest_name or '—'}"
+        else:
+            label += f"Авто: {p.car_number or '—'}"
+        if p.apartment:
+            label += f" | кв.{p.apartment}"
+        label += f" | {p.purpose or '—'}"
+        text += f"{label}\n"
+
+    await bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=message_id,
+        text=text,
+        reply_markup=pass_list_keyboard(items_page, page, total_pages)
+    )
     await callback.answer()
 
 @router.callback_query(F.data == "pass_back")
-async def back_to_pass_list(callback: CallbackQuery):
+async def back_to_pass_list(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(pass_list_type='active', pass_page=1)
     await callback.message.delete()
-    await list_active_passes(callback.message, 1)
+    # Заново показываем список
+    await list_active_passes(callback.message, state, 1)
     await callback.answer()
 
 @router.callback_query(F.data == "pass_menu_back")

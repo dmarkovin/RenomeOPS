@@ -26,7 +26,7 @@ class KeyCommentState(StatesGroup):
 
 # ========== Главное меню ==========
 @router.message(F.text == "🔑 Ключи")
-async def keys_menu(message: Message, page: int = 1, status: str = None):
+async def keys_menu(message: Message, state: FSMContext, page: int = 1, status: str = None):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("У вас нет прав.")
@@ -46,15 +46,17 @@ async def keys_menu(message: Message, page: int = 1, status: str = None):
     for k in keys:
         status_emoji = "🔑" if k.status == "issued" else "✅"
         text += f"{status_emoji} #{k.id} {k.key_number} – {k.recipient} ({k.status})\n"
-    await message.answer(text, reply_markup=key_list_keyboard(keys, page, total_pages))
+
+    sent = await message.answer(text, reply_markup=key_list_keyboard(keys, page, total_pages))
+    await state.update_data(key_message_id=sent.message_id, key_chat_id=sent.chat.id, key_status=status)
 
 @router.message(F.text == "📋 Список выданных")
-async def list_issued_keys(message: Message):
-    await keys_menu(message, status="issued")
+async def list_issued_keys(message: Message, state: FSMContext):
+    await keys_menu(message, state, status="issued")
 
 @router.message(F.text == "📋 Возвращённые")
-async def list_returned_keys(message: Message):
-    await keys_menu(message, status="returned")
+async def list_returned_keys(message: Message, state: FSMContext):
+    await keys_menu(message, state, status="returned")
 
 @router.message(F.text == "➕ Выдать ключ")
 async def start_create_key(message: Message, state: FSMContext):
@@ -281,9 +283,38 @@ async def key_history(callback: CallbackQuery):
 
 # ========== Пагинация ==========
 @router.callback_query(F.data.startswith("key_page:"))
-async def paginate_keys(callback: CallbackQuery):
+async def paginate_keys(callback: CallbackQuery, state: FSMContext, bot):
     page = int(callback.data.split(":")[1])
-    await keys_menu(callback.message, page)
+    data = await state.get_data()
+    message_id = data.get('key_message_id')
+    chat_id = data.get('key_chat_id')
+    status = data.get('key_status')
+    if not message_id or not chat_id:
+        message_id = callback.message.message_id
+        chat_id = callback.message.chat.id
+
+    limit = 10
+    offset = (page - 1) * limit
+    keys = await get_keys(status=status, limit=limit, offset=offset)
+    total = len(keys)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+    if not keys:
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="Нет записей.")
+        await callback.answer()
+        return
+
+    text = "🔑 Список ключей:\n\n"
+    for k in keys:
+        status_emoji = "🔑" if k.status == "issued" else "✅"
+        text += f"{status_emoji} #{k.id} {k.key_number} – {k.recipient} ({k.status})\n"
+
+    await bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=message_id,
+        text=text,
+        reply_markup=key_list_keyboard(keys, page, total_pages)
+    )
     await callback.answer()
 
 # ========== Назад ==========

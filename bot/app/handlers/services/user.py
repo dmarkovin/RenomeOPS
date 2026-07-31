@@ -404,3 +404,19 @@ async def show_user_orders(message: Message):
         service_name = service.name if service else "Неизвестно"
         text += f"ID: {o.id} | Услуга: {service_name} | Статус: {o.status} | {o.created_at.strftime('%d.%m.%Y %H:%M')}\n"
     await message.answer(text)
+
+# ========== ОБРАБОТЧИК КНОПКИ "НАЗАД" ==========
+@router.callback_query(F.data == "service_back")
+async def service_back(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    # Возвращаем в главное меню
+    await callback.message.delete()
+    await callback.message.answer(
+        "Главное меню:",
+        reply_markup=main_menu_keyboard(employee.role)
+    )
+    await callback.answer()

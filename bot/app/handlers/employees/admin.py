@@ -127,6 +127,11 @@ async def block_employee_callback(callback: CallbackQuery):
         await callback.answer("Нет прав", show_alert=True)
         return
 
+    # Проверка, что администратор не блокирует самого себя
+    if user_id == admin.id:
+        await callback.answer("Вы не можете заблокировать самого себя!", show_alert=True)
+        return
+
     emp = await block_employee(user_id)
     if emp:
         await callback.answer("Сотрудник заблокирован", show_alert=True)
@@ -141,6 +146,11 @@ async def activate_employee_callback(callback: CallbackQuery):
     admin = await get_employee(callback.from_user.id)
     if not admin or admin.role != UserRole.ADMIN:
         await callback.answer("Нет прав", show_alert=True)
+        return
+
+    # Проверка, что администратор не активирует самого себя (хотя это логично)
+    if user_id == admin.id:
+        await callback.answer("Вы уже активны.", show_alert=True)
         return
 
     emp = await activate_employee_by_admin(user_id)
@@ -159,10 +169,17 @@ async def delete_employee_callback(callback: CallbackQuery):
         await callback.answer("Нет прав", show_alert=True)
         return
 
+    # Проверка, что администратор не удаляет самого себя
+    if user_id == admin.id:
+        await callback.answer("Вы не можете удалить самого себя!", show_alert=True)
+        return
+
     success = await delete_employee(user_id)
     if success:
         await callback.answer("Сотрудник удалён", show_alert=True)
-        await callback.message.edit_text("Сотрудник удалён.")
+        # Удаляем сообщение и показываем обновлённый список
+        await callback.message.delete()
+        await list_employees(callback.message, page=1)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
@@ -195,13 +212,11 @@ async def set_role(callback: CallbackQuery):
         await callback.answer("Нет прав", show_alert=True)
         return
 
-    # Мгновенно меняем роль
     emp = await update_employee_role(user_id, new_role)
     if not emp:
         await callback.answer("Ошибка", show_alert=True)
         return
 
-    # Автоматически меняем команду на дефолтную для этой роли
     default_team = get_default_team_for_role(new_role)
     if default_team:
         emp = await update_employee_team(user_id, default_team)
@@ -273,6 +288,9 @@ async def start_search(message: Message, state: FSMContext):
     admin = await get_employee(message.from_user.id)
     if not admin or admin.role != UserRole.ADMIN:
         await message.answer("Нет прав.")
+        return
+    if not admin.active:
+        await message.answer("Ваш аккаунт неактивен. Обратитесь к администратору.")
         return
     await state.set_state(EmployeeSearch.query)
     await message.answer("Введите ФИО или телефон для поиска:")

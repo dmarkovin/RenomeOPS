@@ -21,11 +21,14 @@ class PatrolCreate(StatesGroup):
     confirm = State()
 
 @router.message(F.text == "🚶 Обходы")
-async def patrol_menu(message: Message, page: int = 1):
+async def patrol_menu(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.SECURITY, UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("У вас нет прав.")
         return
+
+    # Сохраняем страницу в состояние (для возврата)
+    await state.update_data(patrol_page=page)
 
     limit = 10
     offset = (page - 1) * limit
@@ -34,14 +37,23 @@ async def patrol_menu(message: Message, page: int = 1):
     total_pages = (total + limit - 1) // limit if total > 0 else 1
 
     if not patrols:
-        await message.answer("Нет обходов.", reply_markup=patrol_main_menu_keyboard())
+        text = "Нет обходов."
+        if hasattr(message, 'edit_text'):
+            await message.edit_text(text, reply_markup=patrol_main_menu_keyboard())
+        else:
+            await message.answer(text, reply_markup=patrol_main_menu_keyboard())
         return
 
     text = "🚶 Список обходов:\n\n"
     for p in patrols:
         status_emoji = "🔄" if p.status == "active" else "✅"
         text += f"{status_emoji} #{p.id} {p.route} ({p.status})\n"
-    await message.answer(text, reply_markup=patrol_list_keyboard(patrols, page, total_pages))
+
+    kb = patrol_list_keyboard(patrols, page, total_pages)
+    if hasattr(message, 'edit_text'):
+        await message.edit_text(text, reply_markup=kb)
+    else:
+        await message.answer(text, reply_markup=kb)
 
 @router.message(F.text == "➕ Новый обход")
 async def start_create_patrol(message: Message, state: FSMContext):
@@ -171,14 +183,14 @@ async def patrol_complete(callback: CallbackQuery):
         await callback.answer("Ошибка", show_alert=True)
 
 @router.callback_query(F.data.startswith("patrol_page:"))
-async def paginate_patrols(callback: CallbackQuery):
+async def paginate_patrols(callback: CallbackQuery, state: FSMContext):
     page = int(callback.data.split(":")[1])
-    await patrol_menu(callback.message, page)
+    # Редактируем текущее сообщение
+    await patrol_menu(callback.message, state, page)
     await callback.answer()
 
 @router.callback_query(F.data == "patrol_back")
-async def back_to_patrol_menu(callback: CallbackQuery):
-    await callback.message.delete()
-    employee = await get_employee(callback.from_user.id)
-    await callback.message.answer("Меню обходов", reply_markup=patrol_main_menu_keyboard())
+async def back_to_patrol_menu(callback: CallbackQuery, state: FSMContext):
+    # Возврат к списку с первой страницы
+    await patrol_menu(callback.message, state, 1)
     await callback.answer()

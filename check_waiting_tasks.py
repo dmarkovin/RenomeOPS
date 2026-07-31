@@ -44,7 +44,7 @@ async def check_waiting_tasks():
                         )
                     except Exception as e:
                         print(f"Ошибка отправки уведомления: {e}")
-    await bot.session.close()
+    await bot.close()
 
 if __name__ == "__main__":
     asyncio.run(check_waiting_tasks())

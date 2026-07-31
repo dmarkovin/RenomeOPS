@@ -31,6 +31,10 @@ class Settings:
 
 settings = Settings()
 
+# Проверка обязательного токена
+if not settings.BOT_TOKEN:
+    raise ValueError("BOT_TOKEN не задан в переменных окружения")
+
 BOT_TOKEN = settings.BOT_TOKEN
 POSTGRES_HOST = settings.DB_HOST
 POSTGRES_PORT = settings.DB_PORT

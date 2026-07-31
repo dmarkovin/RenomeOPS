@@ -31,7 +31,7 @@ class DocumentCreate(StatesGroup):
     confirm = State()
 
 @router.message(F.text == "📄 Документы")
-async def documents_menu(message: Message, page: int = 1, doc_type: str = None, status: str = None):
+async def documents_menu(message: Message, state: FSMContext, page: int = 1, doc_type: str = None, status: str = None):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("У вас нет прав.")
@@ -51,28 +51,25 @@ async def documents_menu(message: Message, page: int = 1, doc_type: str = None, 
     for d in docs:
         type_emoji = {"incoming": "📥", "outgoing": "📤", "storage": "📦", "issued": "📋"}.get(d.doc_type, "📄")
         text += f"{type_emoji} #{d.id} {d.name} ({d.doc_type})\n"
-    await message.answer(text, reply_markup=doc_list_keyboard(docs, page, total_pages))
 
+    sent = await message.answer(text, reply_markup=doc_list_keyboard(docs, page, total_pages))
+    await state.update_data(doc_message_id=sent.message_id, doc_chat_id=sent.chat.id, doc_type=doc_type, doc_status=status)
 
 @router.message(F.text == "📋 Входящие")
-async def list_incoming(message: Message):
-    await documents_menu(message, doc_type="incoming")
-
+async def list_incoming(message: Message, state: FSMContext):
+    await documents_menu(message, state, doc_type="incoming")
 
 @router.message(F.text == "📋 Исходящие")
-async def list_outgoing(message: Message):
-    await documents_menu(message, doc_type="outgoing")
-
+async def list_outgoing(message: Message, state: FSMContext):
+    await documents_menu(message, state, doc_type="outgoing")
 
 @router.message(F.text == "📋 На хранении")
-async def list_storage(message: Message):
-    await documents_menu(message, doc_type="storage", status="active")
-
+async def list_storage(message: Message, state: FSMContext):
+    await documents_menu(message, state, doc_type="storage", status="active")
 
 @router.message(F.text == "📋 Выданные")
-async def list_issued(message: Message):
-    await documents_menu(message, doc_type="issued", status="active")
-
+async def list_issued(message: Message, state: FSMContext):
+    await documents_menu(message, state, doc_type="issued", status="active")
 
 @router.message(F.text == "➕ Новый документ")
 async def start_create_document(message: Message, state: FSMContext):
@@ -83,7 +80,6 @@ async def start_create_document(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(DocumentCreate.name)
     await message.answer("Введите название документа:", reply_markup=ReplyKeyboardRemove())
-
 
 @router.message(DocumentCreate.name)
 async def process_name(message: Message, state: FSMContext):
@@ -100,7 +96,6 @@ async def process_name(message: Message, state: FSMContext):
     await state.set_state(DocumentCreate.doc_type)
     await message.answer("Выберите тип документа:", reply_markup=kb)
 
-
 @router.message(DocumentCreate.doc_type)
 async def process_type(message: Message, state: FSMContext):
     type_map = {
@@ -116,14 +111,12 @@ async def process_type(message: Message, state: FSMContext):
     await state.set_state(DocumentCreate.number)
     await message.answer("Введите номер документа (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-
 @router.message(DocumentCreate.number)
 async def process_number(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(number=text if text != "-" else "")
     await state.set_state(DocumentCreate.sender)
     await message.answer("Введите отправителя (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
-
 
 @router.message(DocumentCreate.sender)
 async def process_sender(message: Message, state: FSMContext):
@@ -132,7 +125,6 @@ async def process_sender(message: Message, state: FSMContext):
     await state.set_state(DocumentCreate.recipient)
     await message.answer("Введите получателя (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-
 @router.message(DocumentCreate.recipient)
 async def process_recipient(message: Message, state: FSMContext):
     text = message.text.strip()
@@ -140,14 +132,12 @@ async def process_recipient(message: Message, state: FSMContext):
     await state.set_state(DocumentCreate.issued_to)
     await message.answer("Введите кому выдан (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-
 @router.message(DocumentCreate.issued_to)
 async def process_issued_to(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(issued_to=text if text != "-" else "")
     await state.set_state(DocumentCreate.issued_at)
     await message.answer("Введите дату выдачи (ДД.ММ.ГГГГ) или '-' для сегодня:", reply_markup=ReplyKeyboardRemove())
-
 
 @router.message(DocumentCreate.issued_at)
 async def process_issued_at(message: Message, state: FSMContext):
@@ -165,7 +155,6 @@ async def process_issued_at(message: Message, state: FSMContext):
     await state.set_state(DocumentCreate.comment)
     await message.answer("Введите комментарий (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-
 @router.message(DocumentCreate.comment)
 async def process_comment(message: Message, state: FSMContext):
     text = message.text.strip()
@@ -176,7 +165,6 @@ async def process_comment(message: Message, state: FSMContext):
         resize_keyboard=True
     ))
 
-
 @router.message(DocumentCreate.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -184,7 +172,6 @@ async def process_photo(message: Message, state: FSMContext):
     photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
     await message.answer(f"✅ Добавлено фото ({len(photos)})")
-
 
 @router.message(DocumentCreate.photo, F.text == "✅ Готово")
 async def finish_photo(message: Message, state: FSMContext):
@@ -207,7 +194,6 @@ async def finish_photo(message: Message, state: FSMContext):
         keyboard=[[types.KeyboardButton(text="✅ Да, создать")], [types.KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     ))
-
 
 @router.message(DocumentCreate.confirm, F.text == "✅ Да, создать")
 async def confirm_create(message: Message, state: FSMContext):
@@ -236,12 +222,10 @@ async def confirm_create(message: Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
 
-
 @router.message(DocumentCreate.confirm, F.text == "❌ Отмена")
 async def cancel_create(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=doc_main_menu_keyboard())
-
 
 # Карточка документа
 @router.callback_query(F.data.startswith("doc:"))
@@ -267,7 +251,6 @@ async def show_doc_card(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=doc_action_keyboard(d.id, d.status))
     await callback.answer()
 
-
 @router.callback_query(F.data.startswith("doc_return:"))
 async def doc_return(callback: CallbackQuery):
     doc_id = int(callback.data.split(":")[1])
@@ -278,13 +261,41 @@ async def doc_return(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-
 @router.callback_query(F.data.startswith("doc_page:"))
-async def paginate_docs(callback: CallbackQuery):
+async def paginate_docs(callback: CallbackQuery, state: FSMContext, bot):
     page = int(callback.data.split(":")[1])
-    await documents_menu(callback.message, page)
-    await callback.answer()
+    data = await state.get_data()
+    message_id = data.get('doc_message_id')
+    chat_id = data.get('doc_chat_id')
+    doc_type = data.get('doc_type')
+    doc_status = data.get('doc_status')
+    if not message_id or not chat_id:
+        message_id = callback.message.message_id
+        chat_id = callback.message.chat.id
 
+    limit = 10
+    offset = (page - 1) * limit
+    docs = await get_documents(doc_type=doc_type, status=doc_status, limit=limit, offset=offset)
+    total = len(docs)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+    if not docs:
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="Нет документов.")
+        await callback.answer()
+        return
+
+    text = "📋 Список документов:\n\n"
+    for d in docs:
+        type_emoji = {"incoming": "📥", "outgoing": "📤", "storage": "📦", "issued": "📋"}.get(d.doc_type, "📄")
+        text += f"{type_emoji} #{d.id} {d.name} ({d.doc_type})\n"
+
+    await bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=message_id,
+        text=text,
+        reply_markup=doc_list_keyboard(docs, page, total_pages)
+    )
+    await callback.answer()
 
 @router.callback_query(F.data == "doc_back")
 async def back_to_doc_menu(callback: CallbackQuery):

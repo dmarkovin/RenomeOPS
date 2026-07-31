@@ -97,11 +97,13 @@ async def start_handler(
 
     print(f"DEBUG: Received message: '{message.text}'")
 
+# Единственная версия become_admin с декоратором
+@router.message(Command("become_admin"))
 async def become_admin(message: Message):
     from app.config import settings
-    from app.database.models import UserRole
-    from app.services.employees.service import get_employee, update_employee_role
-    if str(message.from_user.id) != str(settings.ADMIN_TELEGRAM_ID):
+    from app.database.models import UserRole, Team
+    from app.services.employees.service import get_employee, update_employee_role, update_employee_team
+    if message.from_user.id not in settings.ADMIN_TELEGRAM_IDS:
         await message.answer("У вас нет прав.")
         return
     user = await get_employee(message.from_user.id)
@@ -109,8 +111,10 @@ async def become_admin(message: Message):
         await message.answer("Вы не зарегистрированы.")
         return
     await update_employee_role(user.id, UserRole.ADMIN)
-    await message.answer("✅ Ваша роль восстановлена до Администратора.")
+    await update_employee_team(user.id, Team.ADMIN_TEAM)
+    await message.answer("✅ Ваша роль восстановлена до Администратора, команда установлена как ADMIN_TEAM.")
 
+@router.message(Command("profile"))
 async def cmd_profile(message: Message):
     from app.services.employees.service import get_employee
     employee = await get_employee(message.from_user.id)
@@ -128,34 +132,3 @@ async def cmd_profile(message: Message):
         f"Дата регистрации: {employee.registered_at.strftime('%d.%m.%Y %H:%M') if employee.registered_at else '—'}"
     )
     await message.answer(text, parse_mode="HTML")
-
-async def become_admin(message: Message):
-    from app.config import settings
-    from app.database.models import UserRole, Team
-    from app.services.employees.service import get_employee, update_employee_role, update_employee_team
-    if message.from_user.id not in settings.ADMIN_TELEGRAM_IDS:
-        await message.answer("У вас нет прав.")
-        return
-    user = await get_employee(message.from_user.id)
-    if not user:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    await update_employee_role(user.id, UserRole.ADMIN)
-    await update_employee_team(user.id, Team.ADMIN_TEAM)
-    await message.answer("✅ Ваша роль восстановлена до Администратора, команда установлена как ADMIN_TEAM.")
-
-@router.message(Command("become_admin"))
-async def become_admin(message: Message):
-    from app.config import settings
-    from app.database.models import UserRole, Team
-    from app.services.employees.service import get_employee, update_employee_role, update_employee_team
-    if message.from_user.id not in settings.ADMIN_TELEGRAM_IDS:
-        await message.answer("У вас нет прав.")
-        return
-    user = await get_employee(message.from_user.id)
-    if not user:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    await update_employee_role(user.id, UserRole.ADMIN)
-    await update_employee_team(user.id, Team.ADMIN_TEAM)
-    await message.answer("✅ Ваша роль восстановлена до Администратора, команда установлена как ADMIN_TEAM.")
