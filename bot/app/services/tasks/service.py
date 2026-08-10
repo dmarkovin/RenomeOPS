@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import select, and_, or_, func, cast, String
 from sqlalchemy.orm import selectinload
@@ -14,6 +14,23 @@ from app.database.models import (
     UserRole,
     Team,
 )
+
+
+# ==========================
+# Допустимые переходы статусов
+# ==========================
+STATUS_TRANSITIONS = {
+    'created': ['accepted', 'waiting', 'paused', 'closed'],
+    'waiting': ['accepted', 'paused', 'closed'],
+    'accepted': ['in_progress', 'paused', 'closed'],
+    'in_progress': ['checking', 'paused', 'closed'],
+    'checking': ['closed', 'in_progress'],
+    'paused': ['in_progress', 'accepted', 'closed'],
+    'closed': [],
+}
+
+def can_transition(old_status: str, new_status: str) -> bool:
+    return new_status in STATUS_TRANSITIONS.get(old_status, [])
 
 
 # ==========================
@@ -190,79 +207,95 @@ async def count_tasks_for_employee(user_id: int, status: str = None) -> int:
 # ==========================
 async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
-        task = await db.get(Task, task_id)
-        if not task:
-            return None
-        task.assigned_team = team
-        task.assigned_to = None
-        task.updated_at = datetime.utcnow()
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=assigned_by,
-            action="ASSIGNED_TEAM",
-            description=f"Задача назначена на команду {team.value}",
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
+        async with db.begin():
+            task = await db.get(Task, task_id, with_for_update=True)
+            if not task:
+                return None
+            # Проверяем, что задача может быть назначена
+            if task.status not in ('created', 'waiting'):
+                return None
+            task.assigned_team = team
+            task.assigned_to = None
+            task.updated_at = datetime.now(timezone.utc)
+            history = TaskHistory(
+                task_id=task.id,
+                user_id=assigned_by,
+                action="ASSIGNED_TEAM",
+                description=f"Задача назначена на команду {team.value}",
+            )
+            db.add(history)
+            await db.commit()
+            await db.refresh(task)
+            return task
 
 
 # ==========================
-# Назначение на конкретного сотрудника
+# Назначение на конкретного сотрудника (с блокировкой)
 # ==========================
 async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
-        task = await db.get(Task, task_id)
-        if not task:
-            return None
-        employee = await db.get(User, user_id)
-        if not employee:
-            return None
-        task.assigned_to = user_id
-        task.assigned_team = employee.team
-        if task.status == "created":
-            task.status = "accepted"
-        task.updated_at = datetime.utcnow()
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=assigned_by,
-            action="ASSIGNED_USER",
-            description=f"Назначен исполнитель: {employee.full_name}",
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
+        async with db.begin():
+            task = await db.get(Task, task_id, with_for_update=True)
+            if not task:
+                return None
+            # Проверяем, что задача может быть назначена
+            if task.status not in ('created', 'waiting'):
+                return None
+            employee = await db.get(User, user_id)
+            if not employee or not employee.active:
+                return None
+            # Если задача требует команды, проверяем
+            if task.assigned_team and employee.team != task.assigned_team:
+                return None
+            task.assigned_to = user_id
+            task.assigned_team = employee.team
+            if task.status == "created":
+                task.status = "accepted"
+            task.updated_at = datetime.now(timezone.utc)
+            history = TaskHistory(
+                task_id=task.id,
+                user_id=assigned_by,
+                action="ASSIGNED_USER",
+                description=f"Назначен исполнитель: {employee.full_name}",
+            )
+            db.add(history)
+            await db.commit()
+            await db.refresh(task)
+            return task
 
 
 # ==========================
-# Взять задачу (исполнитель из команды)
+# Взять задачу (исполнитель из команды) с блокировкой
 # ==========================
 async def take_task(task_id: int, user_id: int) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
-        task = await db.get(Task, task_id)
-        if not task:
-            return None
-        employee = await db.get(User, user_id)
-        if not employee:
-            return None
-        if task.assigned_team != employee.team or task.assigned_to is not None:
-            return None
-        task.assigned_to = user_id
-        if task.status == "created":
-            task.status = "accepted"
-        task.updated_at = datetime.utcnow()
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=user_id,
-            action="TAKEN",
-            description=f"Сотрудник {employee.full_name} взял задачу в работу",
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
+        async with db.begin():
+            task = await db.get(Task, task_id, with_for_update=True)
+            if not task:
+                return None
+            # Проверяем, что задача не назначена и находится в подходящем статусе
+            if task.assigned_to is not None or task.status not in ('created', 'waiting', 'accepted'):
+                return None
+            employee = await db.get(User, user_id)
+            if not employee or not employee.active:
+                return None
+            # Проверяем, что сотрудник из нужной команды
+            if task.assigned_team and employee.team != task.assigned_team:
+                return None
+            task.assigned_to = user_id
+            if task.status == "created":
+                task.status = "accepted"
+            task.updated_at = datetime.now(timezone.utc)
+            history = TaskHistory(
+                task_id=task.id,
+                user_id=user_id,
+                action="TAKEN",
+                description=f"Сотрудник {employee.full_name} взял задачу в работу",
+            )
+            db.add(history)
+            await db.commit()
+            await db.refresh(task)
+            return task
 
 
 # ==========================
@@ -275,36 +308,37 @@ async def transfer_task(
     comment: str = None,
 ) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
-        task = await db.get(Task, task_id)
-        if not task:
-            return None
-        if task.assigned_to != from_user_id:
-            return None
-        new_assignee = await db.get(User, to_user_id)
-        if not new_assignee:
-            return None
-        old_assignee = await db.get(User, from_user_id)
-        old_name = old_assignee.full_name if old_assignee else "неизвестно"
-        task.assigned_to = to_user_id
-        task.assigned_team = new_assignee.team
-        task.updated_at = datetime.utcnow()
-        history_text = f"Передано от {old_name} к {new_assignee.full_name}"
-        if comment:
-            history_text += f"\nКомментарий: {comment}"
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=from_user_id,
-            action="TRANSFERRED",
-            description=history_text,
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
+        async with db.begin():
+            task = await db.get(Task, task_id, with_for_update=True)
+            if not task:
+                return None
+            if task.assigned_to != from_user_id:
+                return None
+            new_assignee = await db.get(User, to_user_id)
+            if not new_assignee or not new_assignee.active:
+                return None
+            old_assignee = await db.get(User, from_user_id)
+            old_name = old_assignee.full_name if old_assignee else "неизвестно"
+            task.assigned_to = to_user_id
+            task.assigned_team = new_assignee.team
+            task.updated_at = datetime.now(timezone.utc)
+            history_text = f"Передано от {old_name} к {new_assignee.full_name}"
+            if comment:
+                history_text += f"\nКомментарий: {comment}"
+            history = TaskHistory(
+                task_id=task.id,
+                user_id=from_user_id,
+                action="TRANSFERRED",
+                description=history_text,
+            )
+            db.add(history)
+            await db.commit()
+            await db.refresh(task)
+            return task
 
 
 # ==========================
-# Изменить статус
+# Изменить статус (с валидацией перехода)
 # ==========================
 async def change_status(
     task_id: int,
@@ -314,39 +348,43 @@ async def change_status(
     wait_until: datetime = None,
 ) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
-        task = await db.get(Task, task_id)
-        if not task:
-            return None
-        old_status = task.status
-        task.status = new_status
-        task.updated_at = datetime.utcnow()
-        if new_status == "closed":
-            task.closed_at = datetime.utcnow()
-        if new_status == "waiting" and wait_until:
-            task.wait_until = wait_until
-        else:
-            task.wait_until = None
+        async with db.begin():
+            task = await db.get(Task, task_id, with_for_update=True)
+            if not task:
+                return None
+            # Валидация перехода
+            if not can_transition(task.status, new_status):
+                return None
+            old_status = task.status
+            task.status = new_status
+            task.updated_at = datetime.now(timezone.utc)
+            if new_status == "closed":
+                task.closed_at = datetime.now(timezone.utc)
+            if new_status == "waiting" and wait_until:
+                task.wait_until = wait_until
+            else:
+                task.wait_until = None
 
-        action = f"Статус изменён: {old_status} → {new_status}"
-        if comment:
-            action += f"\nКомментарий: {comment}"
-        if wait_until:
-            action += f"\nОжидание до: {wait_until.strftime('%d.%m.%Y %H:%M')}"
+            action = f"Статус изменён: {old_status} → {new_status}"
+            if comment:
+                action += f"\nКомментарий: {comment}"
+            if wait_until:
+                action += f"\nОжидание до: {wait_until.strftime('%d.%m.%Y %H:%M')}"
 
-        history = TaskHistory(
-            task_id=task.id,
-            user_id=user_id,
-            action=f"STATUS_CHANGE_{new_status.upper()}",
-            description=action,
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
+            history = TaskHistory(
+                task_id=task.id,
+                user_id=user_id,
+                action=f"STATUS_CHANGE_{new_status.upper()}",
+                description=action,
+            )
+            db.add(history)
+            await db.commit()
+            await db.refresh(task)
+            return task
 
 
 # ==========================
-# Добавить комментарий
+# Добавить комментарий (убедимся, что сохраняется)
 # ==========================
 async def add_comment(
     task_id: int,

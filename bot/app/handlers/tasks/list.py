@@ -98,7 +98,6 @@ async def show_list(
         show_assignee = True
 
         # Получаем все задачи без пагинации (используем большой лимит)
-        # Чтобы избежать двойной обрезки, будем пагинировать в памяти
         if list_type == "open":
             tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
@@ -135,8 +134,12 @@ async def show_list(
             tasks = [t for t in tasks if getattr(t, 'is_feedback', False)]
             title = "📢 Обращения (проблемы)"
             show_assignee = False
+        else:
+            # Если list_type не распознан, используем "open"
+            tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
+            title = "📋 Все открытые заявки"
 
-        # Фильтрация по приоритету (если указана)
+        # Фильтрация по приоритету
         if filter_priority is not None:
             tasks = [t for t in tasks if t.priority == filter_priority]
 
@@ -148,8 +151,6 @@ async def show_list(
 
         total = len(tasks)
         total_pages = (total + limit - 1) // limit if total > 0 else 1
-
-        # Обрезаем для текущей страницы
         start = (page - 1) * limit
         tasks_page = tasks[start:start+limit]
 

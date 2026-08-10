@@ -19,7 +19,7 @@ async def _can_send(user_id: int, notification_type: str) -> bool:
         if not settings:
             return True  # если настроек нет, отправляем (по умолчанию включено)
         return getattr(settings, notification_type, True)
-    except:
+    except Exception as e:
         return True
 
 async def notify_admins(text: str, notification_type: str = "notify_admin"):

@@ -26,6 +26,12 @@ async def choose_employee(
         callback.data.split(":")[1]
     )
 
+    # Получаем задачу, чтобы узнать команду (если есть)
+    task = (
+        await session.execute(
+            select(Task).where(Task.id == task_id)
+        )
+    ).scalar_one_or_none()
 
     employees = (
         await session.execute(
@@ -36,12 +42,12 @@ async def choose_employee(
         )
     ).scalars().all()
 
-
     keyboard = []
 
-
     for employee in employees:
-
+        # Если у задачи есть assigned_team, фильтруем
+        if task and task.assigned_team and employee.team != task.assigned_team:
+            continue
         keyboard.append(
             [
                 InlineKeyboardButton(
@@ -52,20 +58,16 @@ async def choose_employee(
             ]
         )
 
+    if not keyboard:
+        await callback.message.edit_text("Нет доступных сотрудников для назначения.")
+        await callback.answer()
+        return
 
     await callback.message.edit_text(
-
         "Выберите исполнителя:",
-
-        reply_markup=
-        InlineKeyboardMarkup(
-            inline_keyboard=keyboard
-        )
-
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
-
     await callback.answer()
-
 
 
 @router.callback_query(
@@ -76,73 +78,62 @@ async def assign_employee(
     session: AsyncSession
 ):
     _, task_id, employee_id = callback.data.split(":")
-
-
     task_id = int(task_id)
-
     employee_id = int(employee_id)
 
-
-
-    task = (
-        await session.execute(
-            select(Task)
-            .where(
-                Task.id == task_id
+    # Используем блокировку строки, чтобы избежать race condition
+    async with session.begin():
+        task = (
+            await session.execute(
+                select(Task)
+                .where(Task.id == task_id)
+                .with_for_update()
             )
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
 
+        if not task:
+            await callback.answer("Заявка не найдена", show_alert=True)
+            return
 
-
-    employee = (
-        await session.execute(
-            select(User)
-            .where(
-                User.id == employee_id
+        # Проверяем, что задача может быть назначена
+        if task.status not in ("created", "waiting"):
+            await callback.answer(
+                f"Задача уже в статусе {task.status} и не может быть назначена",
+                show_alert=True
             )
-        )
-    ).scalar_one_or_none()
+            return
 
+        employee = (
+            await session.execute(
+                select(User)
+                .where(User.id == employee_id)
+            )
+        ).scalar_one_or_none()
 
+        if not employee or not employee.active:
+            await callback.answer("Сотрудник не активен", show_alert=True)
+            return
 
-    if not task:
+        # Проверяем команду, если задана
+        if task.assigned_team and employee.team != task.assigned_team:
+            await callback.answer(
+                "Сотрудник не из нужной команды",
+                show_alert=True
+            )
+            return
 
-        await callback.answer(
-            "Заявка не найдена",
-            show_alert=True
-        )
+        task.assigned_to = employee.id
+        task.status = TaskStatus.ACCEPTED
 
-        return
-
-
-
-    task.assigned_to = employee.id
-
-    task.status = TaskStatus.ACCEPTED
-
-
-
-    await session.commit()
-
-
+        await session.commit()
 
     await callback.message.edit_text(
-
         f"""
 ✅ Исполнитель назначен
 
-
 Заявка №{task.id}
-
 Исполнитель:
-
 <b>{employee.full_name}</b>
 """
-
     )
-
-
-    await callback.answer(
-        "Готово"
-    )
+    await callback.answer("Готово")

@@ -148,7 +148,7 @@ async def process_issued_at(message: Message, state: FSMContext):
     else:
         try:
             issued_at = datetime.strptime(text, "%d.%m.%Y")
-        except:
+        except Exception as e:
             await message.answer("Неверный формат. Используйте ДД.ММ.ГГГГ или '-'.")
             return
     await state.update_data(issued_at=issued_at)

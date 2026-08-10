@@ -1,50 +1,35 @@
 import asyncio
-import os
-import sys
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timezone
 from sqlalchemy import select, and_
-from app.database import AsyncSessionLocal
-from app.database.models import Task, TaskStatus
-from app.services.employees.service import get_employee
-from app.services.notification_service import bot, set_bot
-from app.config import settings
-from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from bot.app.database.session import async_session
+from bot.app.database.models import Task, User
+from bot.app.services.notification_service import notify_task_ready
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def check_waiting_tasks():
-    """Проверяет задачи со статусом WAITING, у которых wait_until <= текущего времени"""
-    bot = Bot(token=settings.BOT_TOKEN)
-    set_bot(bot)
-    now = datetime.utcnow()
-    async with AsyncSessionLocal() as db:
-        # Находим задачи, у которых wait_until не None и <= now
+    async with async_session() as session:
+        now = datetime.now(timezone.utc)
         stmt = select(Task).where(
             and_(
-                Task.status == TaskStatus.WAITING,
+                Task.status == 'waiting',
                 Task.wait_until <= now
             )
         )
-        result = await db.execute(stmt)
+        result = await session.execute(stmt)
         tasks = result.scalars().all()
+
         for task in tasks:
-            # Отправляем уведомление исполнителю
             if task.assigned_to:
-                employee = await get_employee(task.assigned_to)
-                if employee and employee.telegram_id:
-                    keyboard = InlineKeyboardMarkup(
-                        inline_keyboard=[
-                            [InlineKeyboardButton(text="▶ Вернуть в работу", callback_data=f"task_status:{task.id}:start")]
-                        ]
-                    )
-                    try:
-                        await bot.send_message(
-                            employee.telegram_id,
-                            f"⏰ Напоминание: задача #{task.id} «{task.title}» была отложена и срок ожидания истёк.\nВерните её в работу или уточните статус.",
-                            reply_markup=keyboard
-                        )
-                    except Exception as e:
-                        print(f"Ошибка отправки уведомления: {e}")
-    await bot.close()
+                user = await session.get(User, task.assigned_to)
+                if user and user.active:
+                    await notify_task_ready(task, user)
+                    logger.info(f"Уведомление отправлено для задачи {task.id} пользователю {user.telegram_id}")
+            else:
+                logger.warning(f"Задача {task.id} не назначена, пропускаем")
+        await session.commit()
 
 if __name__ == "__main__":
     asyncio.run(check_waiting_tasks())

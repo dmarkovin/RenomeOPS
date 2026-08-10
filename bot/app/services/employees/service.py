@@ -1,6 +1,6 @@
 from sqlalchemy import select, or_, and_, func
 from sqlalchemy.orm import selectinload
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from app.database import AsyncSessionLocal
@@ -36,7 +36,7 @@ async def activate_employee(user_id: int, telegram_id: int, username: str) -> Op
             user.telegram_id = telegram_id
             user.username = username
             user.active = True
-            user.registered_at = datetime.utcnow()
+            user.registered_at = datetime.now(timezone.utc)
             await db.commit()
             await db.refresh(user)
         return user
@@ -148,11 +148,13 @@ async def activate_employee_by_admin(user_id: int) -> Optional[User]:
         return user
 
 
+# ===== ИСПРАВЛЕНО: мягкое удаление (деактивация) вместо физического удаления =====
 async def delete_employee(user_id: int) -> bool:
+    """Деактивирует пользователя вместо физического удаления."""
     async with AsyncSessionLocal() as db:
         user = await db.get(User, user_id)
         if user:
-            await db.delete(user)
+            user.active = False
             await db.commit()
             return True
         return False

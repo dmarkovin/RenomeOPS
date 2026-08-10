@@ -20,50 +20,29 @@ router = Router()
 async def start_handler(
     message: Message
 ):
-
-    print(
-        "START RECEIVED:",
-        message.from_user.id
-    )
-
+    print("START RECEIVED:", message.from_user.id)
 
     employee = await get_employee(
         message.from_user.id
     )
 
-
     if employee:
-
-        await show_main_menu(
-            message
-        )
-
+        # Проверяем, активен ли пользователь
+        if not employee.active:
+            await message.answer(
+                "⛔ Ваш аккаунт заблокирован. Обратитесь к администратору для восстановления доступа."
+            )
+            return
+        await show_main_menu(message)
         return
 
-
-
     args = message.text.split()
-
-
     if len(args) > 1:
-
         invite_code = args[1]
-
-
-        employee = await get_employee_by_invite(
-            invite_code
-        )
-
-
+        employee = await get_employee_by_invite(invite_code)
         if employee is None:
-
-            await message.answer(
-                "❌ Приглашение не найдено."
-            )
-
+            await message.answer("❌ Приглашение не найдено.")
             return
-
-
 
         await activate_employee(
             employee.id,
@@ -71,19 +50,12 @@ async def start_handler(
             message.from_user.username
         )
 
-
         await message.answer(
             "✅ Вы зарегистрированы в системе."
         )
 
-
-        await show_main_menu(
-            message
-        )
-
+        await show_main_menu(message)
         return
-
-
 
     await message.answer(
         """
@@ -94,7 +66,6 @@ async def start_handler(
 Получите приглашение от администратора.
 """
     )
-
     print(f"DEBUG: Received message: '{message.text}'")
 
 # Единственная версия become_admin с декоратором

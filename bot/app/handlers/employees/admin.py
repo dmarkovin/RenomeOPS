@@ -169,14 +169,14 @@ async def delete_employee_callback(callback: CallbackQuery):
         await callback.answer("Нет прав", show_alert=True)
         return
 
-    # Проверка, что администратор не удаляет самого себя
+    # Проверка, что администратор не деактивирует самого себя
     if user_id == admin.id:
-        await callback.answer("Вы не можете удалить самого себя!", show_alert=True)
+        await callback.answer("Вы не можете деактивировать самого себя!", show_alert=True)
         return
 
-    success = await delete_employee(user_id)
+    success = await delete_employee(user_id)  # теперь это деактивация
     if success:
-        await callback.answer("Сотрудник удалён", show_alert=True)
+        await callback.answer("Сотрудник деактивирован", show_alert=True)
         # Удаляем сообщение и показываем обновлённый список
         await callback.message.delete()
         await list_employees(callback.message, page=1)
@@ -318,3 +318,4 @@ async def search_from_list(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await start_search(callback.message, state)
     await callback.answer()
+

@@ -304,8 +304,8 @@ async def cancel_confirm(message: Message, state: FSMContext):
 @router.message(F.text == "📋 Активные пропуски")
 async def list_active_passes(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
+        await message.answer("У вас нет прав для просмотра пропусков.")
         return
     await state.update_data(pass_list_type='active', pass_page=page)
     limit = 10
@@ -340,8 +340,8 @@ async def list_active_passes(message: Message, state: FSMContext, page: int = 1)
 @router.message(F.text == "📜 История пропусков")
 async def list_history(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
+        await message.answer("У вас нет прав для просмотра истории пропусков.")
         return
     await state.update_data(pass_list_type='history', pass_page=page)
     limit = 10
@@ -374,11 +374,20 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
 # ========== Поиск по пропускам ==========
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
+        await message.answer("У вас нет прав для поиска пропусков.")
+        return
     await state.set_state(PassSearch.query)
     await message.answer("Введите текст для поиска (имя гостя, номер авто, квартира, ID):")
 
 @router.message(StateFilter(PassSearch.query))
 async def process_search_pass(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
+        await message.answer("У вас нет прав для поиска пропусков.")
+        await state.clear()
+        return
     query = message.text.strip()
     if len(query) < 2:
         await message.answer("Введите минимум 2 символа.")
@@ -553,6 +562,10 @@ async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
 
 @router.callback_query(F.data == "pass_back")
 async def back_to_pass_list(callback: CallbackQuery, state: FSMContext):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
+        await callback.answer("У вас нет прав для возврата к списку пропусков.", show_alert=True)
+        return
     await state.update_data(pass_list_type='active', pass_page=1)
     await callback.message.delete()
     # Заново показываем список

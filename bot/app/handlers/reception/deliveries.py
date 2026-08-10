@@ -9,9 +9,6 @@ from app.services.reception.delivery_service import (
     create_delivery, get_all_deliveries, get_delivery,
     update_delivery_status, add_delivery_comment, get_delivery_history
 )
-from app.services.reception.document_service import (
-    create_document, get_documents, get_document, update_document_status
-)
 from app.database.models import UserRole
 from app.keyboards.reception import reception_menu_keyboard
 
@@ -21,15 +18,6 @@ class DeliveryCreate(StatesGroup):
     recipient = State()
     apartment = State()
     courier = State()
-    comment = State()
-    photo = State()
-    confirm = State()
-
-class DocumentCreate(StatesGroup):
-    name = State()
-    type = State()
-    sender = State()
-    recipient = State()
     comment = State()
     photo = State()
     confirm = State()
@@ -330,21 +318,43 @@ async def delivery_history(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== Архив ==========
+# ========== Архив доставки ==========
 @router.message(F.text == "📦 Архив доставки")
-async def delivery_archive(message: Message):
+async def delivery_archive(message: Message, page: int = 1):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("Нет прав.")
         return
-    deliveries = await get_all_deliveries(status="completed", limit=50)
+    limit = 10
+    offset = (page - 1) * limit
+    deliveries = await get_all_deliveries(status="completed", limit=limit, offset=offset)
+    # Получаем общее количество для пагинации
+    all_completed = await get_all_deliveries(status="completed", limit=10000, offset=0)
+    total_count = len(all_completed)
+    total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
+
     if not deliveries:
         await message.answer("Архив пуст.")
         return
-    text = "📦 Архив посылок:\n\n"
+
+    text = f"📦 Архив посылок (стр. {page}/{total_pages}):\n\n"
     for d in deliveries:
         text += f"#{d.id} {d.recipient} ({d.status})\n"
-    await message.answer(text)
+
+    kb_buttons = []
+    if page > 1:
+        kb_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"archive_delivery_page:{page-1}"))
+    kb_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="ignore"))
+    if page < total_pages:
+        kb_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"archive_delivery_page:{page+1}"))
+    kb = InlineKeyboardMarkup(inline_keyboard=[kb_buttons]) if kb_buttons else None
+    await message.answer(text, reply_markup=kb)
+
+@router.callback_query(F.data.startswith("archive_delivery_page:"))
+async def archive_delivery_page(callback: CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    await delivery_archive(callback.message, page)
+    await callback.answer()
 
 # ========== Назад ==========
 @router.callback_query(F.data == "delivery_back")

@@ -47,7 +47,7 @@ async def service_price(message: Message, state: FSMContext):
         price = float(message.text.strip())
         if price < 0:
             raise ValueError
-    except:
+    except Exception as e:
         await message.answer("❌ Введите корректную цену (положительное число).", reply_markup=ReplyKeyboardRemove())
         return
     await state.update_data(price=price)

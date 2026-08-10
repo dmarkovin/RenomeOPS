@@ -18,15 +18,27 @@ router = Router()
 
 @router.callback_query(F.data.startswith("obj_"))
 async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state == ServiceOrderState.select_object:
-        return
     data = callback.data.split(":")
     action = data[0]
+    current_state = await state.get_state()
+
+    # Если мы не в процессе выбора объекта для услуги, игнорируем (или обрабатываем отдельно)
+    if current_state != ServiceOrderState.select_object:
+        await callback.answer("Действие недоступно", show_alert=True)
+        return
+
+    # Получаем сохранённые данные из состояния
+    state_data = await state.get_data()
+    building = state_data.get("building")
+    entrance = state_data.get("entrance")
+    floor = state_data.get("floor")
+    object_type = state_data.get("object_type")  # "apartment", "parking", "cellar"
 
     if action == "obj_building":
         building_id = int(data[1])
+        await state.update_data(building=building_id)
         entrances = get_entrances(building_id)
+        await state.update_data(object_type="apartment")
         await callback.message.edit_text(
             f"🏢 Выберите подъезд для корпуса {building_id}:",
             reply_markup=entrance_keyboard(building_id, entrances)
@@ -34,103 +46,141 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
 
     elif action == "obj_entrance":
         building_id = int(data[1])
-        entrance = int(data[2])
-        floors = get_floors(building_id, entrance)
+        entrance_num = int(data[2])
+        await state.update_data(entrance=entrance_num)
+        floors = get_floors(building_id, entrance_num)
         await callback.message.edit_text(
-            f"🏗 Выберите этаж для подъезда {entrance} (корпус {building_id}):",
-            reply_markup=floor_keyboard(building_id, entrance, floors)
+            f"🏗 Выберите этаж для подъезда {entrance_num} (корпус {building_id}):",
+            reply_markup=floor_keyboard(building_id, entrance_num, floors)
         )
 
     elif action == "obj_floor":
         building_id = int(data[1])
-        entrance = int(data[2])
-        floor = int(data[3])
-        apartments = get_apartments(building_id, entrance, floor)
+        entrance_num = int(data[2])
+        floor_num = int(data[3])
+        await state.update_data(floor=floor_num)
+        apartments = get_apartments(building_id, entrance_num, floor_num)
+        if not apartments:
+            await callback.message.edit_text("На этом этаже нет квартир. Выберите другой этаж.")
+            return
         await callback.message.edit_text(
-            f"🏠 Выберите квартиру на {floor} этаже (подъезд {entrance}):",
-            reply_markup=apartment_keyboard(building_id, entrance, floor, apartments)
+            f"🏠 Выберите квартиру на {floor_num} этаже (подъезд {entrance_num}):",
+            reply_markup=apartment_keyboard(building_id, entrance_num, floor_num, apartments)
         )
 
     elif action == "obj_apartment":
         building_id = int(data[1])
-        entrance = int(data[2])
-        floor = int(data[3])
-        apartment = int(data[4])
-        # Сохраняем результат в состоянии
+        entrance_num = int(data[2])
+        floor_num = int(data[3])
+        apartment_num = int(data[4])
         result = {
             "building": building_id,
-            "entrance": entrance,
-            "floor": floor,
-            "apartment": apartment,
+            "entrance": entrance_num,
+            "floor": floor_num,
+            "apartment": apartment_num,
             "type": "apartment"
         }
         await state.update_data(object_selection=result)
         await callback.message.edit_text(
-            f"✅ Выбрана квартира {apartment} (корпус {building_id}, подъезд {entrance}, этаж {floor})"
+            f"✅ Выбрана квартира {apartment_num} (корпус {building_id}, подъезд {entrance_num}, этаж {floor_num})"
         )
         # Здесь можно завершить выбор или передать управление другому хендлеру
 
+    elif action == "obj_parking":
+        await state.update_data(object_type="parking")
+        await callback.message.edit_text(
+            "🚗 Выберите уровень паркинга:",
+            reply_markup=parking_floor_keyboard(2, [-1, -2])  # building_id пока не используется, можно передать 0
+        )
+
     elif action == "obj_parking_floor":
         building_id = int(data[1])
-        floor = int(data[2])
-        spots = get_parking_spots(building_id, floor)
+        floor_num = int(data[2])
+        await state.update_data(parking_floor=floor_num)
+        spots = get_parking_spots(building_id, floor_num)
         await callback.message.edit_text(
-            f"🅿️ Выберите машиноместо на этаже {floor}:",
-            reply_markup=parking_spot_keyboard(building_id, floor, spots)
+            f"🚗 Выберите машиноместо на этаже {floor_num}:",
+            reply_markup=parking_spot_keyboard(building_id, floor_num, spots)
         )
 
     elif action == "obj_parking_spot":
         building_id = int(data[1])
-        floor = int(data[2])
-        spot = int(data[3])
+        floor_num = int(data[2])
+        spot_num = int(data[3])
         result = {
             "building": building_id,
-            "parking_floor": floor,
-            "parking_spot": spot,
+            "parking_floor": floor_num,
+            "parking_spot": spot_num,
             "type": "parking"
         }
         await state.update_data(object_selection=result)
         await callback.message.edit_text(
-            f"✅ Выбрано машиноместо {spot} (этаж {floor})"
+            f"✅ Выбрано машиноместо {spot_num} (этаж {floor_num})"
         )
 
     elif action == "obj_cellar":
         building_id = int(data[1])
-        cellar = int(data[2])
+        cellar_num = int(data[2])
         result = {
             "building": building_id,
-            "cellar": cellar,
+            "cellar": cellar_num,
             "type": "cellar"
         }
         await state.update_data(object_selection=result)
         await callback.message.edit_text(
-            f"✅ Выбран келлер {cellar}"
+            f"✅ Выбран келлер {cellar_num}"
         )
 
+    # ========== ОБРАБОТЧИКИ КНОПОК "НАЗАД" ==========
     elif action == "obj_back_building":
+        # Возврат к выбору корпуса
         await callback.message.edit_text(
             "🏢 Выберите корпус:",
             reply_markup=building_keyboard()
         )
 
     elif action == "obj_back_entrance":
-        # Для простоты возврат к выбору корпуса
-        await callback.message.edit_text(
-            "🏢 Выберите корпус:",
-            reply_markup=building_keyboard()
-        )
+        # Возврат к выбору подъезда (используем сохранённый building)
+        if building:
+            entrances = get_entrances(building)
+            await callback.message.edit_text(
+                f"🏢 Выберите подъезд для корпуса {building}:",
+                reply_markup=entrance_keyboard(building, entrances)
+            )
+        else:
+            # Если building не сохранён, возвращаем к выбору корпуса
+            await callback.message.edit_text(
+                "🏢 Выберите корпус:",
+                reply_markup=building_keyboard()
+            )
 
     elif action == "obj_back_floor":
-        await callback.message.edit_text(
-            "🏢 Выберите корпус:",
-            reply_markup=building_keyboard()
-        )
+        # Возврат к выбору этажа (используем сохранённые building и entrance)
+        if building and entrance:
+            floors = get_floors(building, entrance)
+            await callback.message.edit_text(
+                f"🏗 Выберите этаж для подъезда {entrance} (корпус {building}):",
+                reply_markup=floor_keyboard(building, entrance, floors)
+            )
+        else:
+            # Если данных нет, возвращаем к выбору корпуса
+            await callback.message.edit_text(
+                "🏢 Выберите корпус:",
+                reply_markup=building_keyboard()
+            )
 
     elif action == "obj_back_parking_floor":
-        await callback.message.edit_text(
-            "🏢 Выберите корпус:",
-            reply_markup=building_keyboard()
-        )
+        # Возврат к выбору уровня паркинга (используем сохранённый building)
+        if building:
+            await callback.message.edit_text(
+                "🚗 Выберите уровень паркинга:",
+                reply_markup=parking_floor_keyboard(2, [-1, -2])
+            )
+        else:
+            await callback.message.edit_text(
+                "🏢 Выберите корпус:",
+                reply_markup=building_keyboard()
+            )
 
     elif action == "obj_cancel":
         await callback.message.delete()
