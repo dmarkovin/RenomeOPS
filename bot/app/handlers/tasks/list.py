@@ -99,6 +99,13 @@ async def show_list(
 
         # Получаем все задачи без пагинации (используем большой лимит)
         if list_type == "open":
+            # Проверяем, что пользователь имеет право видеть общий список
+            if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+                if hasattr(target, 'answer'):
+                    await target.answer("У вас нет прав на просмотр всех заявок.", show_alert=True)
+                else:
+                    await target.answer("У вас нет прав на просмотр всех заявок.")
+                return
             tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
         elif list_type == "my":
@@ -130,12 +137,17 @@ async def show_list(
             title = "📋 Личные задачи"
             show_assignee = False
         elif list_type == "archive_feedback":
+            if employee.role != UserRole.ADMIN:
+                if hasattr(target, 'answer'):
+                    await target.answer("Только для администратора.", show_alert=True)
+                else:
+                    await target.answer("Только для администратора.")
+                return
             tasks = await get_tasks_by_status("closed", limit=1000, offset=0, user_id=employee.id)
             tasks = [t for t in tasks if getattr(t, 'is_feedback', False)]
             title = "📢 Обращения (проблемы)"
             show_assignee = False
         else:
-            # Если list_type не распознан, используем "open"
             tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
 
@@ -336,14 +348,24 @@ async def take_from_list(callback: CallbackQuery, state: FSMContext):
     filter_priority = data.get("filter_priority")
     await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
+# ===== ИСПРАВЛЕННАЯ КНОПКА "НАЗАД" =====
 @router.callback_query(F.data == "tasks_back")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     list_type = data.get("list_type", "open")
-    page = data.get("page", 1)
-    sort_by = data.get("sort_by", "date")
-    filter_priority = data.get("filter_priority")
-    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+    if list_type.startswith("archive_"):
+        # Возврат в меню выбора категории архива
+        await show_archive_menu(callback, state)
+    else:
+        # Возврат в меню "Заявки"
+        await state.clear()
+        employee = await get_employee(callback.from_user.id)
+        if employee:
+            await callback.message.delete()
+            await callback.message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
+        else:
+            await callback.answer("Ошибка", show_alert=True)
+        await callback.answer()
 
 @router.message(F.text == "⬅️ Назад")
 async def back_to_tasks_menu(message: Message, state: FSMContext):

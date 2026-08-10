@@ -10,7 +10,7 @@ from app.services.reception.key_service import (
     add_key_comment, get_key_history
 )
 from app.database.models import UserRole
-from app.keyboards.reception_keys import key_main_menu_keyboard, key_list_keyboard
+from app.keyboards.reception_keys import key_list_keyboard
 
 router = Router()
 
@@ -24,13 +24,72 @@ class KeyCreate(StatesGroup):
 class KeyCommentState(StatesGroup):
     waiting_for_comment = State()
 
-# ========== Главное меню ==========
+# ========== Главное меню ключей ==========
 @router.message(F.text == "🔑 Ключи")
-async def keys_menu(message: Message, state: FSMContext, page: int = 1, status: str = None):
+async def keys_main_menu(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("У вас нет прав.")
         return
+    await state.clear()
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➕ Выдать ключ")],
+            [KeyboardButton(text="📋 Список выданных")],
+            [KeyboardButton(text="📋 Возвращённые")],
+            [KeyboardButton(text="⬅️ Назад")],
+        ],
+        resize_keyboard=True
+    )
+    await message.answer("🔑 Управление ключами:", reply_markup=kb)
+
+# ========== Список выданных ключей ==========
+@router.message(F.text == "📋 Список выданных")
+async def list_issued_keys(message: Message, state: FSMContext, page: int = 1):
+    await show_key_list(message, state, status="issued", title="🔑 Выданные ключи", page=page)
+
+# ========== Список возвращённых ключей ==========
+@router.message(F.text == "📋 Возвращённые")
+async def list_returned_keys(message: Message, state: FSMContext, page: int = 1):
+    await show_key_list(message, state, status="returned", title="✅ Возвращённые ключи", page=page)
+
+async def show_key_list(message: Message, state: FSMContext, status: str, title: str, page: int = 1):
+    employee = await get_employee(message.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+        await message.answer("У вас нет прав.")
+        return
+    limit = 10
+    offset = (page - 1) * limit
+    keys = await get_keys(status=status, limit=limit, offset=offset)
+    total = len(keys)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+    if not keys:
+        await message.answer(f"{title}\n\nНет записей.", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        ))
+        return
+
+    text = f"{title} (стр. {page}/{total_pages}):\n\n"
+    for k in keys:
+        status_emoji = "🔑" if k.status == "issued" else "✅"
+        text += f"{status_emoji} #{k.id} {k.key_number} – {k.recipient} ({k.status})\n"
+
+    sent = await message.answer(text, reply_markup=key_list_keyboard(keys, page, total_pages, status))
+    await state.update_data(key_status=status, key_page=page, key_message_id=sent.message_id, key_chat_id=sent.chat.id)
+
+# ========== Пагинация ==========
+@router.callback_query(F.data.startswith("key_page:"))
+async def paginate_keys(callback: CallbackQuery, state: FSMContext, bot):
+    page = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    status = data.get('key_status', 'issued')
+    message_id = data.get('key_message_id')
+    chat_id = data.get('key_chat_id')
+    if not message_id or not chat_id:
+        message_id = callback.message.message_id
+        chat_id = callback.message.chat.id
 
     limit = 10
     offset = (page - 1) * limit
@@ -39,25 +98,43 @@ async def keys_menu(message: Message, state: FSMContext, page: int = 1, status: 
     total_pages = (total + limit - 1) // limit if total > 0 else 1
 
     if not keys:
-        await message.answer("Нет записей.", reply_markup=key_main_menu_keyboard())
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="Нет записей.")
+        await callback.answer()
         return
 
-    text = "🔑 Список ключей:\n\n"
+    title = "🔑 Выданные ключи" if status == "issued" else "✅ Возвращённые ключи"
+    text = f"{title} (стр. {page}/{total_pages}):\n\n"
     for k in keys:
         status_emoji = "🔑" if k.status == "issued" else "✅"
         text += f"{status_emoji} #{k.id} {k.key_number} – {k.recipient} ({k.status})\n"
 
-    sent = await message.answer(text, reply_markup=key_list_keyboard(keys, page, total_pages))
-    await state.update_data(key_message_id=sent.message_id, key_chat_id=sent.chat.id, key_status=status)
+    await bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=message_id,
+        text=text,
+        reply_markup=key_list_keyboard(keys, page, total_pages, status)
+    )
+    await callback.answer()
 
-@router.message(F.text == "📋 Список выданных")
-async def list_issued_keys(message: Message, state: FSMContext):
-    await keys_menu(message, state, status="issued")
+# ========== Кнопка "Назад" в списке ключей ==========
+@router.callback_query(F.data == "key_back")
+async def key_list_back(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.delete()
+    employee = await get_employee(callback.from_user.id)
+    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
+        await callback.message.answer("🔑 Управление ключами:", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Выдать ключ")],
+                [KeyboardButton(text="📋 Список выданных")],
+                [KeyboardButton(text="📋 Возвращённые")],
+                [KeyboardButton(text="⬅️ Назад")],
+            ],
+            resize_keyboard=True
+        ))
+    await callback.answer()
 
-@router.message(F.text == "📋 Возвращённые")
-async def list_returned_keys(message: Message, state: FSMContext):
-    await keys_menu(message, state, status="returned")
-
+# ========== Создание ключа ==========
 @router.message(F.text == "➕ Выдать ключ")
 async def start_create_key(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -123,7 +200,15 @@ async def confirm_create_key(message: Message, state: FSMContext):
             created_by=employee.id
         )
         await state.clear()
-        await message.answer(f"✅ Ключ #{key.id} выдан.", reply_markup=key_main_menu_keyboard())
+        await message.answer(f"✅ Ключ #{key.id} выдан.", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Выдать ключ")],
+                [KeyboardButton(text="📋 Список выданных")],
+                [KeyboardButton(text="📋 Возвращённые")],
+                [KeyboardButton(text="⬅️ Назад")],
+            ],
+            resize_keyboard=True
+        ))
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
@@ -131,7 +216,15 @@ async def confirm_create_key(message: Message, state: FSMContext):
 @router.message(KeyCreate.confirm, F.text == "❌ Отмена")
 async def cancel_create_key(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("Отменено", reply_markup=key_main_menu_keyboard())
+    await message.answer("Отменено", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➕ Выдать ключ")],
+            [KeyboardButton(text="📋 Список выданных")],
+            [KeyboardButton(text="📋 Возвращённые")],
+            [KeyboardButton(text="⬅️ Назад")],
+        ],
+        resize_keyboard=True
+    ))
 
 # ========== Карточка ключа ==========
 @router.callback_query(F.data.startswith("key:"))
@@ -157,10 +250,11 @@ async def show_key_card(callback: CallbackQuery):
     ])
     if k.status == "issued":
         kb.inline_keyboard.append([InlineKeyboardButton(text="✅ Вернуть", callback_data=f"key_return:{key_id}")])
-    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back_from_card")])
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
+# ========== Возврат ключа ==========
 @router.callback_query(F.data.startswith("key_return:"))
 async def key_return(callback: CallbackQuery):
     key_id = int(callback.data.split(":")[1])
@@ -281,46 +375,19 @@ async def key_history(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== Пагинация ==========
-@router.callback_query(F.data.startswith("key_page:"))
-async def paginate_keys(callback: CallbackQuery, state: FSMContext, bot):
-    page = int(callback.data.split(":")[1])
-    data = await state.get_data()
-    message_id = data.get('key_message_id')
-    chat_id = data.get('key_chat_id')
-    status = data.get('key_status')
-    if not message_id or not chat_id:
-        message_id = callback.message.message_id
-        chat_id = callback.message.chat.id
-
-    limit = 10
-    offset = (page - 1) * limit
-    keys = await get_keys(status=status, limit=limit, offset=offset)
-    total = len(keys)
-    total_pages = (total + limit - 1) // limit if total > 0 else 1
-
-    if not keys:
-        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="Нет записей.")
-        await callback.answer()
-        return
-
-    text = "🔑 Список ключей:\n\n"
-    for k in keys:
-        status_emoji = "🔑" if k.status == "issued" else "✅"
-        text += f"{status_emoji} #{k.id} {k.key_number} – {k.recipient} ({k.status})\n"
-
-    await bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=message_id,
-        text=text,
-        reply_markup=key_list_keyboard(keys, page, total_pages)
-    )
-    await callback.answer()
-
-# ========== Назад ==========
-@router.callback_query(F.data == "key_back")
-async def key_back(callback: CallbackQuery):
+# ========== Назад из карточки ==========
+@router.callback_query(F.data == "key_back_from_card")
+async def key_back_from_card(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
-    await callback.message.answer("🔑 Меню ключей:", reply_markup=key_main_menu_keyboard())
+    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
+        await callback.message.answer("🔑 Управление ключами:", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Выдать ключ")],
+                [KeyboardButton(text="📋 Список выданных")],
+                [KeyboardButton(text="📋 Возвращённые")],
+                [KeyboardButton(text="⬅️ Назад")],
+            ],
+            resize_keyboard=True
+        ))
     await callback.answer()

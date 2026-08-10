@@ -1,5 +1,4 @@
 from aiogram.types import ReplyKeyboardRemove
-from app.handlers.services.user import ServiceOrderState
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -22,8 +21,15 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
     action = data[0]
     current_state = await state.get_state()
 
-    # Если мы не в процессе выбора объекта для услуги, игнорируем (или обрабатываем отдельно)
-    if current_state != ServiceOrderState.select_object:
+    # Разрешаем навигацию для состояний создания задач и услуг
+    # Проверяем, что состояние существует и относится к TaskCreate или ServiceOrderState
+    if current_state:
+        # Если состояние не связано с созданием задачи или услуги, запрещаем
+        if not ("TaskCreate" in current_state or "ServiceOrderState" in current_state):
+            await callback.answer("Действие недоступно", show_alert=True)
+            return
+    else:
+        # Если состояния нет, тоже запрещаем
         await callback.answer("Действие недоступно", show_alert=True)
         return
 
@@ -90,7 +96,7 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
         await state.update_data(object_type="parking")
         await callback.message.edit_text(
             "🚗 Выберите уровень паркинга:",
-            reply_markup=parking_floor_keyboard(2, [-1, -2])  # building_id пока не используется, можно передать 0
+            reply_markup=parking_floor_keyboard(2, [-1, -2])
         )
 
     elif action == "obj_parking_floor":
@@ -133,14 +139,12 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
 
     # ========== ОБРАБОТЧИКИ КНОПОК "НАЗАД" ==========
     elif action == "obj_back_building":
-        # Возврат к выбору корпуса
         await callback.message.edit_text(
             "🏢 Выберите корпус:",
             reply_markup=building_keyboard()
         )
 
     elif action == "obj_back_entrance":
-        # Возврат к выбору подъезда (используем сохранённый building)
         if building:
             entrances = get_entrances(building)
             await callback.message.edit_text(
@@ -148,14 +152,12 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
                 reply_markup=entrance_keyboard(building, entrances)
             )
         else:
-            # Если building не сохранён, возвращаем к выбору корпуса
             await callback.message.edit_text(
                 "🏢 Выберите корпус:",
                 reply_markup=building_keyboard()
             )
 
     elif action == "obj_back_floor":
-        # Возврат к выбору этажа (используем сохранённые building и entrance)
         if building and entrance:
             floors = get_floors(building, entrance)
             await callback.message.edit_text(
@@ -163,14 +165,12 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
                 reply_markup=floor_keyboard(building, entrance, floors)
             )
         else:
-            # Если данных нет, возвращаем к выбору корпуса
             await callback.message.edit_text(
                 "🏢 Выберите корпус:",
                 reply_markup=building_keyboard()
             )
 
     elif action == "obj_back_parking_floor":
-        # Возврат к выбору уровня паркинга (используем сохранённый building)
         if building:
             await callback.message.edit_text(
                 "🚗 Выберите уровень паркинга:",

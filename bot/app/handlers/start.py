@@ -3,6 +3,7 @@ from aiogram.filters import Command
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 
 from app.services.employees.service import (
     get_employee,
@@ -18,8 +19,11 @@ router = Router()
 
 @router.message(CommandStart())
 async def start_handler(
-    message: Message
+    message: Message,
+    state: FSMContext
 ):
+    # Очищаем состояние при любом /start, чтобы выйти из любого диалога
+    await state.clear()
     print("START RECEIVED:", message.from_user.id)
 
     employee = await get_employee(
@@ -70,7 +74,8 @@ async def start_handler(
 
 # Единственная версия become_admin с декоратором
 @router.message(Command("become_admin"))
-async def become_admin(message: Message):
+async def become_admin(message: Message, state: FSMContext):
+    await state.clear()
     from app.config import settings
     from app.database.models import UserRole, Team
     from app.services.employees.service import get_employee, update_employee_role, update_employee_team
@@ -86,7 +91,8 @@ async def become_admin(message: Message):
     await message.answer("✅ Ваша роль восстановлена до Администратора, команда установлена как ADMIN_TEAM.")
 
 @router.message(Command("profile"))
-async def cmd_profile(message: Message):
+async def cmd_profile(message: Message, state: FSMContext):
+    await state.clear()
     from app.services.employees.service import get_employee
     employee = await get_employee(message.from_user.id)
     if not employee:

@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import Key
 from typing import List
 
-def key_list_keyboard(keys: List[Key], page: int, total_pages: int) -> InlineKeyboardMarkup:
+def key_list_keyboard(keys: List[Key], page: int, total_pages: int, status: str) -> InlineKeyboardMarkup:
     buttons = []
     for k in keys[:10]:
         status_emoji = "🔑" if k.status == "issued" else "✅"
@@ -18,14 +18,3 @@ def key_list_keyboard(keys: List[Key], page: int, total_pages: int) -> InlineKey
         buttons.append(nav_buttons)
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def key_main_menu_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Выдать ключ")],
-            [KeyboardButton(text="📋 Список выданных")],
-            [KeyboardButton(text="📋 Возвращённые")],
-            [KeyboardButton(text="⬅️ Назад")]
-        ],
-        resize_keyboard=True
-    )
