@@ -352,6 +352,74 @@ async def back_to_task_photos(callback: CallbackQuery):
     await callback.message.answer("📷 Выберите фото для просмотра:", reply_markup=kb)
     await callback.answer()
 
+# ===========================
+# Видео
+# ===========================
+@router.callback_query(F.data.startswith("task_video:"))
+async def show_task_videos(callback: CallbackQuery):
+    task_id = int(callback.data.split(":")[1])
+    task = await get_task(task_id)
+    if not task or not task.video_ids:
+        await callback.answer("Нет видео", show_alert=True)
+        return
+    if len(task.video_ids) == 1:
+        video_id = task.video_ids[0]
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task:{task_id}")]
+        ])
+        await safe_delete_message(callback.message)
+        await callback.message.answer_video(video_id, reply_markup=kb)
+        await callback.answer()
+        return
+    buttons = []
+    for i, video_id in enumerate(task.video_ids):
+        buttons.append([InlineKeyboardButton(text=f"📹 Видео {i+1}", callback_data=f"task_video_view:{task_id}:{i}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task:{task_id}")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await safe_delete_message(callback.message)
+    await callback.message.answer("📹 Выберите видео для просмотра:", reply_markup=kb)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_video_view:"))
+async def view_task_video(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    task_id = int(parts[1])
+    index = int(parts[2])
+    task = await get_task(task_id)
+    if not task or not task.video_ids:
+        await callback.answer("Нет видео", show_alert=True)
+        return
+    if index >= len(task.video_ids):
+        await callback.answer("Видео не найдено", show_alert=True)
+        return
+    video_id = task.video_ids[index]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад к списку видео", callback_data=f"task_video_back:{task_id}")]
+    ])
+    await safe_delete_message(callback.message)
+    await callback.message.answer_video(
+        video_id,
+        caption=f"📹 Видео {index+1}/{len(task.video_ids)}",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_video_back:"))
+async def back_to_task_videos(callback: CallbackQuery):
+    task_id = int(callback.data.split(":")[1])
+    task = await get_task(task_id)
+    if not task or not task.video_ids:
+        await callback.answer("Нет видео", show_alert=True)
+        return
+    buttons = []
+    for i, video_id in enumerate(task.video_ids):
+        buttons.append([InlineKeyboardButton(text=f"📹 Видео {i+1}", callback_data=f"task_video_view:{task_id}:{i}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task:{task_id}")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await safe_delete_message(callback.message)
+    await callback.message.answer("📹 Выберите видео для просмотра:", reply_markup=kb)
+    await callback.answer()
+
 @router.callback_query(F.data.startswith("task_add_photo:"))
 async def start_add_photo(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])

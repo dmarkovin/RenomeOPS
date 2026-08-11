@@ -64,10 +64,13 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text="➕ Добавить фото", callback_data=f"task_add_photo:{task_id}")])
 
     # ====== Общие кнопки ======
-    buttons.append([
-        InlineKeyboardButton(text="💬 Комментарии", callback_data=f"task_comment_menu:{task_id}"),
-        InlineKeyboardButton(text="📷 Фото", callback_data=f"task_photo:{task_id}"),
-    ])
+    media_buttons = []
+    media_buttons.append(InlineKeyboardButton(text="💬 Комментарии", callback_data=f"task_comment_menu:{task_id}"))
+    media_buttons.append(InlineKeyboardButton(text="📷 Фото", callback_data=f"task_photo:{task_id}"))
+    if task.video_ids:
+        media_buttons.append(InlineKeyboardButton(text="📹 Видео", callback_data=f"task_video:{task_id}"))
+    buttons.append(media_buttons)
+
     buttons.append([
         InlineKeyboardButton(text="📜 История", callback_data=f"task_history:{task_id}"),
     ])

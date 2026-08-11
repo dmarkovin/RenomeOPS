@@ -34,7 +34,7 @@ def can_transition(old_status: str, new_status: str) -> bool:
 
 
 # ==========================
-# Создание заявки (единственная версия)
+# Создание заявки (с поддержкой видео)
 # ==========================
 async def create_task(
     title: str,
@@ -53,6 +53,7 @@ async def create_task(
     applicant_phone: str = None,
     priority: int = 3,
     photo_ids: List[str] = None,
+    video_ids: List[str] = None,
     is_paid: bool = False,
     is_feedback: bool = False,
     is_role_change: bool = False,
@@ -83,7 +84,8 @@ async def create_task(
             service_order_id=service_order_id,
             assigned_to=assigned_to,
             assigned_team=assigned_team,
-            status="created"
+            status="created",
+            video_ids=video_ids or []  # сохраняем видео
         )
         db.add(task)
         await db.flush()
@@ -446,6 +448,35 @@ async def add_photo(
         await db.commit()
         await db.refresh(photo)
         return photo
+
+
+# ==========================
+# Добавить видео
+# ==========================
+async def add_video(
+    task_id: int,
+    user_id: int,
+    file_id: str,
+) -> Optional[Task]:
+    """Добавляет видео к задаче (сохраняет file_id в JSON-поле video_ids)"""
+    async with AsyncSessionLocal() as db:
+        task = await db.get(Task, task_id)
+        if not task:
+            return None
+        if task.video_ids is None:
+            task.video_ids = []
+        task.video_ids.append(file_id)
+        task.updated_at = datetime.utcnow()
+        history = TaskHistory(
+            task_id=task_id,
+            user_id=user_id,
+            action="VIDEO",
+            description=f"Добавлено видео (file_id: {file_id[:10]}...)",
+        )
+        db.add(history)
+        await db.commit()
+        await db.refresh(task)
+        return task
 
 
 # ==========================

@@ -101,6 +101,8 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
+    # Новое поле для видео (список file_id)
+    video_ids = Column(JSON, default=list)
     __table_args__ = (
         Index("ix_tasks_status", "status"),
         Index("ix_tasks_assigned_to", "assigned_to"),
