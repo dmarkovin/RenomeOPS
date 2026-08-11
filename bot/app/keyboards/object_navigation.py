@@ -26,10 +26,23 @@ def floor_keyboard(building_id: int, entrance: int, floors: List[int]) -> Inline
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def apartment_keyboard(building_id: int, entrance: int, floor: int, apartments: List[int]) -> InlineKeyboardMarkup:
+def apartment_keyboard(building_id: int, entrance: int, floor: int, apartments: List) -> InlineKeyboardMarkup:
+    """
+    Генерирует клавиатуру для выбора квартир или общих зон.
+    Если apartments – список строк (общие зоны), то callback = obj_common:building:entrance:floor:name
+    Если apartments – список чисел (квартиры), то callback = obj_apartment:building:entrance:floor:num
+    """
     buttons = []
-    for apt in apartments:
-        buttons.append([InlineKeyboardButton(text=f"Квартира {apt}", callback_data=f"obj_apartment:{building_id}:{entrance}:{floor}:{apt}")])
+    for item in apartments:
+        if isinstance(item, int):
+            # Квартира
+            callback = f"obj_apartment:{building_id}:{entrance}:{floor}:{item}"
+            text = f"Квартира {item}"
+        else:
+            # Общая зона (строка)
+            callback = f"obj_common:{building_id}:{entrance}:{floor}:{item}"
+            text = item
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
     buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_floor")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -59,7 +72,6 @@ def cellar_keyboard(building_id: int, cellars: List[int]) -> InlineKeyboardMarku
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Упрощённая клавиатура выбора типа локации (только основные типы)
 def location_type_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="🏠 Квартира", callback_data="loc_type:apartment")],

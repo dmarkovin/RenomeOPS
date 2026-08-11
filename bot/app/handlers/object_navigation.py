@@ -1,4 +1,6 @@
 from aiogram.types import ReplyKeyboardRemove
+from app.handlers.services.user import ServiceOrderState
+from app.handlers.tasks.create import TaskCreate
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -21,24 +23,18 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
     action = data[0]
     current_state = await state.get_state()
 
-    # Разрешаем навигацию для состояний создания задач и услуг
-    # Проверяем, что состояние существует и относится к TaskCreate или ServiceOrderState
-    if current_state:
-        # Если состояние не связано с созданием задачи или услуги, запрещаем
-        if not ("TaskCreate" in current_state or "ServiceOrderState" in current_state):
-            await callback.answer("Действие недоступно", show_alert=True)
-            return
-    else:
-        # Если состояния нет, тоже запрещаем
+    # Правильное сравнение с состояниями FSM в aiogram 3
+    if current_state and not (
+        current_state.startswith("TaskCreate:") or
+        current_state.startswith("ServiceOrderState:")
+    ):
         await callback.answer("Действие недоступно", show_alert=True)
         return
 
-    # Получаем сохранённые данные из состояния
     state_data = await state.get_data()
     building = state_data.get("building")
     entrance = state_data.get("entrance")
     floor = state_data.get("floor")
-    object_type = state_data.get("object_type")  # "apartment", "parking", "cellar"
 
     if action == "obj_building":
         building_id = int(data[1])
@@ -70,27 +66,53 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text("На этом этаже нет квартир. Выберите другой этаж.")
             return
         await callback.message.edit_text(
-            f"🏠 Выберите квартиру на {floor_num} этаже (подъезд {entrance_num}):",
+            f"🏠 Выберите на этаже {floor_num}:",
             reply_markup=apartment_keyboard(building_id, entrance_num, floor_num, apartments)
         )
 
     elif action == "obj_apartment":
-        building_id = int(data[1])
-        entrance_num = int(data[2])
-        floor_num = int(data[3])
-        apartment_num = int(data[4])
+        # Квартира (число)
+        _, building_str, entrance_str, floor_str, apt_str = data
+        building = int(building_str)
+        entrance = int(entrance_str)
+        floor = int(floor_str)
+        apartment = int(apt_str)
         result = {
-            "building": building_id,
-            "entrance": entrance_num,
-            "floor": floor_num,
-            "apartment": apartment_num,
+            "building": building,
+            "entrance": entrance,
+            "floor": floor,
+            "apartment": apartment,
             "type": "apartment"
         }
         await state.update_data(object_selection=result)
         await callback.message.edit_text(
-            f"✅ Выбрана квартира {apartment_num} (корпус {building_id}, подъезд {entrance_num}, этаж {floor_num})"
+            f"✅ Выбрана квартира {apartment} (корпус {building}, подъезд {entrance}, этаж {floor})"
         )
-        # Здесь можно завершить выбор или передать управление другому хендлеру
+        # Передаём управление следующему шагу в create.py
+        await state.set_state(TaskCreate.enter_title)
+        await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
+
+    elif action == "obj_common":
+        # Общая зона (строка)
+        _, building_str, entrance_str, floor_str, common_name = data
+        building = int(building_str)
+        entrance = int(entrance_str)
+        floor = int(floor_str)
+        # common_name может содержать запятые, поэтому объединяем остаток
+        common_name = ":".join(data[4:])  # восстановить полное название
+        result = {
+            "building": building,
+            "entrance": entrance,
+            "floor": floor,
+            "common_area": common_name,
+            "type": "common_area"
+        }
+        await state.update_data(object_selection=result)
+        await callback.message.edit_text(
+            f"✅ Выбрана общая зона: {common_name}"
+        )
+        await state.set_state(TaskCreate.enter_title)
+        await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
 
     elif action == "obj_parking":
         await state.update_data(object_type="parking")
@@ -123,6 +145,8 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             f"✅ Выбрано машиноместо {spot_num} (этаж {floor_num})"
         )
+        await state.set_state(TaskCreate.enter_title)
+        await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
 
     elif action == "obj_cellar":
         building_id = int(data[1])
@@ -136,6 +160,8 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             f"✅ Выбран келлер {cellar_num}"
         )
+        await state.set_state(TaskCreate.enter_title)
+        await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
 
     # ========== ОБРАБОТЧИКИ КНОПОК "НАЗАД" ==========
     elif action == "obj_back_building":

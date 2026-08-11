@@ -228,7 +228,7 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
                 return None
             task.assigned_team = team
             task.assigned_to = None
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.utcnow()
             history = TaskHistory(
                 task_id=task.id,
                 user_id=assigned_by,
@@ -237,33 +237,30 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
             )
             db.add(history)
             await db.commit()
-            await db.refresh(task)
             return task
 
 
 # ==========================
 # Назначение на конкретного сотрудника (с блокировкой)
 # ==========================
-async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int) -> Optional[Task]:
+async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
         async with db.begin():
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            # Проверяем, что задача может быть назначена
             if task.status not in ('created', 'waiting'):
                 return None
             employee = await db.get(User, user_id)
             if not employee or not employee.active:
                 return None
-            # Если задача требует команды, проверяем
-            if task.assigned_team and employee.team != task.assigned_team:
+            if not force and task.assigned_team and employee.team != task.assigned_team:
                 return None
             task.assigned_to = user_id
             task.assigned_team = employee.team
             if task.status == "created":
                 task.status = "accepted"
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.utcnow()
             history = TaskHistory(
                 task_id=task.id,
                 user_id=assigned_by,
@@ -272,7 +269,6 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int) -> O
             )
             db.add(history)
             await db.commit()
-            await db.refresh(task)
             return task
 
 
@@ -297,7 +293,7 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
             task.assigned_to = user_id
             if task.status == "created":
                 task.status = "accepted"
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.utcnow()
             history = TaskHistory(
                 task_id=task.id,
                 user_id=user_id,
@@ -306,7 +302,6 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
             )
             db.add(history)
             await db.commit()
-            await db.refresh(task)
             return task
 
 
@@ -333,7 +328,7 @@ async def transfer_task(
             old_name = old_assignee.full_name if old_assignee else "неизвестно"
             task.assigned_to = to_user_id
             task.assigned_team = new_assignee.team
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.utcnow()
             history_text = f"Передано от {old_name} к {new_assignee.full_name}"
             if comment:
                 history_text += f"\nКомментарий: {comment}"
@@ -345,7 +340,6 @@ async def transfer_task(
             )
             db.add(history)
             await db.commit()
-            await db.refresh(task)
             return task
 
 
@@ -369,9 +363,9 @@ async def change_status(
                 return None
             old_status = task.status
             task.status = new_status
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.utcnow()
             if new_status == "closed":
-                task.closed_at = datetime.now(timezone.utc)
+                task.closed_at = datetime.utcnow()
             if new_status == "waiting" and wait_until:
                 task.wait_until = wait_until
             else:
@@ -391,7 +385,6 @@ async def change_status(
             )
             db.add(history)
             await db.commit()
-            await db.refresh(task)
             return task
 
 
@@ -515,16 +508,11 @@ async def get_tasks_by_status(status: str, limit: int = 20, offset: int = 0, use
         if user_id:
             user = await db.get(User, user_id)
             if user and user.role == UserRole.ADMIN:
-                # Администратор видит все закрытые (кроме is_feedback? нет, администратор видит всё)
-                # Но если мы хотим оставить как есть, то для администратора не добавляем фильтры
                 pass
             elif user and user.role in (UserRole.CONCIERGE, UserRole.DIRECTOR):
-                # Консьерж и директор видят все закрытые, кроме is_feedback
                 query = query.where(Task.is_feedback == False)
-                # Исключаем задачи, назначенные на ADMIN_TEAM
                 query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
             else:
-                # Для исполнителей – только свои задачи (assigned_to или assigned_team)
                 query = query.where(
                     or_(
                         Task.assigned_to == user_id,
