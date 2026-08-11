@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 from app.services.employees.service import get_employee, get_employee_by_id
 from app.services.passes.service import (
     create_pass, get_pass, get_passes, get_pass_history, search_passes,
-    check_in, check_out, update_pass_status, count_passes_by_status
+    check_in, check_out, update_pass_status, count_passes_by_status,
+    add_pass_comment
 )
 from app.services.tasks.service import get_available_employees
 from app.database.models import UserRole, Team
@@ -38,11 +39,11 @@ class PassCreate(StatesGroup):
     select_start_date = State()
     select_end_date = State()
 
-class PassCommentState(StatesGroup):
-    waiting_for_comment = State()
-
 class PassSearch(StatesGroup):
     query = State()
+
+class PassCommentState(StatesGroup):
+    waiting_for_comment = State()
 
 # ========== Главное меню пропусков ==========
 @router.message(F.text == "🚗 Пропуска")
@@ -298,8 +299,8 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             purpose=data.get("purpose"),
             start_date=data.get("start_date"),
             end_date=data.get("end_date"),
-            comment="",
-            photo_ids=[],
+            comment=data.get("comment", ""),
+            photo_ids=data.get("photos", []),
             created_by=employee.id,
             assigned_to=data.get("assigned_to"),
             assigned_team=data.get("assigned_team")
@@ -323,10 +324,10 @@ async def cancel_confirm(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=pass_main_menu_keyboard())
 
-# ========== Активные пропуска (все) ==========
+# ========== Активные пропуска ==========
 @router.message(F.text == "📋 Активные пропуски")
-async def list_active_passes(message: Message, state: FSMContext, page: int = 1):
-    employee = await get_employee(message.from_user.id)
+async def list_active_passes(message: Message, state: FSMContext, page: int = 1, user_id: int = None):
+    employee = await get_employee(user_id if user_id else message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
         await message.answer("У вас нет прав для просмотра пропусков.")
         return
@@ -393,7 +394,7 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
     sent = await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
     await state.update_data(pass_message_id=sent.message_id, pass_chat_id=sent.chat.id)
 
-# ========== Поиск по пропускам ==========
+# ========== Поиск ==========
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -460,11 +461,12 @@ async def show_pass_card(callback: CallbackQuery):
         f"Выезд: {p.checked_out_at.strftime('%d.%m.%Y %H:%M') if p.checked_out_at else '—'}\n"
         f"Комментарий: {p.comment or '—'}"
     )
-    history_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{p.id}")]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Комментарии", callback_data=f"pass_comment_menu:{pass_id}")],
+        [InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{p.id}")],
     ])
-    kb = pass_action_keyboard(p.id, p.status, user_role)
-    merged_buttons = kb.inline_keyboard + history_kb.inline_keyboard
+    action_kb = pass_action_keyboard(p.id, p.status, user_role)
+    merged_buttons = action_kb.inline_keyboard + kb.inline_keyboard
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=merged_buttons))
     await callback.answer()
 
@@ -484,11 +486,11 @@ async def show_pass_history(callback: CallbackQuery):
     await callback.message.answer(text)
     await callback.answer()
 
-# ========== Действия с пропуском ==========
+# ========== Действия ==========
 @router.callback_query(F.data.startswith("pass_checkin:"))
 async def pass_checkin(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
-    p = await check_in(pass_id)
+    p = await check_in(pass_id, callback.from_user.id)
     if p:
         await callback.answer("✅ Въезд отмечен")
         await show_pass_card(callback)
@@ -498,7 +500,7 @@ async def pass_checkin(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("pass_checkout:"))
 async def pass_checkout(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
-    p = await check_out(pass_id)
+    p = await check_out(pass_id, callback.from_user.id)
     if p:
         await callback.answer("✅ Выезд отмечен")
         await show_pass_card(callback)
@@ -512,7 +514,7 @@ async def pass_complete(callback: CallbackQuery):
     if not employee or employee.role not in (UserRole.CONCIERGE, UserRole.ADMIN, UserRole.DIRECTOR):
         await callback.answer("Только для консьержа/админа/директора", show_alert=True)
         return
-    p = await update_pass_status(pass_id, "completed")
+    p = await update_pass_status(pass_id, "completed", callback.from_user.id)
     if p:
         await callback.answer("✅ Пропуск выполнен")
         await show_pass_card(callback)
@@ -522,14 +524,100 @@ async def pass_complete(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("pass_close:"))
 async def pass_close(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
-    p = await update_pass_status(pass_id, "expired")
+    p = await update_pass_status(pass_id, "expired", callback.from_user.id)
     if p:
         await callback.answer("✅ Пропуск закрыт")
         await show_pass_card(callback)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-# ========== Пагинация и возврат ==========
+# ========== Комментарии ==========
+@router.callback_query(F.data.startswith("pass_comment_menu:"))
+async def pass_comment_menu(callback: CallbackQuery):
+    pass_id = int(callback.data.split(":")[1])
+    await callback.message.delete()
+    await callback.message.answer(
+        "💬 Меню комментариев:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"pass_comment_list:{pass_id}")],
+            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"pass_comment_add:{pass_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"pass_comment_back:{pass_id}")],
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("pass_comment_list:"))
+async def pass_comment_list(callback: CallbackQuery):
+    pass_id = int(callback.data.split(":")[1])
+    p = await get_pass(pass_id)
+    if not p:
+        await callback.answer("Не найден", show_alert=True)
+        return
+    comments = p.comments or []
+    if not comments:
+        text = "💬 Комментариев пока нет."
+    else:
+        text = f"💬 <b>Комментарии к пропуску #{pass_id}</b>\n\n"
+        for c in comments[:10]:
+            user_name = c.get("author_name", "—")
+            created_at = c.get("created_at", "")
+            text += f"👤 {user_name} | {created_at}\n"
+            text += f"{c.get('text', '')}\n\n"
+    await callback.message.delete()
+    await callback.message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"pass_comment_menu:{pass_id}")]
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("pass_comment_add:"))
+async def pass_comment_add(callback: CallbackQuery, state: FSMContext):
+    pass_id = int(callback.data.split(":")[1])
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    await state.set_state(PassCommentState.waiting_for_comment)
+    await state.update_data(pass_id=pass_id)
+    await callback.message.delete()
+    await callback.message.answer("✍️ Введите текст комментария:")
+    await callback.answer()
+
+@router.message(StateFilter(PassCommentState.waiting_for_comment), F.text)
+async def pass_comment_process(message: Message, state: FSMContext):
+    data = await state.get_data()
+    pass_id = data.get("pass_id")
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Ошибка")
+        await state.clear()
+        return
+    comment = await add_pass_comment(pass_id, employee.id, employee.full_name, message.text)
+    if comment:
+        await message.answer("✅ Комментарий добавлен.")
+    else:
+        await message.answer("❌ Ошибка.")
+    await state.clear()
+    await message.answer(
+        "💬 Меню комментариев:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"pass_comment_list:{pass_id}")],
+            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"pass_comment_add:{pass_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"pass_comment_back:{pass_id}")],
+        ])
+    )
+
+@router.callback_query(F.data.startswith("pass_comment_back:"))
+async def pass_comment_back(callback: CallbackQuery):
+    pass_id = int(callback.data.split(":")[1])
+    await callback.message.delete()
+    await show_pass_card(callback)
+    await callback.answer()
+
+# ========== Пагинация ==========
 @router.callback_query(F.data.startswith("pass_page:"))
 async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
     page = int(callback.data.split(":")[1])
@@ -584,13 +672,9 @@ async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
 
 @router.callback_query(F.data == "pass_back")
 async def back_to_pass_list(callback: CallbackQuery, state: FSMContext):
-    employee = await get_employee(callback.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
-        await callback.answer("У вас нет прав для возврата к списку пропусков.", show_alert=True)
-        return
-    await state.update_data(pass_list_type='active', pass_page=1)
+    await state.update_data(pass_list_type="active", pass_page=1)
     await callback.message.delete()
-    await list_active_passes(callback.message, state, 1)
+    await list_active_passes(callback.message, state, 1, user_id=callback.from_user.id)
     await callback.answer()
 
 @router.callback_query(F.data == "pass_menu_back")
@@ -616,94 +700,3 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext):
     employee = await get_employee(callback.from_user.id)
     if employee:
         await callback.message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
-
-# ========== Комментарии к пропускам ==========
-@router.callback_query(F.data.startswith("pass_comment_menu:"))
-async def pass_comment_menu(callback: CallbackQuery):
-    pass_id = int(callback.data.split(":")[1])
-    await callback.message.delete()
-    await callback.message.answer(
-        "💬 Меню комментариев:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"pass_comment_list:{pass_id}")],
-            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"pass_comment_add:{pass_id}")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"pass_comment_back:{pass_id}")],
-        ])
-    )
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("pass_comment_list:"))
-async def pass_comment_list(callback: CallbackQuery):
-    pass_id = int(callback.data.split(":")[1])
-    from app.services.passes.service import get_pass
-    p = await get_pass(pass_id)
-    if not p:
-        await callback.answer("Не найден", show_alert=True)
-        return
-    comments = p.comments or []
-    if not comments:
-        text = "💬 Комментариев пока нет."
-    else:
-        text = f"💬 <b>Комментарии к пропуску #{pass_id}</b>\n\n"
-        for c in comments[:10]:
-            user_name = c.get("user_name", "—")
-            created_at = c.get("created_at", "")
-            text += f"👤 {user_name} | {created_at}\n"
-            text += f"{c.get('text', '')}\n\n"
-    await callback.message.delete()
-    await callback.message.answer(
-        text,
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"pass_comment_menu:{pass_id}")]
-        ])
-    )
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("pass_comment_add:"))
-async def pass_comment_add(callback: CallbackQuery, state: FSMContext):
-    pass_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Ошибка", show_alert=True)
-        return
-    await state.set_state(PassCommentState.waiting_for_comment)
-    await state.update_data(pass_id=pass_id)
-    await callback.message.delete()
-    await callback.message.answer("✍️ Введите текст комментария:")
-    await callback.answer()
-
-class PassCommentState(StatesGroup):
-    waiting_for_comment = State()
-
-@router.message(StateFilter(PassCommentState.waiting_for_comment), F.text)
-async def pass_comment_process(message: Message, state: FSMContext):
-    data = await state.get_data()
-    pass_id = data.get("pass_id")
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Ошибка")
-        await state.clear()
-        return
-    from app.services.passes.service import add_pass_comment
-    success = await add_pass_comment(pass_id, employee.id, message.text)
-    if success:
-        await message.answer("✅ Комментарий добавлен.")
-    else:
-        await message.answer("❌ Ошибка.")
-    await state.clear()
-    await message.answer(
-        "💬 Меню комментариев:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"pass_comment_list:{pass_id}")],
-            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"pass_comment_add:{pass_id}")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"pass_comment_back:{pass_id}")],
-        ])
-    )
-
-@router.callback_query(F.data.startswith("pass_comment_back:"))
-async def pass_comment_back(callback: CallbackQuery):
-    pass_id = int(callback.data.split(":")[1])
-    await callback.message.delete()
-    await show_pass_card(callback)
-    await callback.answer()

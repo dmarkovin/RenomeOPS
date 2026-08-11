@@ -1,133 +1,264 @@
 from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F, types
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters.state import StateFilter
 
 from app.services.employees.service import get_employee
-from app.services.services.service import create_service, get_all_services, get_all_orders, update_order_status
+from app.services.services.service import (
+    create_service, get_all_services, get_service,
+    update_service, delete_service
+)
 from app.database.models import UserRole
-from app.keyboards.services import service_admin_keyboard
+from app.keyboards.services import (
+    service_admin_list_keyboard,
+    service_admin_edit_keyboard
+)
 
 router = Router()
 
-class ServiceCreation(StatesGroup):
+class ServiceEdit(StatesGroup):
     name = State()
     description = State()
     price = State()
     category = State()
-    confirm = State()
+    confirm_delete = State()
 
-@router.message(F.text == "➕ Создать услугу")
-async def start_create_service(message: Message, state: FSMContext):
+@router.message(F.text == "💳 Управление услугами")
+async def service_admin_menu(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR):
+    if not employee or employee.role != UserRole.ADMIN:
         await message.answer("У вас нет прав.")
         return
+    await state.update_data(service_admin_page=page)
+    limit = 10
+    offset = (page - 1) * limit
+    services = await get_all_services(active_only=False, limit=limit, offset=offset)
+    total = len(await get_all_services(active_only=False, limit=10000))
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    if not services:
+        await message.answer("Услуг пока нет.", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        ))
+        return
+    kb = service_admin_list_keyboard(services, page, total_pages)
+    await message.answer("📋 Список услуг (администрирование):", reply_markup=kb)
+
+@router.callback_query(F.data.startswith("service_admin_page:"))
+async def service_admin_page(callback: CallbackQuery, state: FSMContext):
+    page = int(callback.data.split(":")[1])
+    await service_admin_menu(callback.message, state, page)
+    await callback.answer()
+
+@router.callback_query(F.data == "service_admin_create")
+async def service_admin_create(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
     await state.clear()
-    await state.set_state(ServiceCreation.name)
-    await message.answer("Введите название услуги:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(ServiceEdit.name)
+    await callback.message.answer("Введите название услуги:", reply_markup=ReplyKeyboardRemove())
+    await callback.answer()
 
-@router.message(ServiceCreation.name)
-async def service_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text.strip())
-    await state.set_state(ServiceCreation.description)
-    await message.answer("Введите описание услуги (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
+@router.message(ServiceEdit.name)
+async def service_edit_name(message: Message, state: FSMContext):
+    data = await state.get_data()
+    service_id = data.get("service_id")
+    if service_id:
+        await update_service(service_id, name=message.text.strip())
+        await message.answer("✅ Название обновлено.")
+        await state.clear()
+        await service_admin_menu(message, state)
+    else:
+        await state.update_data(name=message.text.strip())
+        await state.set_state(ServiceEdit.description)
+        await message.answer("Введите описание услуги (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-@router.message(ServiceCreation.description)
-async def service_description(message: Message, state: FSMContext):
-    text = message.text.strip()
-    await state.update_data(description=text if text != "-" else None)
-    await state.set_state(ServiceCreation.price)
-    await message.answer("Введите стоимость услуги (в рублях):", reply_markup=ReplyKeyboardRemove())
+@router.message(ServiceEdit.description)
+async def service_edit_description(message: Message, state: FSMContext):
+    data = await state.get_data()
+    service_id = data.get("service_id")
+    if service_id:
+        await update_service(service_id, description=message.text.strip() if message.text != "-" else "")
+        await message.answer("✅ Описание обновлено.")
+        await state.clear()
+        await service_admin_menu(message, state)
+    else:
+        await state.update_data(description=message.text.strip() if message.text != "-" else "")
+        await state.set_state(ServiceEdit.price)
+        await message.answer("Введите стоимость услуги (в рублях):", reply_markup=ReplyKeyboardRemove())
 
-@router.message(ServiceCreation.price)
-async def service_price(message: Message, state: FSMContext):
+@router.message(ServiceEdit.price)
+async def service_edit_price(message: Message, state: FSMContext):
+    data = await state.get_data()
+    service_id = data.get("service_id")
     try:
         price = float(message.text.strip())
         if price < 0:
             raise ValueError
-    except Exception as e:
-        await message.answer("❌ Введите корректную цену (положительное число).", reply_markup=ReplyKeyboardRemove())
+    except Exception:
+        await message.answer("❌ Введите корректную цену (положительное число).")
         return
-    await state.update_data(price=price)
-    await state.set_state(ServiceCreation.category)
-    await message.answer("Введите категорию услуги (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
+    if service_id:
+        await update_service(service_id, price=price)
+        await message.answer("✅ Цена обновлена.")
+        await state.clear()
+        await service_admin_menu(message, state)
+    else:
+        await state.update_data(price=price)
+        await state.set_state(ServiceEdit.category)
+        await message.answer("Введите категорию услуги (или '-' для пропуска):", reply_markup=ReplyKeyboardRemove())
 
-@router.message(ServiceCreation.category)
-async def service_category(message: Message, state: FSMContext):
-    text = message.text.strip()
-    await state.update_data(category=text if text != "-" else None)
+@router.message(ServiceEdit.category)
+async def service_edit_category(message: Message, state: FSMContext):
     data = await state.get_data()
-    await state.set_state(ServiceCreation.confirm)
+    service_id = data.get("service_id")
+    if service_id:
+        await update_service(service_id, category=message.text.strip() if message.text != "-" else "")
+        await message.answer("✅ Категория обновлена.")
+        await state.clear()
+        await service_admin_menu(message, state)
+    else:
+        category = message.text.strip() if message.text != "-" else None
+        try:
+            service = await create_service(
+                name=data.get("name"),
+                description=data.get("description"),
+                price=data.get("price"),
+                category=category
+            )
+            await message.answer(f"✅ Услуга '{service.name}' создана (ID: {service.id})")
+        except Exception as e:
+            await message.answer(f"❌ Ошибка: {str(e)}")
+        await state.clear()
+        await service_admin_menu(message, state)
+
+@router.callback_query(F.data.startswith("service_admin_edit:"))
+async def service_admin_edit_start(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    service = await get_service(service_id)
+    if not service:
+        await callback.answer("Услуга не найдена", show_alert=True)
+        return
     text = (
-        f"📝 Проверьте данные:\n"
-        f"Название: {data['name']}\n"
-        f"Описание: {data['description'] or '—'}\n"
-        f"Цена: {data['price']} руб.\n"
-        f"Категория: {data['category'] or '—'}\n\n"
-        f"Подтвердить создание?"
+        f"📝 <b>Редактирование услуги #{service.id}</b>\n\n"
+        f"Название: {service.name}\n"
+        f"Описание: {service.description or '—'}\n"
+        f"Цена: {service.price} руб.\n"
+        f"Категория: {service.category or '—'}\n"
+        f"Активна: {'✅ Да' if service.active else '❌ Нет'}\n\n"
+        f"Выберите поле для изменения:"
     )
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✅ Да")],
-            [KeyboardButton(text="❌ Нет")],
-        ],
-        resize_keyboard=True
-    )
-    await message.answer(text, reply_markup=kb)
+    await callback.message.edit_text(text, reply_markup=service_admin_edit_keyboard(service_id), parse_mode="HTML")
+    await callback.answer()
 
-@router.message(ServiceCreation.confirm, F.text == "✅ Да")
-async def confirm_create_service(message: Message, state: FSMContext):
+@router.callback_query(F.data.startswith("service_edit_name:"))
+async def service_edit_name_start(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    await state.update_data(service_id=service_id)
+    await state.set_state(ServiceEdit.name)
+    await callback.message.delete()
+    await callback.message.answer("Введите новое название услуги:")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("service_edit_description:"))
+async def service_edit_description_start(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    await state.update_data(service_id=service_id)
+    await state.set_state(ServiceEdit.description)
+    await callback.message.delete()
+    await callback.message.answer("Введите новое описание услуги (или '-' для пропуска):")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("service_edit_price:"))
+async def service_edit_price_start(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    await state.update_data(service_id=service_id)
+    await state.set_state(ServiceEdit.price)
+    await callback.message.delete()
+    await callback.message.answer("Введите новую цену (в рублях):")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("service_edit_category:"))
+async def service_edit_category_start(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    await state.update_data(service_id=service_id)
+    await state.set_state(ServiceEdit.category)
+    await callback.message.delete()
+    await callback.message.answer("Введите новую категорию (или '-' для пропуска):")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("service_edit_active:"))
+async def service_edit_active(callback: CallbackQuery):
+    service_id = int(callback.data.split(":")[1])
+    service = await get_service(service_id)
+    if not service:
+        await callback.answer("Услуга не найдена", show_alert=True)
+        return
+    await update_service(service_id, active=not service.active)
+    await callback.answer(f"✅ Статус изменён на {'активна' if not service.active else 'неактивна'}")
+    await service_admin_edit_start(callback, await callback.bot.get_state(callback.from_user.id))
+
+@router.callback_query(F.data.startswith("service_edit_back:"))
+async def service_edit_back(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    await callback.message.delete()
+    await service_admin_menu(callback.message, state)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("service_admin_delete:"))
+async def service_admin_delete(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    service = await get_service(service_id)
+    if not service:
+        await callback.answer("Услуга не найдена", show_alert=True)
+        return
+    await state.set_state(ServiceEdit.confirm_delete)
+    await state.update_data(service_id=service_id)
+    await callback.message.edit_text(
+        f"⚠️ Вы действительно хотите удалить услугу '{service.name}'?\n"
+        f"Это действие нельзя отменить. Все заказы с этой услугой останутся в истории.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, удалить", callback_data="service_admin_delete_confirm")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="service_admin_delete_cancel")]
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(ServiceEdit.confirm_delete), F.data == "service_admin_delete_confirm")
+async def service_admin_delete_confirm(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    try:
-        service = await create_service(
-            name=data['name'],
-            description=data.get('description'),
-            price=data['price'],
-            category=data.get('category')
-        )
-        await message.answer(f"✅ Услуга '{service.name}' создана (ID: {service.id})", reply_markup=service_admin_keyboard())
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
+    service_id = data.get("service_id")
+    success = await delete_service(service_id)
+    if success:
+        await callback.answer("✅ Услуга удалена (деактивирована)", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка", show_alert=True)
     await state.clear()
+    await callback.message.delete()
+    await service_admin_menu(callback.message, state)
 
-@router.message(ServiceCreation.confirm, F.text == "❌ Нет")
-async def cancel_create_service(message: Message, state: FSMContext):
+@router.callback_query(StateFilter(ServiceEdit.confirm_delete), F.data == "service_admin_delete_cancel")
+async def service_admin_delete_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await message.answer("❌ Создание отменено", reply_markup=service_admin_keyboard())
+    await callback.message.delete()
+    await service_admin_menu(callback.message, state)
+    await callback.answer()
 
-@router.message(ServiceCreation.confirm)
-async def invalid_confirm(message: Message):
-    await message.answer("Пожалуйста, используйте кнопки.")
+@router.callback_query(F.data == "service_admin_back")
+async def service_admin_back(callback: CallbackQuery):
+    await callback.message.delete()
+    employee = await get_employee(callback.from_user.id)
+    if employee and employee.role == UserRole.ADMIN:
+        from app.keyboards.admin import admin_keyboard
+        await callback.message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())
+    await callback.answer()
 
-@router.message(F.text == "📋 Список услуг")
-async def list_services(message: Message):
+@router.message(F.text == "⬅️ Назад")
+async def back_from_services(message: Message):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR):
-        await message.answer("Нет прав.")
-        return
-    services = await get_all_services(active_only=False)
-    if not services:
-        await message.answer("Услуг пока нет.")
-        return
-    text = "📋 Список услуг:\n\n"
-    for s in services:
-        status = "✅" if s.active else "❌"
-        text += f"{status} {s.name} — {s.price} руб. (ID: {s.id})\n"
-    await message.answer(text, reply_markup=service_admin_keyboard())
-
-@router.message(F.text == "📦 Заказы")
-async def list_orders(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR):
-        await message.answer("Нет прав.")
-        return
-    orders = await get_all_orders(limit=20)
-    if not orders:
-        await message.answer("Заказов пока нет.")
-        return
-    text = "📦 Заказы услуг:\n\n"
-    for o in orders:
-        text += f"ID: {o.id} | Услуга ID: {o.service_id} | Статус: {o.status} | Создан: {o.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-    await message.answer(text, reply_markup=service_admin_keyboard())
+    if employee and employee.role == UserRole.ADMIN:
+        from app.keyboards.admin import admin_keyboard
+        await message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())
+    else:
+        await message.answer("Возврат...")

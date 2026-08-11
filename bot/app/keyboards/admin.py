@@ -4,15 +4,11 @@ def admin_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="📋 Заявки"),
-                KeyboardButton(text="💳 Платные услуги"),
-            ],
-            [
                 KeyboardButton(text="👥 Сотрудники"),
-                KeyboardButton(text="🚗 Пропуска"),
+                KeyboardButton(text="💳 Управление услугами"),
             ],
             [
-                KeyboardButton(text="➕ Создать услугу"),
+                KeyboardButton(text="📋 Заявки"),
                 KeyboardButton(text="📊 Статистика"),
             ],
             [

@@ -6,6 +6,7 @@ from app.database.models import Pass, User, Team
 
 
 def _add_history(pass_obj, action: str, user_id: int = None, details: str = ""):
+    """Добавляет запись в историю пропуска"""
     if pass_obj.history is None:
         pass_obj.history = []
     entry = {
@@ -46,6 +47,7 @@ async def create_pass(
             assigned_to=assigned_to,
             assigned_team=assigned_team,
             status="active",
+            history=[],
             comments=[]
         )
         db.add(p)
@@ -133,32 +135,31 @@ async def check_out(pass_id: int, user_id: int = None) -> Optional[Pass]:
         return p
 
 
-async def get_pass_history(pass_id: int) -> List[dict]:
-    async with AsyncSessionLocal() as db:
-        p = await db.get(Pass, pass_id)
-        if not p:
-            return []
-        return p.history or []
-
-
-async def add_pass_comment(pass_id: int, user_id: int, text: str) -> bool:
+async def add_pass_comment(pass_id: int, user_id: int, author_name: str, text: str) -> bool:
     async with AsyncSessionLocal() as db:
         p = await db.get(Pass, pass_id)
         if not p:
             return False
         if p.comments is None:
             p.comments = []
-        user = await db.get(User, user_id)
-        user_name = user.full_name if user else "Неизвестный"
         p.comments.append({
-            "user_id": user_id,
-            "user_name": user_name,
+            "author_id": user_id,
+            "author_name": author_name,
             "text": text,
             "created_at": datetime.utcnow().isoformat()
         })
-        _add_history(p, "COMMENT", user_id, f"Добавлен комментарий: {text[:50]}...")
+        p.updated_at = datetime.utcnow()
+        _add_history(p, "COMMENT", user_id, f"Добавлен комментарий: {text[:50]}")
         await db.commit()
         return True
+
+
+async def get_pass_history(pass_id: int) -> List[dict]:
+    async with AsyncSessionLocal() as db:
+        p = await db.get(Pass, pass_id)
+        if not p:
+            return []
+        return p.history or []
 
 
 async def search_passes(query: str, limit: int = 20) -> List[Pass]:

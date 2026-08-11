@@ -1,30 +1,42 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
 
-from app.services.employees.service import get_employee
+from app.services.employees.service import get_employee, update_employee_role, update_employee_team, get_all_employees, get_employee_by_id
+from app.services.tasks.service import (
+    count_open_tasks, count_tasks_by_status, count_checking_tasks,
+    get_open_tasks, get_tasks_by_status, count_team_tasks, get_team_tasks
+)
+from app.services.passes.service import count_passes_by_status
+from app.services.reception.delivery_service import get_all_deliveries
+from app.services.reception.key_service import get_keys
+from app.services.reception.document_service import get_documents
+from app.services.patrol.service import get_patrols
 from app.services.notification_service import notify_admins
 from app.database.models import UserRole, Team
 from app.keyboards.main_menu import main_menu_keyboard
 from app.keyboards.settings import settings_keyboard
 from app.keyboards.employees.roles import role_selection_keyboard
-from app.services.employees.service import update_employee_role
-from app.services.settings.service import get_user_settings, update_setting
-from app.keyboards.notification_settings import notification_settings_keyboard
-from app.states.feedback import Feedback
-from app.services.tasks.service import create_task
-from app.services.employees.service import get_all_employees
-from app.states.employees.team_change import TeamChange
 from app.keyboards.employees.teams import team_selection_keyboard
+from app.states.employees.role_change import RoleChange
+from app.states.employees.team_change import TeamChange
+from app.states.feedback import Feedback
+from app.services.settings.service import get_user_settings, update_setting
+from app.services.employees.service import count_employees
 
 router = Router()
 
-class SettingsStates(StatesGroup):
-    change_role = State()
-    notification_settings = State()
+# ========== Функция для главного меню (используется в start.py) ==========
+async def show_main_menu(message: Message):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
 
+# ========== Профиль ==========
 @router.message(F.text == "👤 Профиль")
 async def show_profile(message: Message):
     employee = await get_employee(message.from_user.id)
@@ -41,158 +53,163 @@ async def show_profile(message: Message):
         f"Telegram ID: {employee.telegram_id or '—'}\n"
         f"Дата регистрации: {employee.registered_at.strftime('%d.%m.%Y %H:%M') if employee.registered_at else '—'}"
     )
-    await message.answer(text, parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML", reply_markup=settings_keyboard(employee.role))
 
+# ========== Настройки ==========
 @router.message(F.text == "⚙ Настройки")
-async def settings_menu(message: Message):
+async def show_settings(message: Message):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
         return
     await message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
 
-# ===== Смена роли для администратора (мгновенно) =====
+# ========== Смена роли ==========
 @router.message(F.text == "🔄 Сменить роль")
-async def change_own_role(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role != UserRole.ADMIN:
-        await message.answer("Только для администратора.")
-        return
-    await state.set_state(SettingsStates.change_role)
-    await state.update_data(user_id=employee.id)
-    await message.answer(
-        "⚠️ Внимание! Если вы измените свою роль, вы можете потерять доступ к административным функциям.\n"
-        "Чтобы восстановить роль, используйте команду /become_admin.\n\n"
-        "Выберите новую роль:",
-        reply_markup=role_selection_keyboard(employee.id)
-    )
-
-@router.callback_query(F.data.startswith("emp_set_role:"), StateFilter(SettingsStates.change_role))
-async def set_own_role(callback: CallbackQuery, state: FSMContext):
-    _, user_id_str, role_str = callback.data.split(":")
-    user_id = int(user_id_str)
-    new_role = UserRole(role_str)
-    user = await update_employee_role(user_id, new_role)
-    if user:
-        await callback.answer(f"✅ Ваша роль изменена на {new_role.value}", show_alert=True)
-        await state.clear()
-        employee = await get_employee(callback.from_user.id)
-        if employee:
-            await callback.message.edit_text("⚙ Настройки:", reply_markup=settings_keyboard(new_role))
-    else:
-        await callback.answer("Ошибка", show_alert=True)
-
-# ===== Смена команды (для всех, кроме ADMIN) =====
-@router.message(F.text == "🔄 Сменить команду")
-async def change_team_start(message: Message, state: FSMContext):
+async def change_role(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
         return
-    if employee.role == UserRole.ADMIN:
-        await message.answer("Администратор может сменить команду через карточку сотрудника.")
+    await state.set_state(RoleChange.select_role)
+    await message.answer(
+        "Выберите новую роль:",
+        reply_markup=role_selection_keyboard(employee.id)
+    )
+
+@router.callback_query(F.data.startswith("emp_set_role:"), StateFilter(RoleChange.select_role))
+async def set_role(callback: CallbackQuery, state: FSMContext):
+    _, user_id_str, role_str = callback.data.split(":")
+    user_id = int(user_id_str)
+    new_role = UserRole(role_str)
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
         return
+    if user_id != employee.id:
+        await callback.answer("Вы можете менять только свою роль.", show_alert=True)
+        return
+    await update_employee_role(user_id, new_role)
+    await callback.answer(f"✅ Ваша роль изменена на {new_role.value}")
+    await state.clear()
+    await callback.message.delete()
+    await callback.message.answer("Главное меню:", reply_markup=main_menu_keyboard(new_role))
+    await callback.answer()
+
+# ========== Смена команды ==========
+@router.message(F.text == "🔄 Сменить команду")
+async def change_team(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=team.value, callback_data=f"emp_set_team:{employee.id}:{team.value}")]
+        for team in Team
+    ] + [[InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_action")]])
     await state.set_state(TeamChange.select_team)
-    await message.answer("Выберите новую команду:", reply_markup=team_selection_keyboard(employee.id))
+    await message.answer("Выберите новую команду:", reply_markup=kb)
 
 @router.callback_query(StateFilter(TeamChange.select_team), F.data.startswith("emp_set_team:"))
-async def team_selected(callback: CallbackQuery, state: FSMContext):
+async def set_team(callback: CallbackQuery, state: FSMContext):
     _, user_id_str, team_str = callback.data.split(":")
     user_id = int(user_id_str)
-    new_team = Team(team_str) if team_str != "None" else None
-    await state.update_data(new_team=new_team, user_id=user_id)
+    new_team = Team(team_str)
+    employee = await get_employee(callback.from_user.id)
+    if not employee or user_id != employee.id:
+        await callback.answer("Ошибка", show_alert=True)
+        return
     await state.set_state(TeamChange.reason)
-    await callback.message.edit_text("Напишите обоснование для смены команды:")
+    await state.update_data(new_team=new_team)
+    await callback.message.edit_text("Введите причину смены команды (обязательно):")
+    await callback.answer()
 
 @router.message(StateFilter(TeamChange.reason), F.text)
 async def process_team_change_reason(message: Message, state: FSMContext):
-    reason = message.text
+    reason = message.text.strip()
+    if not reason:
+        await message.answer("Причина обязательна. Введите текст:")
+        return
     data = await state.get_data()
-    user_id = data.get("user_id")
     new_team = data.get("new_team")
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Ошибка")
         await state.clear()
         return
-
+    from app.services.tasks.service import create_task
     task = await create_task(
-        title=f"Запрос на смену команды для {employee.full_name}",
-        description=f"Пользователь {employee.full_name} (ID: {employee.id}) запрашивает смену команды на {new_team.value if new_team else 'без команды'}.\nОбоснование: {reason}",
+        title=f"Смена команды: {employee.full_name}",
+        description=f"Причина: {reason}\nТекущая команда: {employee.team.value if employee.team else '—'}\nНовая команда: {new_team.value}",
         created_by=employee.id,
-        priority=3,
-        is_feedback=True,
         is_role_change=True,
         assigned_team=Team.ADMIN_TEAM
     )
-    from app.services.tasks.service import assign_task_to_user
-    admins = await get_all_employees(role=UserRole.ADMIN, active=True)
-    if admins:
-        await assign_task_to_user(task.id, admins[0].id, employee.id)
-        await notify_admins(f"📢 Запрос на смену команды от {employee.full_name} (ID: {employee.id}) на {new_team.value if new_team else 'без команды'}. Задача #{task.id} создана.")
-        await message.answer(f"✅ Запрос на смену команды отправлен администраторам. Задача #{task.id} создана.")
-    else:
-        await message.answer("⚠️ Нет доступных администраторов. Запрос создан, но не назначен.")
+    await notify_admins(
+        f"📢 Запрос на смену команды от {employee.full_name} (ID: {employee.id}) на {new_team.value}. Задача #{task.id} создана."
+    )
+    await message.answer(
+        f"✅ Запрос на смену команды отправлен администратору. Задача #{task.id} создана."
+    )
     await state.clear()
 
+# ========== Уведомления ==========
 @router.message(F.text == "🔔 Уведомления")
-async def open_notification_settings(message: Message, state: FSMContext):
+async def notification_settings(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
         return
     settings = await get_user_settings(employee.id)
+    if not settings:
+        await message.answer("Настройки уведомлений не найдены.")
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{'✅' if getattr(settings, setting, True) else '❌'} {label}",
+            callback_data=f"notif_toggle:{setting}"
+        )]
+        for setting, label in [
+            ("notify_task_assigned", "Назначение задач"),
+            ("notify_task_status_changed", "Изменение статуса"),
+            ("notify_task_comment", "Комментарии"),
+            ("notify_new_task_team", "Новые задачи команды"),
+            ("notify_checking", "Проверка задач"),
+            ("notify_admin", "Административные"),
+        ]
+    ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="notif_back")]])
     await state.set_state(SettingsStates.notification_settings)
-    await message.answer(
-        "🔔 **Настройки уведомлений**\n\n"
-        "Здесь вы можете включить или отключить отдельные типы уведомлений.\n"
-        "✅ – включено, ❌ – отключено.",
-        reply_markup=notification_settings_keyboard(settings),
-        parse_mode="HTML"
-    )
+    await message.answer("Настройки уведомлений:", reply_markup=kb)
+
+class SettingsStates(StatesGroup):
+    notification_settings = State()
 
 @router.callback_query(F.data.startswith("notif_toggle:"), StateFilter(SettingsStates.notification_settings))
 async def toggle_notification(callback: CallbackQuery, state: FSMContext):
-    setting_name = callback.data.split(":")[1]
+    setting = callback.data.split(":")[1]
     employee = await get_employee(callback.from_user.id)
     if not employee:
         await callback.answer("Ошибка", show_alert=True)
         return
     settings = await get_user_settings(employee.id)
-    current_value = getattr(settings, setting_name)
-    new_value = not current_value
-    await update_setting(employee.id, setting_name, new_value)
-    settings = await get_user_settings(employee.id)
-    await callback.message.edit_text(
-        "🔔 **Настройки уведомлений**\n\n"
-        "Здесь вы можете включить или отключить отдельные типы уведомлений.\n"
-        "✅ – включено, ❌ – отключено.",
-        reply_markup=notification_settings_keyboard(settings),
-        parse_mode="HTML"
-    )
-    await callback.answer("Настройка сохранена")
+    if not settings:
+        await callback.answer("Настройки не найдены", show_alert=True)
+        return
+    current = getattr(settings, setting, True)
+    await update_setting(employee.id, setting, not current)
+    await callback.answer("✅ Настройка обновлена")
+    await notification_settings(callback.message, state)
 
 @router.callback_query(F.data == "notif_back", StateFilter(SettingsStates.notification_settings))
 async def back_from_notifications(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     employee = await get_employee(callback.from_user.id)
-    if not employee:
+    if employee:
         await callback.message.delete()
-        await callback.answer()
-        return
-    await callback.message.delete()
-    await callback.message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
+        await callback.message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
     await callback.answer()
 
-@router.message(F.text == "⬅️ Назад")
-async def back_from_settings(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Возврат...")
-        return
-    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
-
-# ========== Сообщить о проблеме ==========
+# ========== Обратная связь ==========
 @router.message(F.text == "📢 Сообщить о проблеме")
 async def start_feedback(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -200,19 +217,19 @@ async def start_feedback(message: Message, state: FSMContext):
         await message.answer("Вы не зарегистрированы.")
         return
     await state.set_state(Feedback.text)
-    await message.answer("Опишите проблему, с которой вы столкнулись:", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Опишите проблему или предложение:", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True
+    ))
 
-@router.message(Feedback.text)
+@router.message(Feedback.text, F.text != "❌ Отмена")
 async def process_feedback_text(message: Message, state: FSMContext):
     await state.update_data(text=message.text)
     await state.set_state(Feedback.photo)
-    await message.answer(
-        "Пришлите скриншот (опционально) или нажмите **Готово**:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="✅ Готово")]],
-            resize_keyboard=True
-        )
-    )
+    await message.answer("🖼 Пришлите фото (опционально) или нажмите **Готово**:", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Готово")]],
+        resize_keyboard=True
+    ))
 
 @router.message(Feedback.photo, F.photo)
 async def process_feedback_photo(message: Message, state: FSMContext):
@@ -220,49 +237,160 @@ async def process_feedback_photo(message: Message, state: FSMContext):
     photos = data.get("photos", [])
     photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
-    await message.answer(f"✅ Фото добавлено ({len(photos)})")
+    await message.answer(f"✅ Добавлено фото ({len(photos)})")
 
 @router.message(Feedback.photo, F.text == "✅ Готово")
 async def finish_feedback(message: Message, state: FSMContext):
     data = await state.get_data()
-    text = data.get("text")
-    photos = data.get("photos", [])
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Ошибка")
         await state.clear()
         return
-
+    from app.services.tasks.service import create_task
     task = await create_task(
-        title=f"Проблема от {employee.full_name}",
-        description=text,
+        title=f"Обратная связь от {employee.full_name}",
+        description=data.get('text', ''),
         created_by=employee.id,
-        priority=5,
-        photo_ids=photos,
-        is_paid=False,
-        is_feedback=True
+        is_feedback=True,
+        photo_ids=data.get('photos', []),
+        assigned_team=Team.ADMIN_TEAM
+    )
+    await notify_admins(f"📢 Новая задача о проблеме от {employee.full_name}:\n{data.get('text')}")
+    await message.answer(f"✅ Сообщение отправлено администратору. Задача #{task.id} создана.")
+    await state.clear()
+
+@router.message(F.text == "❌ Отмена")
+async def cancel_action(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    await state.clear()
+    await message.answer("Действие отменено.", reply_markup=main_menu_keyboard(employee.role) if employee else None)
+    if employee:
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
+
+# ========== Расширенная статистика ==========
+@router.message(F.text == "📊 Статистика")
+async def show_detailed_statistics(message: Message):
+    employee = await get_employee(message.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR):
+        await message.answer("Только для администратора и директора.")
+        return
+
+    # Сбор данных
+    total_open = await count_open_tasks()
+    total_checking = await count_checking_tasks()
+    total_closed = await count_tasks_by_status("closed")
+    total_waiting = await count_tasks_by_status("waiting")
+    total_in_progress = await count_tasks_by_status("in_progress")
+    total_accepted = await count_tasks_by_status("accepted")
+
+    # Приоритеты
+    tasks = await get_open_tasks(limit=1000)
+    priority_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for t in tasks:
+        if t.priority in priority_counts:
+            priority_counts[t.priority] += 1
+
+    # Исполнители (топ-5)
+    from collections import Counter
+    assignee_counter = Counter()
+    for t in tasks:
+        if t.assigned_to:
+            assignee_counter[t.assigned_to] += 1
+    top_assignees = []
+    for user_id, count in assignee_counter.most_common(5):
+        user = await get_employee_by_id(user_id)
+        if user:
+            top_assignees.append(f"{user.full_name}: {count} задач")
+
+    # Команды
+    team_task_counts = {}
+    for team in Team:
+        team_tasks = await get_team_tasks(employee.id, limit=1000)
+        team_task_counts[team.value] = len(team_tasks)
+
+    # Пропуска
+    active_passes = await count_passes_by_status("active")
+    used_passes = await count_passes_by_status("used")
+    expired_passes = await count_passes_by_status("expired")
+
+    # Доставки
+    all_deliveries = await get_all_deliveries(limit=10000)
+    pending_deliveries = len([d for d in all_deliveries if d.status == "pending"])
+    received_deliveries = len([d for d in all_deliveries if d.status == "received"])
+    completed_deliveries = len([d for d in all_deliveries if d.status == "completed"])
+
+    # Ключи
+    issued_keys = len(await get_keys(status="issued", limit=10000))
+    returned_keys = len(await get_keys(status="returned", limit=10000))
+
+    # Документы
+    docs = await get_documents(limit=10000)
+    doc_types = {}
+    for d in docs:
+        doc_types[d.doc_type] = doc_types.get(d.doc_type, 0) + 1
+
+    # Обходы
+    patrols = await get_patrols(limit=10000)
+    active_patrols = len([p for p in patrols if p.status == "active"])
+    completed_patrols = len([p for p in patrols if p.status == "completed"])
+
+    # Сотрудники
+    total_employees = await count_employees(active=None)
+    active_employees = await count_employees(active=True)
+    inactive_employees = total_employees - active_employees
+    role_counts = {}
+    for role in UserRole:
+        cnt = await count_employees(role=role)
+        role_counts[role.value] = cnt
+
+    text = (
+        f"📊 <b>Расширенная статистика системы</b>\n\n"
+        f"<b>📋 Заявки</b>\n"
+        f"Всего открытых: {total_open}\n"
+        f"В работе: {total_in_progress}\n"
+        f"На проверке: {total_checking}\n"
+        f"Ожидают: {total_waiting}\n"
+        f"Закрыто: {total_closed}\n"
+        f"Принято: {total_accepted}\n\n"
+        f"<b>Приоритеты заявок:</b>\n"
+        f"🔴 Критический (5): {priority_counts.get(5, 0)}\n"
+        f"🟠 Высокий (4): {priority_counts.get(4, 0)}\n"
+        f"🟡 Средний (3): {priority_counts.get(3, 0)}\n"
+        f"🟢 Низкий (2): {priority_counts.get(2, 0)}\n"
+        f"⚪ Неважно (1): {priority_counts.get(1, 0)}\n\n"
+        f"<b>Топ исполнителей:</b>\n"
+        + ("\n".join(top_assignees) if top_assignees else "Нет данных") + "\n\n"
+        f"<b>Задачи по командам:</b>\n"
+        + "\n".join([f"{team}: {count}" for team, count in team_task_counts.items() if count > 0]) + "\n\n"
+        f"<b>🚗 Пропуска</b>\n"
+        f"Активные: {active_passes}\n"
+        f"Использованные: {used_passes}\n"
+        f"Просроченные: {expired_passes}\n\n"
+        f"<b>📦 Доставка</b>\n"
+        f"Ожидают: {pending_deliveries}\n"
+        f"Получены: {received_deliveries}\n"
+        f"Завершены: {completed_deliveries}\n\n"
+        f"<b>🔑 Ключи</b>\n"
+        f"Выданы: {issued_keys}\n"
+        f"Возвращены: {returned_keys}\n\n"
+        f"<b>📄 Документы</b>\n"
+        + "\n".join([f"{doc_type}: {count}" for doc_type, count in doc_types.items()]) + "\n\n"
+        f"<b>🚶 Обходы</b>\n"
+        f"Активные: {active_patrols}\n"
+        f"Завершены: {completed_patrols}\n\n"
+        f"<b>👥 Сотрудники</b>\n"
+        f"Всего: {total_employees}\n"
+        f"Активные: {active_employees}\n"
+        f"Неактивные: {inactive_employees}\n"
+        f"По ролям:\n" + "\n".join([f"{role}: {count}" for role, count in role_counts.items() if count > 0])
     )
 
-    admins = await get_all_employees(role=UserRole.ADMIN, active=True)
-    if admins:
-        from app.services.tasks.service import assign_task_to_user
-        admin = admins[0]
-        await assign_task_to_user(task.id, admin.id, employee.id)
-        await notify_admins(f"📢 Создана задача о проблеме от {employee.full_name}:\n{text}")
-    else:
-        concierges = await get_all_employees(role=UserRole.CONCIERGE, active=True)
-        if concierges:
-            from app.services.tasks.service import assign_task_to_user
-            await assign_task_to_user(task.id, concierges[0].id, employee.id)
-            await notify_admins(f"📢 Создана задача о проблеме от {employee.full_name} (назначена консьержу):\n{text}")
-        else:
-            await message.answer("⚠️ Нет доступных администраторов или консьержей. Задача создана, но не назначена.")
+    await message.answer(text, parse_mode="HTML")
 
-    await message.answer(f"✅ Ваше сообщение зарегистрировано как заявка #{task.id}. Администратор получил уведомление.")
-    await state.clear()
-    await message.answer("Возврат в главное меню", reply_markup=main_menu_keyboard(employee.role))
-
-async def show_main_menu(message: Message):
+# ========== Назад ==========
+@router.message(F.text == "⬅️ Назад")
+async def back_to_main_menu(message: Message):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
