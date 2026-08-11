@@ -1,8 +1,20 @@
 from datetime import datetime
 from typing import List, Optional, Union
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, or_
 from app.database import AsyncSessionLocal
-from app.database.models import Pass, User, UserRole, Team
+from app.database.models import Pass, User, Team
+
+
+def _add_history(pass_obj, action: str, user_id: int = None, details: str = ""):
+    if pass_obj.history is None:
+        pass_obj.history = []
+    entry = {
+        "action": action,
+        "user_id": user_id,
+        "details": details,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    pass_obj.history.append(entry)
 
 
 async def create_pass(
@@ -19,10 +31,6 @@ async def create_pass(
     assigned_to: int = None,
     assigned_team: str = None
 ) -> Pass:
-    if start_date is None:
-        start_date = datetime.utcnow()
-    if end_date is None:
-        end_date = start_date.replace(hour=23, minute=59)
     async with AsyncSessionLocal() as db:
         p = Pass(
             type=type,
@@ -37,9 +45,12 @@ async def create_pass(
             created_by=created_by,
             assigned_to=assigned_to,
             assigned_team=assigned_team,
-            status="active"
+            status="active",
+            comments=[]
         )
         db.add(p)
+        await db.flush()
+        _add_history(p, "CREATED", created_by, f"Создан пропуск типа {type}")
         await db.commit()
         await db.refresh(p)
         return p
@@ -69,65 +80,100 @@ async def get_passes(
 
 async def count_passes_by_status(status: Union[str, List[str]] = None) -> int:
     async with AsyncSessionLocal() as db:
-        query = select(func.count()).select_from(Pass)
+        query = select(Pass)
         if status:
             if isinstance(status, list):
                 query = query.where(Pass.status.in_(status))
             else:
                 query = query.where(Pass.status == status)
         result = await db.execute(query)
-        return result.scalar()
+        return len(result.scalars().all())
 
 
-async def update_pass_status(pass_id: int, status: str) -> Optional[Pass]:
+async def update_pass_status(pass_id: int, status: str, user_id: int = None) -> Optional[Pass]:
     async with AsyncSessionLocal() as db:
         p = await db.get(Pass, pass_id)
         if not p:
             return None
+        old_status = p.status
         p.status = status
         if status == "used":
             p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
+        _add_history(p, "STATUS_CHANGE", user_id, f"Статус изменён с {old_status} на {status}")
         await db.commit()
         await db.refresh(p)
         return p
 
 
-async def check_in(pass_id: int) -> Optional[Pass]:
-    return await update_pass_status(pass_id, "used")
+async def check_in(pass_id: int, user_id: int = None) -> Optional[Pass]:
+    async with AsyncSessionLocal() as db:
+        p = await db.get(Pass, pass_id)
+        if not p or p.status != "active":
+            return None
+        p.status = "used"
+        p.checked_in_at = datetime.utcnow()
+        p.updated_at = datetime.utcnow()
+        _add_history(p, "CHECK_IN", user_id, "Отмечен въезд")
+        await db.commit()
+        await db.refresh(p)
+        return p
 
 
-async def check_out(pass_id: int) -> Optional[Pass]:
+async def check_out(pass_id: int, user_id: int = None) -> Optional[Pass]:
     async with AsyncSessionLocal() as db:
         p = await db.get(Pass, pass_id)
         if not p or p.status != "used":
             return None
         p.checked_out_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
+        _add_history(p, "CHECK_OUT", user_id, "Отмечен выезд")
         await db.commit()
         await db.refresh(p)
         return p
 
 
 async def get_pass_history(pass_id: int) -> List[dict]:
-    """Заглушка — возвращает список действий (можно расширить)"""
-    # В реальности нужна таблица pass_history, но пока вернём пустой список
-    return []
+    async with AsyncSessionLocal() as db:
+        p = await db.get(Pass, pass_id)
+        if not p:
+            return []
+        return p.history or []
+
+
+async def add_pass_comment(pass_id: int, user_id: int, text: str) -> bool:
+    async with AsyncSessionLocal() as db:
+        p = await db.get(Pass, pass_id)
+        if not p:
+            return False
+        if p.comments is None:
+            p.comments = []
+        user = await db.get(User, user_id)
+        user_name = user.full_name if user else "Неизвестный"
+        p.comments.append({
+            "user_id": user_id,
+            "user_name": user_name,
+            "text": text,
+            "created_at": datetime.utcnow().isoformat()
+        })
+        _add_history(p, "COMMENT", user_id, f"Добавлен комментарий: {text[:50]}...")
+        await db.commit()
+        return True
 
 
 async def search_passes(query: str, limit: int = 20) -> List[Pass]:
     async with AsyncSessionLocal() as db:
         if query.isdigit():
-            # поиск по ID
-            p = await db.get(Pass, int(query))
-            if p:
-                return [p]
+            result = await db.execute(select(Pass).where(Pass.id == int(query)).limit(limit))
+            return result.scalars().all()
+        like = f"%{query}%"
         stmt = select(Pass).where(
             or_(
-                Pass.guest_name.ilike(f"%{query}%"),
-                Pass.car_number.ilike(f"%{query}%"),
-                Pass.purpose.ilike(f"%{query}%"),
-                Pass.apartment == (int(query) if query.isdigit() else None),
+                Pass.guest_name.ilike(like),
+                Pass.car_number.ilike(like),
+                Pass.apartment.cast().ilike(like),
+                Pass.purpose.ilike(like),
+                Pass.comment.ilike(like)
             )
         ).order_by(Pass.created_at.desc()).limit(limit)
         result = await db.execute(stmt)

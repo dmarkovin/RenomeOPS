@@ -1,5 +1,5 @@
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -20,15 +20,19 @@ class PatrolCreate(StatesGroup):
     photo = State()
     confirm = State()
 
+# ========== Безопасное редактирование ==========
+async def safe_delete_message(message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
 @router.message(F.text == "🚶 Обходы")
 async def patrol_menu(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.SECURITY, UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("У вас нет прав.")
         return
-
-    # Сохраняем страницу в состояние (для возврата)
-    await state.update_data(patrol_page=page)
 
     limit = 10
     offset = (page - 1) * limit
@@ -37,11 +41,7 @@ async def patrol_menu(message: Message, state: FSMContext, page: int = 1):
     total_pages = (total + limit - 1) // limit if total > 0 else 1
 
     if not patrols:
-        text = "Нет обходов."
-        if hasattr(message, 'edit_text'):
-            await message.edit_text(text, reply_markup=patrol_main_menu_keyboard())
-        else:
-            await message.answer(text, reply_markup=patrol_main_menu_keyboard())
+        await message.answer("Нет обходов.", reply_markup=patrol_main_menu_keyboard())
         return
 
     text = "🚶 Список обходов:\n\n"
@@ -50,10 +50,7 @@ async def patrol_menu(message: Message, state: FSMContext, page: int = 1):
         text += f"{status_emoji} #{p.id} {p.route} ({p.status})\n"
 
     kb = patrol_list_keyboard(patrols, page, total_pages)
-    if hasattr(message, 'edit_text'):
-        await message.edit_text(text, reply_markup=kb)
-    else:
-        await message.answer(text, reply_markup=kb)
+    await message.answer(text, reply_markup=kb)
 
 @router.message(F.text == "➕ Новый обход")
 async def start_create_patrol(message: Message, state: FSMContext):
@@ -76,10 +73,13 @@ async def process_notes(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(notes=text if text != "-" else "")
     await state.set_state(PatrolCreate.photo)
-    await message.answer("🖼 Пришлите фото (опционально) или нажмите **Готово**:", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="✅ Готово")]],
-        resize_keyboard=True
-    ))
+    await message.answer(
+        "🖼 Пришлите фото или видео (опционально). После отправки нажмите **Готово**:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="✅ Готово")]],
+            resize_keyboard=True
+        )
+    )
 
 @router.message(PatrolCreate.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext):
@@ -89,6 +89,14 @@ async def process_photo(message: Message, state: FSMContext):
     await state.update_data(photos=photos)
     await message.answer(f"✅ Добавлено фото ({len(photos)})")
 
+@router.message(PatrolCreate.photo, F.video)
+async def process_video(message: Message, state: FSMContext):
+    data = await state.get_data()
+    videos = data.get("videos", [])
+    videos.append(message.video.file_id)
+    await state.update_data(videos=videos)
+    await message.answer(f"✅ Добавлено видео ({len(videos)})")
+
 @router.message(PatrolCreate.photo, F.text == "✅ Готово")
 async def finish_photo(message: Message, state: FSMContext):
     await state.set_state(PatrolCreate.confirm)
@@ -97,7 +105,8 @@ async def finish_photo(message: Message, state: FSMContext):
         f"📝 Проверьте данные обхода:\n\n"
         f"Маршрут: {data['route']}\n"
         f"Заметки: {data.get('notes') or '—'}\n"
-        f"Фото: {len(data.get('photos', []))} шт.\n\n"
+        f"Фото: {len(data.get('photos', []))} шт.\n"
+        f"Видео: {len(data.get('videos', []))} шт.\n\n"
         f"Подтвердить создание?"
     )
     await message.answer(text, reply_markup=ReplyKeyboardMarkup(
@@ -129,6 +138,7 @@ async def confirm_create(message: Message, state: FSMContext):
             route=data['route'],
             notes=data.get('notes'),
             photo_ids=data.get('photos', []),
+            video_ids=data.get('videos', []),
             created_by=employee.id,
             task_id=task.id
         )
@@ -169,7 +179,29 @@ async def show_patrol_card(callback: CallbackQuery):
         f"Окончание: {p.end_time.strftime('%d.%m.%Y %H:%M') if p.end_time else '—'}\n"
         f"Задача: #{p.task_id if p.task_id else '—'}"
     )
-    await callback.message.edit_text(text, reply_markup=patrol_action_keyboard(p.id, p.status))
+    kb = patrol_action_keyboard(p.id, p.status)
+    # Добавляем кнопку видео, если есть видео
+    if p.video_ids:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="📹 Видео", callback_data=f"patrol_video:{p.id}")])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("patrol_video:"))
+async def show_patrol_videos(callback: CallbackQuery):
+    patrol_id = int(callback.data.split(":")[1])
+    p = await get_patrol(patrol_id)
+    if not p or not p.video_ids:
+        await callback.answer("Нет видео", show_alert=True)
+        return
+    await callback.message.delete()
+    for video_id in p.video_ids:
+        await callback.message.answer_video(video_id)
+    await callback.message.answer(
+        "⬅️ Назад",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"patrol:{patrol_id}")]
+        ])
+    )
     await callback.answer()
 
 @router.callback_query(F.data.startswith("patrol_complete:"))
@@ -185,12 +217,10 @@ async def patrol_complete(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("patrol_page:"))
 async def paginate_patrols(callback: CallbackQuery, state: FSMContext):
     page = int(callback.data.split(":")[1])
-    # Редактируем текущее сообщение
     await patrol_menu(callback.message, state, page)
     await callback.answer()
 
 @router.callback_query(F.data == "patrol_back")
 async def back_to_patrol_menu(callback: CallbackQuery, state: FSMContext):
-    # Возврат к списку с первой страницы
     await patrol_menu(callback.message, state, 1)
     await callback.answer()

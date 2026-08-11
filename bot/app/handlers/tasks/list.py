@@ -271,7 +271,7 @@ async def show_team_tasks(message: Message, state: FSMContext):
 async def show_checking_tasks(message: Message, state: FSMContext):
     await show_list(message, state, "checking", user_id=message.from_user.id)
 
-@router.message(F.text.startswith("📦 Архив"))
+@router.message(F.text == "📦 Архив")
 async def show_archive(message: Message, state: FSMContext):
     await show_archive_menu(message, state)
 

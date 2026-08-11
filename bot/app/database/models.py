@@ -289,6 +289,7 @@ class Patrol(Base):
     start_time = Column(DateTime, default=datetime.utcnow)
     end_time = Column(DateTime, nullable=True)
     photo_ids = Column(JSON, default=list)
+    video_ids = Column(JSON, default=list)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -9,6 +9,7 @@ async def create_patrol(
     route: str,
     notes: str = "",
     photo_ids: List[str] = None,
+    video_ids: List[str] = None,
     created_by: int = None,
     task_id: int = None
 ) -> Patrol:
@@ -17,6 +18,7 @@ async def create_patrol(
             route=route,
             notes=notes,
             photo_ids=photo_ids or [],
+            video_ids=video_ids or [],
             created_by=created_by,
             task_id=task_id,
             status="active"

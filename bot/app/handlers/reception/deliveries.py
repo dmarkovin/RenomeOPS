@@ -25,6 +25,14 @@ class DeliveryCreate(StatesGroup):
 class DeliveryCommentState(StatesGroup):
     waiting_for_comment = State()
 
+# ========== Безопасное редактирование ==========
+async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+
 # ========== Главное меню ==========
 @router.message(F.text == "📦 Доставка")
 async def reception_menu(message: Message):
@@ -35,7 +43,7 @@ async def reception_menu(message: Message):
     await message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
 
 # ========== Создание посылки ==========
-@router.message(F.text == "📦 Посылка")
+@router.message(F.text == "📦 Новая посылка")
 async def start_delivery(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if not employee:
@@ -139,7 +147,7 @@ async def list_active_deliveries(message: Message, state: FSMContext, page: int 
         return
     limit = 10
     offset = (page - 1) * limit
-    all_active = await get_all_deliveries(status=None, limit=10000, offset=0)  # получим все
+    all_active = await get_all_deliveries(status=None, limit=10000, offset=0)
     active_deliveries = [d for d in all_active if d.status in ("pending", "received")]
     total = len(active_deliveries)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
@@ -151,21 +159,18 @@ async def list_active_deliveries(message: Message, state: FSMContext, page: int 
         return
 
     text = f"📦 Список посылок (стр. {page}/{total_pages}):\n\n"
-    for d in deliveries_page:
-        status_emoji = "🟡" if d.status == "pending" else "🔵"
-        text += f"{status_emoji} #{d.id} {d.recipient} ({d.status})\n"
-
     buttons = []
     if page > 1:
         buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"delivery_page:{page-1}"))
     buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="ignore"))
     if page < total_pages:
         buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"delivery_page:{page+1}"))
-    kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+    kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else InlineKeyboardMarkup(inline_keyboard=[])
 
-    # Добавим кнопки для каждой посылки
     for d in deliveries_page:
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"#{d.id} {d.recipient}", callback_data=f"delivery:{d.id}")])
+        status_emoji = "🟡" if d.status == "pending" else "🔵"
+        label = f"{status_emoji} #{d.id} {d.recipient} ({d.status})"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=label, callback_data=f"delivery:{d.id}")])
 
     await state.update_data(delivery_list_page=page)
     sent = await message.answer(text, reply_markup=kb)
@@ -182,7 +187,6 @@ async def paginate_deliveries(callback: CallbackQuery, state: FSMContext, bot):
         message_id = callback.message.message_id
         chat_id = callback.message.chat.id
 
-    # Перезагружаем список
     employee = await get_employee(callback.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
         await callback.answer("Нет прав.", show_alert=True)
@@ -202,19 +206,18 @@ async def paginate_deliveries(callback: CallbackQuery, state: FSMContext, bot):
         return
 
     text = f"📦 Список посылок (стр. {page}/{total_pages}):\n\n"
-    for d in deliveries_page:
-        status_emoji = "🟡" if d.status == "pending" else "🔵"
-        text += f"{status_emoji} #{d.id} {d.recipient} ({d.status})\n"
-
     buttons = []
     if page > 1:
         buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"delivery_page:{page-1}"))
     buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="ignore"))
     if page < total_pages:
         buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"delivery_page:{page+1}"))
-    kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+    kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else InlineKeyboardMarkup(inline_keyboard=[])
+
     for d in deliveries_page:
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"#{d.id} {d.recipient}", callback_data=f"delivery:{d.id}")])
+        status_emoji = "🟡" if d.status == "pending" else "🔵"
+        label = f"{status_emoji} #{d.id} {d.recipient} ({d.status})"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=label, callback_data=f"delivery:{d.id}")])
 
     await bot.edit_message_text(
         chat_id=chat_id,
@@ -226,8 +229,16 @@ async def paginate_deliveries(callback: CallbackQuery, state: FSMContext, bot):
 
 # ========== Карточка посылки ==========
 @router.callback_query(F.data.startswith("delivery:"))
-async def show_delivery_card(callback: CallbackQuery):
-    delivery_id = int(callback.data.split(":")[1])
+async def show_delivery_card(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split(":")
+    delivery_id = int(parts[1])
+    from_archive = len(parts) > 2 and parts[2] == "archive"
+    # Сохраняем флаг в состоянии
+    if from_archive:
+        await state.update_data(from_archive=True)
+    else:
+        await state.update_data(from_archive=False)
+
     delivery = await get_delivery(delivery_id)
     if not delivery:
         await callback.answer("Не найдено", show_alert=True)
@@ -259,27 +270,33 @@ async def show_delivery_card(callback: CallbackQuery):
         kb.inline_keyboard.append([InlineKeyboardButton(text="📥 Получено", callback_data=f"delivery_receive:{delivery_id}")])
     elif delivery.status == "received":
         kb.inline_keyboard.append([InlineKeyboardButton(text="✅ Завершить", callback_data=f"delivery_complete:{delivery_id}")])
-    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="delivery_back_from_card")])
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+    if from_archive:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад к архиву", callback_data="delivery_back_to_archive")])
+    else:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="delivery_back")])
+
+    await safe_edit_or_reply(callback, text, kb, parse_mode="HTML")
     await callback.answer()
 
+# ========== Действия с посылкой ==========
 @router.callback_query(F.data.startswith("delivery_receive:"))
-async def delivery_receive(callback: CallbackQuery):
+async def delivery_receive(callback: CallbackQuery, state: FSMContext):
     delivery_id = int(callback.data.split(":")[1])
     delivery = await update_delivery_status(delivery_id, "received")
     if delivery:
         await callback.answer("✅ Отмечено как получено")
-        await show_delivery_card(callback)
+        await show_delivery_card(callback, state)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
 @router.callback_query(F.data.startswith("delivery_complete:"))
-async def delivery_complete(callback: CallbackQuery):
+async def delivery_complete(callback: CallbackQuery, state: FSMContext):
     delivery_id = int(callback.data.split(":")[1])
     delivery = await update_delivery_status(delivery_id, "completed")
     if delivery:
         await callback.answer("✅ Завершено")
-        await show_delivery_card(callback)
+        await show_delivery_card(callback, state)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
@@ -363,10 +380,10 @@ async def delivery_comment_process(message: Message, state: FSMContext):
     )
 
 @router.callback_query(F.data.startswith("delivery_comment_back:"))
-async def delivery_comment_back(callback: CallbackQuery):
+async def delivery_comment_back(callback: CallbackQuery, state: FSMContext):
     delivery_id = int(callback.data.split(":")[1])
     await callback.message.delete()
-    await show_delivery_card(callback)
+    await show_delivery_card(callback, state)
     await callback.answer()
 
 # ========== Фото ==========
@@ -403,6 +420,10 @@ async def delivery_history(callback: CallbackQuery):
         text += f"📌 {entry.get('action', '')}\n"
         text += f"📝 {entry.get('description', '')}\n\n"
     await callback.message.delete()
+    # После просмотра истории возвращаемся в карточку, сохраняя контекст
+    # Получаем флаг from_archive из состояния и передаём его
+    state = callback.bot.get("state")  # нужно получить состояние, но лучше передать через callback_data
+    # Используем безопасный способ: возвращаемся через delivery:{id} без флага, но с сохранением в состоянии
     await callback.message.answer(
         text,
         parse_mode="HTML",
@@ -414,7 +435,7 @@ async def delivery_history(callback: CallbackQuery):
 
 # ========== Архив доставки ==========
 @router.message(F.text == "📦 Архив доставки")
-async def delivery_archive(message: Message, page: int = 1):
+async def delivery_archive(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("Нет прав.")
@@ -430,60 +451,48 @@ async def delivery_archive(message: Message, page: int = 1):
         await message.answer("Архив пуст.")
         return
 
-    text = f"📦 Архив посылок (стр. {page}/{total_pages}):\n\n"
-    for d in deliveries:
-        text += f"#{d.id} {d.recipient} ({d.status})\n"
+    await state.update_data(archive_page=page)
 
-    kb_buttons = []
+    text = f"📦 Архив посылок (стр. {page}/{total_pages}):\n\n"
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    for d in deliveries:
+        label = f"#{d.id} {d.recipient} ({d.status})"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=label, callback_data=f"delivery:{d.id}:archive")])
+
+    nav_buttons = []
     if page > 1:
-        kb_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"archive_delivery_page:{page-1}"))
-    kb_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="ignore"))
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"archive_delivery_page:{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="ignore"))
     if page < total_pages:
-        kb_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"archive_delivery_page:{page+1}"))
-    kb = InlineKeyboardMarkup(inline_keyboard=[kb_buttons]) if kb_buttons else None
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"archive_delivery_page:{page+1}"))
+    if nav_buttons:
+        kb.inline_keyboard.append(nav_buttons)
+    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="delivery_back_to_archive")])
+
     await message.answer(text, reply_markup=kb)
 
 @router.callback_query(F.data.startswith("archive_delivery_page:"))
-async def archive_delivery_page(callback: CallbackQuery):
+async def archive_delivery_page(callback: CallbackQuery, state: FSMContext):
     page = int(callback.data.split(":")[1])
-    await delivery_archive(callback.message, page)
+    await delivery_archive(callback.message, state, page)
     await callback.answer()
 
-# ========== Назад из карточки ==========
-@router.callback_query(F.data == "delivery_back_from_card")
-async def delivery_back_from_card(callback: CallbackQuery):
+# ========== Назад из архива ==========
+@router.callback_query(F.data == "delivery_back_to_archive")
+async def delivery_back_to_archive(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    page = data.get("archive_page", 1)
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
     if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
-        await callback.message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
+        await delivery_archive(callback.message, state, page)
     await callback.answer()
 
 # ========== Старый назад (для совместимости) ==========
 @router.callback_query(F.data == "delivery_back")
-async def delivery_back(callback: CallbackQuery):
+async def delivery_back(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
     if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
         await callback.message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
     await callback.answer()
-
-@router.callback_query(F.data.startswith("delivery_receive_from_list:"))
-async def delivery_receive_from_list(callback: CallbackQuery):
-    delivery_id = int(callback.data.split(":")[1])
-    delivery = await update_delivery_status(delivery_id, "received")
-    if delivery:
-        await callback.answer("✅ Отмечено как получено")
-        # Обновляем список
-        await list_active_deliveries(callback.message, await callback.bot.get_state(callback.from_user.id), page=1)
-    else:
-        await callback.answer("Ошибка", show_alert=True)
-
-@router.callback_query(F.data.startswith("delivery_complete_from_list:"))
-async def delivery_complete_from_list(callback: CallbackQuery):
-    delivery_id = int(callback.data.split(":")[1])
-    delivery = await update_delivery_status(delivery_id, "completed")
-    if delivery:
-        await callback.answer("✅ Завершено")
-        await list_active_deliveries(callback.message, await callback.bot.get_state(callback.from_user.id), page=1)
-    else:
-        await callback.answer("Ошибка", show_alert=True)

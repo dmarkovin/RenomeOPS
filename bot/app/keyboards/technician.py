@@ -7,7 +7,7 @@ def technician_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📋 Заявки"),
             ],
             [
-                KeyboardButton(text="👤 Профиль"),
+                KeyboardButton(text="⚙ Настройки"),
             ],
         ],
         resize_keyboard=True

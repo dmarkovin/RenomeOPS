@@ -9,7 +9,6 @@ def security_keyboard() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="🚗 Пропуска"),
-                KeyboardButton(text="👤 Профиль"),
             ],
             [
                 KeyboardButton(text="⚙ Настройки"),
