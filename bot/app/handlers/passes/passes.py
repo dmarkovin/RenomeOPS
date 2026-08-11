@@ -307,7 +307,7 @@ async def list_active_passes(message: Message, state: FSMContext, page: int = 1)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
         await message.answer("У вас нет прав для просмотра пропусков.")
         return
-    await state.update_data(pass_list_type='active', pass_page=page)
+    await state.update_data(pass_list_type='active', pass_page=page, search_mode=False, search_query=None)
     limit = 10
     all_passes = await get_passes(status="active", limit=1000, offset=0)
     total = len(all_passes)
@@ -332,7 +332,6 @@ async def list_active_passes(message: Message, state: FSMContext, page: int = 1)
         label += f" | {p.purpose or '—'}"
         text += f"{label}\n"
 
-    # Отправляем новое сообщение, сохраняем его ID в состоянии
     sent = await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
     await state.update_data(pass_message_id=sent.message_id, pass_chat_id=sent.chat.id)
 
@@ -343,7 +342,7 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
         await message.answer("У вас нет прав для просмотра истории пропусков.")
         return
-    await state.update_data(pass_list_type='history', pass_page=page)
+    await state.update_data(pass_list_type='history', pass_page=page, search_mode=False, search_query=None)
     limit = 10
     all_passes = await get_passes(status=['used', 'expired', 'completed'], limit=1000, offset=0)
     total = len(all_passes)
@@ -398,23 +397,27 @@ async def process_search_pass(message: Message, state: FSMContext):
         await state.clear()
         return
     text = "🔍 Результаты поиска по пропускам:\n\n"
+    buttons = []
     for p in passes:
         status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
         label = f"{status_emoji} #{p.id} "
         if p.type == "guest":
-            label += f"Гость: {p.guest_name or '—'}"
+            label += f"Гость: {p.guest_name or '—'} "
         else:
-            label += f"Авто: {p.car_number or '—'}"
+            label += f"Авто: {p.car_number or '—'} "
         if p.apartment:
-            label += f" | кв.{p.apartment}"
-        label += f" | {p.purpose or '—'}"
-        text += f"{label}\n"
-    await message.answer(text)
-    await state.clear()
+            label += f"| кв.{p.apartment} "
+        label += f"| {p.purpose or '—'}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"pass:{p.id}")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    # Сохраняем, что мы в режиме поиска, и сам запрос
+    await state.update_data(search_mode=True, search_query=query)
+    await message.answer(text, reply_markup=kb)
+    # Не очищаем состояние полностью, чтобы сохранить search_mode и search_query
 
 # ========== Карточка пропуска ==========
 @router.callback_query(F.data.startswith("pass:"))
-async def show_pass_card(callback: CallbackQuery):
+async def show_pass_card(callback: CallbackQuery, state: FSMContext):
     pass_id = int(callback.data.split(":")[1])
     p = await get_pass(pass_id)
     if not p:
@@ -513,11 +516,9 @@ async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
         page = 1
     data = await state.get_data()
     list_type = data.get('pass_list_type', 'active')
-    # Получаем сохранённый message_id
     message_id = data.get('pass_message_id')
     chat_id = data.get('pass_chat_id')
     if not message_id or not chat_id:
-        # если нет сохранённого, используем текущий callback.message
         message_id = callback.message.message_id
         chat_id = callback.message.chat.id
 
@@ -566,9 +567,37 @@ async def back_to_pass_list(callback: CallbackQuery, state: FSMContext):
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
         await callback.answer("У вас нет прав для возврата к списку пропусков.", show_alert=True)
         return
-    await state.update_data(pass_list_type='active', pass_page=1)
+    data = await state.get_data()
+    search_mode = data.get("search_mode", False)
+    if search_mode:
+        # Возвращаемся к результатам поиска
+        search_query = data.get("search_query")
+        if search_query:
+            # Повторяем поиск
+            passes = await search_passes(search_query, limit=20)
+            if passes:
+                text = "🔍 Результаты поиска по пропускам:\n\n"
+                buttons = []
+                for p in passes:
+                    status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
+                    label = f"{status_emoji} #{p.id} "
+                    if p.type == "guest":
+                        label += f"Гость: {p.guest_name or '—'} "
+                    else:
+                        label += f"Авто: {p.car_number or '—'} "
+                    if p.apartment:
+                        label += f"| кв.{p.apartment} "
+                    label += f"| {p.purpose or '—'}"
+                    buttons.append([InlineKeyboardButton(text=label, callback_data=f"pass:{p.id}")])
+                kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+                await callback.message.edit_text(text, reply_markup=kb)
+                # Очищаем флаг поиска, чтобы не зациклиться
+                await state.update_data(search_mode=False)
+                await callback.answer()
+                return
+    # Если не в поиске или поиск не дал результатов, возвращаемся к активным пропускам
+    await state.update_data(pass_list_type='active', pass_page=1, search_mode=False, search_query=None)
     await callback.message.delete()
-    # Заново показываем список
     await list_active_passes(callback.message, state, 1)
     await callback.answer()
 

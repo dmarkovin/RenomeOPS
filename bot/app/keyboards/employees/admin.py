@@ -8,7 +8,10 @@ def employees_admin_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="➕ Новый сотрудник"),
             ],
             [
+                KeyboardButton(text="📦 Архив сотрудников"),
                 KeyboardButton(text="🔍 Поиск"),
+            ],
+            [
                 KeyboardButton(text="⬅️ Назад"),
             ],
         ],

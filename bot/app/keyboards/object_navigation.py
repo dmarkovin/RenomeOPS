@@ -39,8 +39,10 @@ def apartment_keyboard(building_id: int, entrance: int, floor: int, apartments: 
             callback = f"obj_apartment:{building_id}:{entrance}:{floor}:{item}"
             text = f"Квартира {item}"
         else:
-            # Общая зона (строка)
-            callback = f"obj_common:{building_id}:{entrance}:{floor}:{item}"
+            # Общая зона (строка) – передаём название в callback (теперь оно безопасно, т.к. только латиница/цифры/пробелы? но лучше id)
+            # Мы изменили логику: теперь на первом этаже apartments – это названия, а не id. Но для безопасности заменим пробелы на подчёркивания.
+            safe_name = item.replace(" ", "_").replace("'", "").replace('"', "")
+            callback = f"obj_common:{building_id}:{entrance}:{floor}:{safe_name}"
             text = item
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
     buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_floor")])

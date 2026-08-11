@@ -9,29 +9,25 @@ from app.services.employees.service import (
     get_employee,
     get_employee_by_invite,
     activate_employee,
+    create_employee,
 )
-
+from app.database.models import UserRole, Team
 from app.handlers.menu import show_main_menu
 
-
 router = Router()
-
 
 @router.message(CommandStart())
 async def start_handler(
     message: Message,
     state: FSMContext
 ):
-    # Очищаем состояние при любом /start, чтобы выйти из любого диалога
     await state.clear()
     print("START RECEIVED:", message.from_user.id)
 
-    employee = await get_employee(
-        message.from_user.id
-    )
+    # Проверяем, есть ли пользователь с таким telegram_id (даже неактивный)
+    employee = await get_employee(message.from_user.id)
 
     if employee:
-        # Проверяем, активен ли пользователь
         if not employee.active:
             await message.answer(
                 "⛔ Ваш аккаунт заблокирован. Обратитесь к администратору для восстановления доступа."
@@ -40,27 +36,33 @@ async def start_handler(
         await show_main_menu(message)
         return
 
+    # Если нет пользователя с таким Telegram ID, пробуем обработать invite-код
     args = message.text.split()
     if len(args) > 1:
         invite_code = args[1]
+        # Ищем пользователя по invite-коду (он может быть активным или неактивным)
         employee = await get_employee_by_invite(invite_code)
         if employee is None:
-            await message.answer("❌ Приглашение не найдено.")
+            # Если код не найден, но может быть, что сотрудник уже активирован и код удалён?
+            await message.answer("❌ Приглашение не найдено или уже использовано.")
             return
 
+        # Если сотрудник с таким кодом уже активен, значит код использован
+        if employee.active:
+            await message.answer("❌ Этот пригласительный код уже был использован.")
+            return
+
+        # Если сотрудник неактивен, активируем его
         await activate_employee(
             employee.id,
             message.from_user.id,
             message.from_user.username
         )
-
-        await message.answer(
-            "✅ Вы зарегистрированы в системе."
-        )
-
+        await message.answer("✅ Вы зарегистрированы в системе.")
         await show_main_menu(message)
         return
 
+    # Если не передан invite-код и пользователь не зарегистрирован
     await message.answer(
         """
 👋 Добро пожаловать в Renome OPS.
@@ -72,12 +74,10 @@ async def start_handler(
     )
     print(f"DEBUG: Received message: '{message.text}'")
 
-# Единственная версия become_admin с декоратором
 @router.message(Command("become_admin"))
 async def become_admin(message: Message, state: FSMContext):
     await state.clear()
     from app.config import settings
-    from app.database.models import UserRole, Team
     from app.services.employees.service import get_employee, update_employee_role, update_employee_team
     if message.from_user.id not in settings.ADMIN_TELEGRAM_IDS:
         await message.answer("У вас нет прав.")

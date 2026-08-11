@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.filters.state import StateFilter
 
@@ -38,7 +38,7 @@ async def employees_menu(message: Message):
     )
 
 # ===== Список сотрудников =====
-async def list_employees(message: Message, page: int = 1, user_id: int = None):
+async def list_employees(message: Message, page: int = 1, user_id: int = None, include_inactive: bool = False):
     if user_id is None:
         user_id = message.from_user.id
     admin = await get_employee(user_id)
@@ -48,38 +48,53 @@ async def list_employees(message: Message, page: int = 1, user_id: int = None):
 
     limit = 10
     offset = (page - 1) * limit
-    employees = await get_all_employees(limit=limit, offset=offset)
-    total = await count_employees()
+    employees = await get_all_employees(limit=limit, offset=offset, include_inactive=include_inactive)
+    total = await count_employees(include_inactive=include_inactive)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
 
     if not employees:
-        await message.answer("Нет сотрудников.")
+        await message.answer("Нет сотрудников." if not include_inactive else "Архив пуст.")
         return
 
-    text = f"📋 Список сотрудников (стр. {page}/{total_pages}):\n\n"
+    title = "📋 Список сотрудников" if not include_inactive else "📦 Архив сотрудников (неактивные)"
+    text = f"{title} (стр. {page}/{total_pages}):\n\n"
     for emp in employees:
         status = "✅" if emp.active else "❌"
         text += f"ID: {emp.id} | {emp.full_name} | {emp.role.value} | {status}\n"
 
-    await message.answer(
-        text,
-        reply_markup=employee_list_keyboard(employees, page, total_pages)
-    )
+    kb = employee_list_keyboard(employees, page, total_pages)
+    # Добавляем кнопку для переключения в архив, если сейчас активные
+    if not include_inactive:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="📦 Архив", callback_data="emp_archive:1")])
+    else:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="📋 Активные", callback_data="emp_active:1")])
+    await message.answer(text, reply_markup=kb)
 
 @router.message(F.text == "📋 Список сотрудников")
 async def list_employees_handler(message: Message):
-    await list_employees(message, page=1, user_id=message.from_user.id)
+    await list_employees(message, page=1, user_id=message.from_user.id, include_inactive=False)
 
-# ===== Пагинация в списке =====
+@router.message(F.text == "📦 Архив сотрудников")
+async def archive_employees_handler(message: Message):
+    await list_employees(message, page=1, user_id=message.from_user.id, include_inactive=True)
+
+# ===== Пагинация и переключение =====
 @router.callback_query(F.data.startswith("emp_page:"))
 async def paginate_employees(callback: CallbackQuery):
-    page = int(callback.data.split(":")[1])
-    admin = await get_employee(callback.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
-        await callback.answer("Нет прав", show_alert=True)
-        return
+    parts = callback.data.split(":")
+    page = int(parts[1])
+    include_inactive = parts[2] == "1" if len(parts) > 2 else False
+    await list_employees(callback.message, page=page, user_id=callback.from_user.id, include_inactive=include_inactive)
+    await callback.answer()
 
-    await list_employees(callback.message, page=page, user_id=callback.from_user.id)
+@router.callback_query(F.data == "emp_archive")
+async def show_archive(callback: CallbackQuery):
+    await list_employees(callback.message, page=1, user_id=callback.from_user.id, include_inactive=True)
+    await callback.answer()
+
+@router.callback_query(F.data == "emp_active")
+async def show_active(callback: CallbackQuery):
+    await list_employees(callback.message, page=1, user_id=callback.from_user.id, include_inactive=False)
     await callback.answer()
 
 # ===== Карточка сотрудника =====
@@ -109,7 +124,7 @@ async def show_employee_card(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ===== Блокировка сотрудника =====
+# ===== Блокировка/деактивация =====
 @router.callback_query(F.data.startswith("emp_block:"))
 async def block_employee_callback(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
@@ -117,19 +132,16 @@ async def block_employee_callback(callback: CallbackQuery):
     if not admin or admin.role != UserRole.ADMIN:
         await callback.answer("Нет прав", show_alert=True)
         return
-
     if user_id == admin.id:
         await callback.answer("Вы не можете заблокировать самого себя!", show_alert=True)
         return
-
     emp = await block_employee(user_id)
     if emp:
-        await callback.answer("Сотрудник заблокирован", show_alert=True)
+        await callback.answer("Сотрудник деактивирован", show_alert=True)
         await show_employee_card(callback)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-# ===== Активация сотрудника =====
 @router.callback_query(F.data.startswith("emp_activate:"))
 async def activate_employee_callback(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
@@ -137,11 +149,9 @@ async def activate_employee_callback(callback: CallbackQuery):
     if not admin or admin.role != UserRole.ADMIN:
         await callback.answer("Нет прав", show_alert=True)
         return
-
     if user_id == admin.id:
         await callback.answer("Вы уже активны.", show_alert=True)
         return
-
     emp = await activate_employee_by_admin(user_id)
     if emp:
         await callback.answer("Сотрудник активирован", show_alert=True)
@@ -149,7 +159,7 @@ async def activate_employee_callback(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
-# ===== Удаление сотрудника (деактивация) =====
+# ===== Удаление (деактивация) =====
 @router.callback_query(F.data.startswith("emp_delete:"))
 async def delete_employee_callback(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
@@ -157,16 +167,14 @@ async def delete_employee_callback(callback: CallbackQuery):
     if not admin or admin.role != UserRole.ADMIN:
         await callback.answer("Нет прав", show_alert=True)
         return
-
     if user_id == admin.id:
         await callback.answer("Вы не можете деактивировать самого себя!", show_alert=True)
         return
-
     success = await delete_employee(user_id)
     if success:
         await callback.answer("Сотрудник деактивирован", show_alert=True)
         await callback.message.delete()
-        await list_employees(callback.message, page=1, user_id=callback.from_user.id)
+        await list_employees(callback.message, page=1, user_id=callback.from_user.id, include_inactive=False)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
@@ -193,23 +201,19 @@ async def set_role(callback: CallbackQuery):
     _, user_id_str, role_str = callback.data.split(":")
     user_id = int(user_id_str)
     new_role = UserRole(role_str)
-
     admin = await get_employee(callback.from_user.id)
     if not admin or admin.role != UserRole.ADMIN:
         await callback.answer("Нет прав", show_alert=True)
         return
-
     emp = await update_employee_role(user_id, new_role)
     if not emp:
         await callback.answer("Ошибка", show_alert=True)
         return
-
     default_team = get_default_team_for_role(new_role)
     if default_team:
         emp = await update_employee_team(user_id, default_team)
     else:
         emp = await update_employee_team(user_id, None)
-
     await callback.answer(
         f"✅ Роль изменена на {new_role.value}, команда установлена автоматически.",
         show_alert=True
@@ -257,10 +261,10 @@ async def set_team(callback: CallbackQuery):
 @router.callback_query(F.data == "emp_back")
 async def back_to_employees_list(callback: CallbackQuery):
     await callback.message.delete()
-    await list_employees(callback.message, page=1, user_id=callback.from_user.id)
+    await list_employees(callback.message, page=1, user_id=callback.from_user.id, include_inactive=False)
     await callback.answer()
 
-# ===== Назад в главное меню админа =====
+# ===== Назад в главное меню =====
 @router.message(F.text == "⬅️ Назад")
 async def back_to_admin_menu(message: Message):
     admin = await get_employee(message.from_user.id)
@@ -269,7 +273,7 @@ async def back_to_admin_menu(message: Message):
     else:
         await message.answer("Возврат...")
 
-# ===== Поиск сотрудников =====
+# ===== Поиск =====
 @router.message(F.text == "🔍 Поиск")
 async def start_search(message: Message, state: FSMContext):
     admin = await get_employee(message.from_user.id)

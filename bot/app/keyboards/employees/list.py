@@ -7,6 +7,7 @@ def employee_list_keyboard(
     page: int,
     total_pages: int,
     filters: dict = None,
+    include_inactive: bool = False,
 ) -> InlineKeyboardMarkup:
     buttons = []
     for emp in employees:
@@ -20,12 +21,18 @@ def employee_list_keyboard(
 
     nav_buttons = []
     if page > 1:
-        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"emp_page:{page-1}"))
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"emp_page:{page-1}:{1 if include_inactive else 0}"))
     nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="ignore"))
     if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"emp_page:{page+1}"))
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"emp_page:{page+1}:{1 if include_inactive else 0}"))
     if nav_buttons:
         buttons.append(nav_buttons)
+
+    # Кнопки переключения между активными и архивом
+    if not include_inactive:
+        buttons.append([InlineKeyboardButton(text="📦 Архив", callback_data="emp_archive")])
+    else:
+        buttons.append([InlineKeyboardButton(text="📋 Активные", callback_data="emp_active")])
 
     buttons.append([
         InlineKeyboardButton(text="🔍 Поиск", callback_data="emp_search"),
@@ -45,6 +52,7 @@ def employee_card_keyboard(user_id: int, active: bool) -> InlineKeyboardMarkup:
     buttons.append(InlineKeyboardButton(text="🗑 Удалить", callback_data=f"emp_delete:{user_id}"))
     buttons.append(InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="emp_back"))
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
 
 def search_result_keyboard(employees: List, page: int, total_pages: int, query: str) -> InlineKeyboardMarkup:
     """Клавиатура для результатов поиска"""

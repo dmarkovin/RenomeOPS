@@ -7,7 +7,8 @@ from aiogram.fsm.context import FSMContext
 
 from app.utils.object_navigation import (
     get_buildings, get_entrances, get_floors, get_apartments,
-    get_parking_floors, get_parking_spots, get_cellars
+    get_parking_floors, get_parking_spots, get_cellars,
+    get_common_area_name
 )
 from app.keyboards.object_navigation import (
     building_keyboard, entrance_keyboard, floor_keyboard,
@@ -23,7 +24,6 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
     action = data[0]
     current_state = await state.get_state()
 
-    # Правильное сравнение с состояниями FSM в aiogram 3
     if current_state and not (
         current_state.startswith("TaskCreate:") or
         current_state.startswith("ServiceOrderState:")
@@ -88,18 +88,18 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             f"✅ Выбрана квартира {apartment} (корпус {building}, подъезд {entrance}, этаж {floor})"
         )
-        # Передаём управление следующему шагу в create.py
         await state.set_state(TaskCreate.enter_title)
         await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
 
     elif action == "obj_common":
-        # Общая зона (строка)
-        _, building_str, entrance_str, floor_str, common_name = data
+        # Общая зона – в callback передаётся название с заменой пробелов на подчёркивания
+        # Восстанавливаем название
+        _, building_str, entrance_str, floor_str, common_name_encoded = data
         building = int(building_str)
         entrance = int(entrance_str)
         floor = int(floor_str)
-        # common_name может содержать запятые, поэтому объединяем остаток
-        common_name = ":".join(data[4:])  # восстановить полное название
+        # Декодируем название: заменяем подчёркивания на пробелы
+        common_name = common_name_encoded.replace("_", " ")
         result = {
             "building": building,
             "entrance": entrance,

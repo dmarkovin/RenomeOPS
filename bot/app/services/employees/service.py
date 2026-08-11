@@ -36,7 +36,8 @@ async def activate_employee(user_id: int, telegram_id: int, username: str) -> Op
             user.telegram_id = telegram_id
             user.username = username
             user.active = True
-            user.registered_at = datetime.now(timezone.utc)
+            user.registered_at = datetime.utcnow()
+            # Инвайт-код остаётся прежним, но после активации он больше не используется
             await db.commit()
             await db.refresh(user)
         return user
@@ -74,12 +75,16 @@ async def get_all_employees(
     search: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
+    include_inactive: bool = False,  # по умолчанию скрываем неактивных
 ) -> List[User]:
     async with AsyncSessionLocal() as db:
         query = select(User)
         filters = []
         if active is not None:
             filters.append(User.active == active)
+        elif not include_inactive:
+            # Если не передан active и include_inactive=False, показываем только активных
+            filters.append(User.active == True)
         if role:
             filters.append(User.role == role)
         if team:
@@ -104,12 +109,15 @@ async def count_employees(
     role: Optional[UserRole] = None,
     team: Optional[Team] = None,
     search: Optional[str] = None,
+    include_inactive: bool = False,
 ) -> int:
     async with AsyncSessionLocal() as db:
         query = select(User)
         filters = []
         if active is not None:
             filters.append(User.active == active)
+        elif not include_inactive:
+            filters.append(User.active == True)
         if role:
             filters.append(User.role == role)
         if team:
@@ -148,7 +156,6 @@ async def activate_employee_by_admin(user_id: int) -> Optional[User]:
         return user
 
 
-# ===== ИСПРАВЛЕНО: мягкое удаление (деактивация) вместо физического удаления =====
 async def delete_employee(user_id: int) -> bool:
     """Деактивирует пользователя вместо физического удаления."""
     async with AsyncSessionLocal() as db:
