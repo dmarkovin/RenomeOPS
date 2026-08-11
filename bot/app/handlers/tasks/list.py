@@ -99,7 +99,6 @@ async def show_list(
 
         # Получаем все задачи без пагинации (используем большой лимит)
         if list_type == "open":
-            # Проверяем, что пользователь имеет право видеть общий список
             if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
                 if hasattr(target, 'answer'):
                     await target.answer("У вас нет прав на просмотр всех заявок.", show_alert=True)
@@ -166,7 +165,17 @@ async def show_list(
         start = (page - 1) * limit
         tasks_page = tasks[start:start+limit]
 
-        await state.update_data(list_type=list_type, page=page, sort_by=sort_by, filter_priority=filter_priority)
+        # Сохраняем текущие параметры списка для возврата из карточки
+        await state.update_data(
+            list_type=list_type,
+            page=page,
+            sort_by=sort_by,
+            filter_priority=filter_priority,
+            current_list_type=list_type,
+            current_page=page,
+            current_sort=sort_by,
+            current_filter=filter_priority
+        )
         await state.set_state(TaskContext.list_type)
 
         if not tasks_page:
@@ -352,12 +361,18 @@ async def take_from_list(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "tasks_back")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    prev_list_type = data.get("prev_list_type")
+    if prev_list_type:
+        page = data.get("prev_page", 1)
+        sort_by = data.get("prev_sort", "date")
+        filter_priority = data.get("prev_filter")
+        await state.update_data(prev_list_type=None, prev_page=None, prev_sort=None, prev_filter=None)
+        await show_list(callback, state, prev_list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+        return
     list_type = data.get("list_type", "open")
     if list_type.startswith("archive_"):
-        # Возврат в меню выбора категории архива
         await show_archive_menu(callback, state)
     else:
-        # Возврат в меню "Заявки"
         await state.clear()
         employee = await get_employee(callback.from_user.id)
         if employee:
