@@ -15,6 +15,9 @@ bot_updates_processed = Counter('bot_updates_processed', 'Total processed update
 
 # uptime бота (стартуем с 0, обновляем раз в секунду)
 bot_uptime = Gauge('bot_uptime_seconds', 'Bot uptime in seconds')
+
+bot_up = Gauge("bot_up", "Bot is up and running (1 = up, 0 = down)")
+bot_up.set(1)
 bot_start_time = time.time()
 
 def update_uptime():
