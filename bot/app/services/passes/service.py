@@ -6,7 +6,6 @@ from app.database.models import Pass, User, Team
 
 
 def _add_history(pass_obj, action: str, user_id: int = None, details: str = ""):
-    """Добавляет запись в историю пропуска"""
     if pass_obj.history is None:
         pass_obj.history = []
     entry = {
@@ -99,8 +98,6 @@ async def update_pass_status(pass_id: int, status: str, user_id: int = None) -> 
             return None
         old_status = p.status
         p.status = status
-        if status == "used":
-            p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
         _add_history(p, "STATUS_CHANGE", user_id, f"Статус изменён с {old_status} на {status}")
         await db.commit()
@@ -113,7 +110,6 @@ async def check_in(pass_id: int, user_id: int = None) -> Optional[Pass]:
         p = await db.get(Pass, pass_id)
         if not p or p.status != "active":
             return None
-        p.status = "used"
         p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
         _add_history(p, "CHECK_IN", user_id, "Отмечен въезд")
@@ -125,7 +121,7 @@ async def check_in(pass_id: int, user_id: int = None) -> Optional[Pass]:
 async def check_out(pass_id: int, user_id: int = None) -> Optional[Pass]:
     async with AsyncSessionLocal() as db:
         p = await db.get(Pass, pass_id)
-        if not p or p.status != "used":
+        if not p or p.status != "active":
             return None
         p.checked_out_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()

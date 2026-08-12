@@ -368,7 +368,7 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
         return
     await state.update_data(pass_list_type='history', pass_page=page)
     limit = 10
-    all_passes = await get_passes(status=['used', 'expired', 'completed'], limit=1000, offset=0)
+    all_passes = await get_passes(status=['completed', 'expired'], limit=1000, offset=0)
     total = len(all_passes)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
     start = (page - 1) * limit
@@ -465,11 +465,16 @@ async def show_pass_card(callback: CallbackQuery):
         [InlineKeyboardButton(text="💬 Комментарии", callback_data=f"pass_comment_menu:{pass_id}")],
         [InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{p.id}")],
     ])
-    action_kb = pass_action_keyboard(p.id, p.status, user_role)
+    action_kb = pass_action_keyboard(p.id, p.status, user_role, p)
     merged_buttons = action_kb.inline_keyboard + kb.inline_keyboard
-    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=merged_buttons))
+    try:
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=merged_buttons))
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=merged_buttons))
     await callback.answer()
 
+# ========== История ==========
 @router.callback_query(F.data.startswith("pass_history:"))
 async def show_pass_history(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
@@ -481,8 +486,18 @@ async def show_pass_history(callback: CallbackQuery):
     for entry in history[:10]:
         action = entry.get("action", "—")
         user_name = entry.get("user", "Система")
-        created_at = entry.get("created_at", datetime.utcnow())
-        text += f"🕒 {created_at.strftime('%d.%m.%Y %H:%M')} – {user_name}: {action}\n"
+        created_at = entry.get("created_at")
+        if created_at:
+            try:
+                if isinstance(created_at, str):
+                    dt = datetime.fromisoformat(created_at)
+                else:
+                    dt = created_at
+                text += f"🕒 {dt.strftime('%d.%m.%Y %H:%M')} – {user_name}: {action}\n"
+            except Exception:
+                text += f"🕒 {created_at} – {user_name}: {action}\n"
+        else:
+            text += f"– {user_name}: {action}\n"
     await callback.message.answer(text)
     await callback.answer()
 
@@ -636,7 +651,7 @@ async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
         all_items = await get_passes(status="active", limit=1000, offset=0)
         title = "📋 Активные пропуски"
     else:
-        all_items = await get_passes(status=['used', 'expired', 'completed'], limit=1000, offset=0)
+        all_items = await get_passes(status=['completed', 'expired'], limit=1000, offset=0)
         title = "📜 История пропусков"
 
     total = len(all_items)

@@ -92,14 +92,16 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
 
     elif action == "obj_common":
-        # Общая зона – в callback передаётся название с заменой пробелов на подчёркивания
-        # Восстанавливаем название
-        _, building_str, entrance_str, floor_str, common_name_encoded = data
+        # Общая зона – в callback передаётся ID
+        _, building_str, entrance_str, floor_str, area_id_str = data
         building = int(building_str)
         entrance = int(entrance_str)
         floor = int(floor_str)
-        # Декодируем название: заменяем подчёркивания на пробелы
-        common_name = common_name_encoded.replace("_", " ")
+        area_id = int(area_id_str)
+        common_name = get_common_area_name(building, entrance, area_id)
+        if not common_name:
+            await callback.answer("Зона не найдена", show_alert=True)
+            return
         result = {
             "building": building,
             "entrance": entrance,

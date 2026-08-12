@@ -2,11 +2,13 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+
 from app.config import settings
-from app.database.db import init_db, close_db
+from app.database.db import init_db
+from app.handlers import routers
 from app.middlewares.db import DatabaseMiddleware
 from app.middlewares.auth import AuthMiddleware
-from app.handlers import routers
+from app.services.notification_service import set_bot
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,8 +29,9 @@ async def main():
     logger.info("Database initialized.")
     logger.info("All routers registered successfully.")
     logger.info("Renome OPS bot started polling...")
-    # Создаём бота с токеном из настроек
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    # Инициализируем глобальный bot для уведомлений
+    set_bot(bot)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
@@ -36,5 +39,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped.")
-    finally:
-        asyncio.run(close_db())

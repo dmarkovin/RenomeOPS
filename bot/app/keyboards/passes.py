@@ -31,16 +31,19 @@ def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> Inlin
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def pass_action_keyboard(pass_id: int, status: str, user_role: str) -> InlineKeyboardMarkup:
+def pass_action_keyboard(pass_id: int, status: str, user_role: str, pass_obj: Pass = None) -> InlineKeyboardMarkup:
     buttons = []
-    if status == "active":
+    # Въезд: если нет отметки въезда
+    if pass_obj and pass_obj.checked_in_at is None and status == "active":
         buttons.append([InlineKeyboardButton(text="✅ Въезд", callback_data=f"pass_checkin:{pass_id}")])
-    elif status == "used":
+    # Выезд: если есть въезд, но нет выезда, и статус активный
+    if pass_obj and pass_obj.checked_in_at is not None and pass_obj.checked_out_at is None and status == "active":
         buttons.append([InlineKeyboardButton(text="🚗 Выезд", callback_data=f"pass_checkout:{pass_id}")])
-    if user_role in ("CONCIERGE", "ADMIN", "DIRECTOR"):
-        if status not in ("completed", "expired"):
-            buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"pass_complete:{pass_id}")])
-    if status not in ("expired", "completed"):
+    # Выполнено: только для админа/консьержа/директора, если статус active
+    if user_role in ("CONCIERGE", "ADMIN", "DIRECTOR") and status == "active":
+        buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"pass_complete:{pass_id}")])
+    # Закрыть (expired) – для всех, если статус active
+    if status == "active":
         buttons.append([InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"pass_close:{pass_id}")])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="pass_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -60,7 +63,6 @@ def pass_main_menu_keyboard() -> ReplyKeyboardMarkup:
 
 
 def pass_assign_type_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура выбора типа назначения для пропуска"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="👥 Всей охране")],

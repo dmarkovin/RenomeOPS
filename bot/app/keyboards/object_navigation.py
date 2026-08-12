@@ -1,5 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import List, Optional
+from app.utils.object_navigation import get_common_area_name
 
 def building_keyboard() -> InlineKeyboardMarkup:
     buttons = [
@@ -27,23 +28,17 @@ def floor_keyboard(building_id: int, entrance: int, floors: List[int]) -> Inline
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def apartment_keyboard(building_id: int, entrance: int, floor: int, apartments: List) -> InlineKeyboardMarkup:
-    """
-    Генерирует клавиатуру для выбора квартир или общих зон.
-    Если apartments – список строк (общие зоны), то callback = obj_common:building:entrance:floor:name
-    Если apartments – список чисел (квартиры), то callback = obj_apartment:building:entrance:floor:num
-    """
     buttons = []
     for item in apartments:
-        if isinstance(item, int):
-            # Квартира
-            callback = f"obj_apartment:{building_id}:{entrance}:{floor}:{item}"
-            text = f"Квартира {item}"
+        if floor == 1:
+            # Общая зона – item это ID
+            area_id = item
+            name = get_common_area_name(building_id, entrance, area_id)
+            text = name if name else f"Зона {area_id}"
+            callback = f"obj_common:{building_id}:{entrance}:{floor}:{area_id}"
         else:
-            # Общая зона (строка) – передаём название в callback (теперь оно безопасно, т.к. только латиница/цифры/пробелы? но лучше id)
-            # Мы изменили логику: теперь на первом этаже apartments – это названия, а не id. Но для безопасности заменим пробелы на подчёркивания.
-            safe_name = item.replace(" ", "_").replace("'", "").replace('"', "")
-            callback = f"obj_common:{building_id}:{entrance}:{floor}:{safe_name}"
-            text = item
+            text = f"Квартира {item}"
+            callback = f"obj_apartment:{building_id}:{entrance}:{floor}:{item}"
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
     buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_floor")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])

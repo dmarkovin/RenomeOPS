@@ -13,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     Index,
 )
+from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import declarative_base, relationship
 import enum
 
@@ -101,7 +102,6 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
-    # Новое поле для видео (список file_id)
     video_ids = Column(JSON, default=list)
     __table_args__ = (
         Index("ix_tasks_status", "status"),
@@ -206,9 +206,6 @@ class Pass(Base):
     status = Column(String(20), default="active")
     comment = Column(Text)
     photo_ids = Column(JSON, default=list)
-    comments = Column(JSON, default=list)
-    history = Column(JSON, default=list)
-    comments = Column(JSON, default=list)
     created_by = Column(Integer, ForeignKey("users.id"))
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
     assigned_team = Column(String(50), nullable=True)
@@ -216,6 +213,8 @@ class Pass(Base):
     checked_out_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    history = Column(MutableList.as_mutable(JSON), default=list)
+    comments = Column(MutableList.as_mutable(JSON), default=list)
     creator = relationship("User", foreign_keys=[created_by])
     assignee = relationship("User", foreign_keys=[assigned_to])
 

@@ -21,8 +21,8 @@ from app.keyboards.assign import (
 from app.keyboards.main_menu import main_menu_keyboard
 from app.states.tasks.transfer import TaskTransfer
 from app.services.notification_service import notify_user, notify_team
-from app.keyboards.task_actions import task_actions_keyboard
-from app.handlers.tasks.card import show_task_card
+from app.keyboards.task_actions import task_actions_keyboard, get_task_status_emoji
+from app.handlers.tasks.card import safe_edit_or_reply, show_task_card
 
 router = Router()
 
@@ -71,8 +71,7 @@ async def assign_to_team(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка назначения", show_alert=True)
         return
     await notify_team(team, f"📢 Новая задача #{task_id} назначена на вашу команду.\nНазвание: {task.title}")
-    # Возвращаем карточку задачи через show_task_card, чтобы сохранить контекст
-    await callback.message.delete()
+    # покажем карточку
     await show_task_card(callback, state)
     await callback.answer("Назначено")
 
@@ -107,16 +106,12 @@ async def assign_employee(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка назначения", show_alert=True)
         return
     new_assignee = await get_employee_by_id(emp_id)
-    if not new_assignee:
-        await callback.answer("Сотрудник не найден", show_alert=True)
-        return
-    if new_assignee.telegram_id:
+    if new_assignee and new_assignee.telegram_id:
         await notify_user(
             new_assignee.telegram_id,
             f"📢 Вам назначена задача #{task_id}: {task.title}\nНазначил: {admin.full_name}"
         )
-    # Возвращаем карточку задачи через show_task_card, чтобы сохранить контекст
-    await callback.message.delete()
+    # покажем карточку
     await show_task_card(callback, state)
     await callback.answer("Назначено")
 
@@ -134,16 +129,10 @@ async def back_to_assign_type(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("assign_skip:"))
 async def skip_assign(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
-    task = await get_task(task_id)
-    if not task or not employee:
-        await callback.message.delete()
-        await callback.message.answer("Назначение пропущено.")
-        return
-    await callback.message.delete()
     await show_task_card(callback, state)
+    await callback.answer()
 
-# ---------- Передача задачи (исполнитель -> другому) ----------
+# ---------- Передача задачи ----------
 @router.callback_query(F.data.startswith("task_transfer:"))
 async def start_transfer(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -201,10 +190,13 @@ async def process_transfer_comment(message: Message, state: FSMContext):
             f"От: {from_emp.full_name}\n"
             f"Комментарий: {comment or 'без комментария'}"
         )
-    await message.answer(
-        f"✅ Задача #{task_id} передана {new_assignee.full_name}.",
-        reply_markup=task_actions_keyboard(task, from_emp)
-    )
+    # покажем карточку
+    task = await get_task(task_id)  # обновим данные
+    if task and from_emp:
+        await message.answer(
+            f"✅ Задача #{task_id} передана {new_assignee.full_name}.",
+            reply_markup=task_actions_keyboard(task, from_emp)
+        )
     await state.clear()
 
 @router.callback_query(F.data == "cancel_action")

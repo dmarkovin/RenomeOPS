@@ -37,7 +37,7 @@ class TaskCreate(StatesGroup):
     enter_applicant_name = State()
     enter_applicant_phone = State()
     enter_priority = State()
-    enter_media = State()  # общий для фото и видео
+    enter_photo = State()
     confirm = State()
 
 @router.message(F.text == "➕ Создать заявку")
@@ -107,16 +107,12 @@ async def process_floor(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(StateFilter(TaskCreate.select_apartment), F.data.startswith("obj_apartment:"))
 async def process_apartment(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
-    # Если выбрана общая зона (строка), то передаём её как есть
     if len(parts) >= 5 and not parts[4].isdigit():
-        # Это общая зона (например, "Ресепшен")
+        # Общая зона
         _, building_str, entrance_str, floor_str, common_name = parts
         building = int(building_str)
         entrance = int(entrance_str)
         floor = int(floor_str)
-        # Объединяем остаток, если название содержит двоеточия
-        if len(parts) > 5:
-            common_name = ":".join(parts[4:])
         await state.update_data(
             building=building,
             entrance=entrance,
@@ -126,7 +122,7 @@ async def process_apartment(callback: CallbackQuery, state: FSMContext):
         )
         await callback.message.edit_text(f"✅ Выбрана общая зона: {common_name}")
     else:
-        # Это квартира (число)
+        # Квартира
         _, building_str, entrance_str, floor_str, apt_str = parts
         building = int(building_str)
         entrance = int(entrance_str)
@@ -140,7 +136,6 @@ async def process_apartment(callback: CallbackQuery, state: FSMContext):
             location_type="apartment"
         )
         await callback.message.edit_text(f"✅ Выбрана квартира {apartment}")
-    # Переход к следующему шагу
     await state.set_state(TaskCreate.enter_title)
     await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
@@ -200,14 +195,33 @@ async def process_title(message: Message, state: FSMContext):
 async def process_description(message: Message, state: FSMContext):
     await state.update_data(description=message.text.strip())
     await state.set_state(TaskCreate.enter_applicant_type)
+    employee = await get_employee(message.from_user.id)
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="👤 Жилец")],
             [KeyboardButton(text="👤 Сотрудник")],
+            [KeyboardButton(text="👤 Я")],
         ],
         resize_keyboard=True
     )
     await message.answer("Кто является заявителем?", reply_markup=kb)
+
+@router.message(StateFilter(TaskCreate.enter_applicant_type), F.text == "👤 Я")
+async def process_applicant_type_self(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Ошибка: вы не зарегистрированы.")
+        return
+    await state.update_data(
+        applicant_type="employee",
+        applicant_name=employee.full_name,
+        applicant_phone=employee.phone or ""
+    )
+    await state.set_state(TaskCreate.enter_priority)
+    await message.answer(
+        f"✅ Заявитель: {employee.full_name}, телефон: {employee.phone or 'не указан'}",
+        reply_markup=priority_keyboard()
+    )
 
 @router.message(StateFilter(TaskCreate.enter_applicant_type), F.text.in_(["👤 Жилец", "👤 Сотрудник"]))
 async def process_applicant_type(message: Message, state: FSMContext):
@@ -236,10 +250,10 @@ async def process_applicant_phone(message: Message, state: FSMContext):
 async def process_priority(callback: CallbackQuery, state: FSMContext):
     priority = int(callback.data.split(":")[1])
     await state.update_data(priority=priority)
-    await state.set_state(TaskCreate.enter_media)
+    await state.set_state(TaskCreate.enter_photo)
     await callback.message.delete()
     await callback.message.answer(
-        "🖼 Пришлите фото или видео (опционально) или нажмите **Готово**:",
+        "🖼 Пришлите фото (опционально) или нажмите **Готово**:",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="✅ Готово")]],
             resize_keyboard=True
@@ -247,7 +261,7 @@ async def process_priority(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-@router.message(StateFilter(TaskCreate.enter_media), F.photo)
+@router.message(StateFilter(TaskCreate.enter_photo), F.photo)
 async def process_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
@@ -255,16 +269,8 @@ async def process_photo(message: Message, state: FSMContext):
     await state.update_data(photos=photos)
     await message.answer(f"✅ Добавлено фото ({len(photos)})")
 
-@router.message(StateFilter(TaskCreate.enter_media), F.video)
-async def process_video(message: Message, state: FSMContext):
-    data = await state.get_data()
-    videos = data.get("videos", [])
-    videos.append(message.video.file_id)
-    await state.update_data(videos=videos)
-    await message.answer(f"✅ Добавлено видео ({len(videos)})")
-
-@router.message(StateFilter(TaskCreate.enter_media), F.text == "✅ Готово")
-async def finish_media(message: Message, state: FSMContext):
+@router.message(StateFilter(TaskCreate.enter_photo), F.text == "✅ Готово")
+async def finish_photo(message: Message, state: FSMContext):
     await state.set_state(TaskCreate.confirm)
     data = await state.get_data()
     text = (
@@ -275,8 +281,7 @@ async def finish_media(message: Message, state: FSMContext):
         f"Заявитель: {data.get('applicant_name')} ({data.get('applicant_type')})\n"
         f"Телефон: {data.get('applicant_phone') or '—'}\n"
         f"Приоритет: {data.get('priority')}\n"
-        f"Фото: {len(data.get('photos', []))} шт.\n"
-        f"Видео: {len(data.get('videos', []))} шт.\n\n"
+        f"Фото: {len(data.get('photos', []))} шт.\n\n"
         f"Подтвердить создание?"
     )
     await message.answer(text, reply_markup=ReplyKeyboardMarkup(
@@ -309,8 +314,7 @@ async def confirm_create(message: Message, state: FSMContext):
             applicant_name=data.get('applicant_name'),
             applicant_phone=data.get('applicant_phone'),
             priority=data.get('priority', 3),
-            photo_ids=data.get('photos', []),
-            video_ids=data.get('videos', [])
+            photo_ids=data.get('photos', [])
         )
         await state.clear()
         await notify_admins(f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}")
@@ -320,16 +324,26 @@ async def confirm_create(message: Message, state: FSMContext):
                 f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}\nНазначьте исполнителя.",
                 task.id
             )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task.id}")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await message.answer(
             f"✅ Заявка #{task.id} создана!",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task.id}")],
-                [InlineKeyboardButton(text="📋 Меню заявок", callback_data="tasks_back")]
-            ])
+            reply_markup=kb
         )
+        await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
+
+@router.callback_query(F.data == "main_menu")
+async def main_menu_callback(callback: CallbackQuery):
+    employee = await get_employee(callback.from_user.id)
+    if employee:
+        await callback.message.delete()
+        await callback.message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
+    await callback.answer()
 
 @router.message(StateFilter(TaskCreate.confirm), F.text == "❌ Отмена")
 async def cancel_create(message: Message, state: FSMContext):

@@ -57,7 +57,7 @@ def get_task_list_text(title: str, tasks, page, total_pages, show_assignee=True)
         priority_emoji = get_priority_emoji(task.priority)
         priority_name = get_priority_name(task.priority)
         paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
-        line = f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**"
+        line = f"{status_emoji} {priority_emoji} #{task.id} <b>{paid_marker}{task.title[:30]}</b>"
         if task.status == "waiting" and task.wait_until:
             line += f" ⏳ до {task.wait_until.strftime('%d.%m %H:%M')}"
         text += line + "\n"
@@ -292,7 +292,7 @@ async def show_statistics(message: Message):
     orders = await get_all_orders(limit=1000)
     total_orders = len([o for o in orders if o.status == "pending"])
     text = (
-        f"📊 **Статистика системы**\n\n"
+        f"📊 <b>Статистика системы</b>\n\n"
         f"👥 Активных сотрудников: {total_employees}\n"
         f"📋 Открытых заявок: {total_open}\n"
         f"⏳ Ожидают: {total_waiting}\n"
@@ -429,7 +429,7 @@ async def process_search(message: Message, state: FSMContext):
         priority_name = get_priority_name(task.priority)
         assignee_name = task.assignee.full_name if task.assignee else "не назначен"
         paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
-        text += f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**\n"
+        text += f"{status_emoji} {priority_emoji} #{task.id} <b>{paid_marker}{task.title[:30]}</b>\n"
         text += f"   Приоритет: {priority_name} | Исполнитель: {assignee_name}\n\n"
     await message.answer(text, parse_mode="HTML")
     await state.clear()
