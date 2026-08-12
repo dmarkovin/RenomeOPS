@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    container_name: renome-prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=12h'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    networks:
+      - renomeops_default
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: renome-loki
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+    networks:
+      - renomeops_default
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: renome-grafana
+    volumes:
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - renomeops_default
+
+  node_exporter:
+    image: prom/node-exporter:v1.8.1
+    container_name: renome-node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)'
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+    networks:
+      - renomeops_default
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: renome-promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    ports:
+      - "9080:9080"
+    restart: unless-stopped
+    networks:
+      - renomeops_default
+
+networks:
+  renomeops_default:
+    external: true
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:

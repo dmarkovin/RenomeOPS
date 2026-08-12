@@ -22,6 +22,7 @@ from app.keyboards.date_picker import date_selection_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
 from app.services.notification_service import notify_user, notify_concierges, notify_security, notify_team
 from app.database import AsyncSessionLocal
+from app.metrics import bot_errors_total
 
 router = Router()
 
@@ -50,6 +51,14 @@ async def safe_delete_message(message):
         await message.delete()
     except Exception:
         pass
+
+async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        bot_errors_total.labels(error_type=type(e).__name__).inc()
+        await safe_delete_message(callback.message)
+        await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 # ========== Главное меню пропусков ==========
 @router.message(F.text == "🚗 Пропуска")
@@ -121,6 +130,7 @@ async def process_apartment(message: Message, state: FSMContext):
 async def process_purpose(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(purpose=text if text != "-" else "")
+    # Переходим к выбору даты начала
     await state.set_state(PassCreate.select_start_date)
     await message.answer("Выберите дату начала действия пропуска:", reply_markup=date_selection_keyboard("start"))
 
@@ -321,9 +331,9 @@ async def confirm_create_pass(message: Message, state: FSMContext):
         await notify_concierges(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await notify_security(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await message.answer(f"✅ Пропуск #{p.id} создан!", reply_markup=pass_main_menu_keyboard())
-        # Сбрасываем клавиатуру
         await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
+        bot_errors_total.labels(error_type=type(e).__name__).inc()
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
 
@@ -353,7 +363,14 @@ async def list_active_passes(message: Message, state: FSMContext, page: int = 1,
 
     text = f"📋 Активные пропуски (стр. {page}/{total_pages}):\n\n"
     for p in passes_page:
-        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴"
+        if p.status == "active":
+            status_emoji = "🟢"
+        elif p.status == "used":
+            status_emoji = "🔵"
+        elif p.status == "expired":
+            status_emoji = "🔴"
+        else:
+            status_emoji = "⚪"
         label = f"{status_emoji} #{p.id} "
         if p.type == "guest":
             label += f"Гость: {p.guest_name or '—'}"
@@ -388,7 +405,14 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
 
     text = f"📜 История пропусков (стр. {page}/{total_pages}):\n\n"
     for p in passes_page:
-        status_emoji = "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
+        if p.status == "used":
+            status_emoji = "🔵"
+        elif p.status == "expired":
+            status_emoji = "🔴"
+        elif p.status == "completed":
+            status_emoji = "✅"
+        else:
+            status_emoji = "⚪"
         label = f"{status_emoji} #{p.id} "
         if p.type == "guest":
             label += f"Гость: {p.guest_name or '—'}"
@@ -431,7 +455,16 @@ async def process_search_pass(message: Message, state: FSMContext):
     text = "🔍 Результаты поиска по пропускам:\n\n"
     buttons = []
     for p in passes:
-        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
+        if p.status == "active":
+            status_emoji = "🟢"
+        elif p.status == "used":
+            status_emoji = "🔵"
+        elif p.status == "expired":
+            status_emoji = "🔴"
+        elif p.status == "completed":
+            status_emoji = "✅"
+        else:
+            status_emoji = "⚪"
         label = f"{status_emoji} #{p.id} "
         if p.type == "guest":
             label += f"Гость: {p.guest_name or '—'}"
@@ -469,17 +502,19 @@ async def show_pass_card(callback: CallbackQuery):
         f"Выезд: {p.checked_out_at.strftime('%d.%m.%Y %H:%M') if p.checked_out_at else '—'}\n"
         f"Комментарий: {p.comment or '—'}"
     )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Комментарии", callback_data=f"pass_comment_menu:{pass_id}")],
-        [InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{p.id}")],
+    history_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{p.id}")]
     ])
-    action_kb = pass_action_keyboard(p.id, p.status, user_role)
-    merged_buttons = action_kb.inline_keyboard + kb.inline_keyboard
-    try:
-        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=merged_buttons))
-    except Exception:
-        await callback.message.delete()
-        await callback.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=merged_buttons))
+    # Формируем клавиатуру действий с учётом статуса и отметок
+    action_kb = pass_action_keyboard(
+        p.id,
+        p.status,
+        user_role,
+        bool(p.checked_in_at),
+        bool(p.checked_out_at)
+    )
+    merged_buttons = action_kb.inline_keyboard + history_kb.inline_keyboard
+    await safe_edit_or_reply(callback, text, InlineKeyboardMarkup(inline_keyboard=merged_buttons))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("pass_history:"))
@@ -688,7 +723,16 @@ async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
 
     text = f"{title} (стр. {page}/{total_pages}):\n\n"
     for p in items_page:
-        status_emoji = "🟢" if p.status == "active" else "🔵" if p.status == "used" else "🔴" if p.status == "expired" else "✅" if p.status == "completed" else "⚪"
+        if p.status == "active":
+            status_emoji = "🟢"
+        elif p.status == "used":
+            status_emoji = "🔵"
+        elif p.status == "expired":
+            status_emoji = "🔴"
+        elif p.status == "completed":
+            status_emoji = "✅"
+        else:
+            status_emoji = "⚪"
         label = f"{status_emoji} #{p.id} "
         if p.type == "guest":
             label += f"Гость: {p.guest_name or '—'}"

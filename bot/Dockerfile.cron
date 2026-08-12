@@ -2,20 +2,28 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Устанавливаем зависимости
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Копируем код
 COPY . .
-
-RUN chmod +x check_waiting_tasks.py
 
 # Устанавливаем cron
 RUN apt-get update && apt-get install -y cron && rm -rf /var/lib/apt/lists/*
 
-# Добавляем задание в cron (каждые 5 минут)
-RUN echo "*/5 * * * * cd /app && /usr/local/bin/python /app/check_waiting_tasks.py >> /var/log/cron.log 2>&1" > /etc/cron.d/check_waiting
+# Копируем скрипт и настраиваем cron
+COPY check_waiting_tasks.py /app/
+RUN chmod +x /app/check_waiting_tasks.py
 
-# Создаём файл лога
+# Добавляем задание в cron (каждые 5 минут)
+RUN echo "*/5 * * * * cd /app && /usr/local/bin/python /app/check_waiting_tasks.py >> /var/log/cron.log 2>&1" > /etc/cron.d/check_waiting_tasks
+
+# Даём права на выполнение
+RUN chmod 0644 /etc/cron.d/check_waiting_tasks
+
+# Создаём лог-файл
 RUN touch /var/log/cron.log
 
+# Запускаем cron
 CMD cron && tail -f /var/log/cron.log

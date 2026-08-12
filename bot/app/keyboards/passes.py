@@ -46,7 +46,7 @@ def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> Inlin
 
 def pass_action_keyboard(pass_id: int, status: str, user_role: str, checked_in: bool = False, checked_out: bool = False) -> InlineKeyboardMarkup:
     buttons = []
-    # Определяем, какую кнопку показывать
+    # Определяем, какую кнопку показывать в зависимости от статуса и отметок
     if status == "active":
         if not checked_in:
             buttons.append([InlineKeyboardButton(text="✅ Въезд", callback_data=f"pass_checkin:{pass_id}")])

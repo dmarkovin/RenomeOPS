@@ -33,6 +33,8 @@ services:
       - redis
     volumes:
       - ./bot:/app
+    ports:
+      - "8000:8000"
 
   cron:
     build:

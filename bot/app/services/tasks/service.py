@@ -151,11 +151,6 @@ async def get_tasks_for_employee(
     limit: int = 20,
     offset: int = 0,
 ) -> List[Task]:
-    """
-    Возвращает задачи, где пользователь является исполнителем (assigned_to)
-    или его команда (assigned_team). Без фильтра по статусу – показывает все задачи.
-    Для администратора/консьержа/директора – все задачи (кроме feedback? в этой функции они не используются).
-    """
     async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
@@ -167,18 +162,12 @@ async def get_tasks_for_employee(
                 cast(Task.assigned_team, String) == employee.team.value,
             )
         )
-        # Исключаем is_feedback для всех, кроме администратора
         if employee.role != UserRole.ADMIN:
             query = query.where(Task.is_feedback == False)
-
-        # Исключаем задачи, назначенные на группу ADMIN_TEAM, для не-админов
         if employee.role != UserRole.ADMIN:
             query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
-
-        # Если статус указан, добавляем фильтр
         if status:
             query = query.where(cast(Task.status, String) == status)
-
         query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
         query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
         result = await db.execute(query)
@@ -283,13 +272,10 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
             employee = await db.get(User, user_id)
             if not employee or not employee.active:
                 return None
-            # Разрешаем брать задачу, если она не закрыта и не на проверке
             if task.status in ("closed", "checking"):
                 return None
-            # Если задача уже назначена, перехват разрешён только админу/консьержу/директору
             if task.assigned_to is not None and employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
                 return None
-            # Проверка команды для обычных исполнителей
             if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
                 if task.assigned_team and employee.team != task.assigned_team:
                     return None
@@ -670,7 +656,6 @@ async def count_regular_closed_tasks(user_id: int = None) -> int:
 
 
 async def search_tasks(query: str, limit: int = 20) -> List[Task]:
-    """Поиск задач по ID, названию, описанию или исполнителю"""
     async with AsyncSessionLocal() as db:
         if query.isdigit():
             task = await db.get(Task, int(query))
@@ -714,7 +699,6 @@ async def get_team_tasks(
     limit: int = 20,
     offset: int = 0,
 ) -> List[Task]:
-    """Задачи, назначенные на команду, но не взятые (assigned_to IS NULL)"""
     async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
