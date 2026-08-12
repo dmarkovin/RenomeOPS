@@ -28,7 +28,7 @@ from app.services.employees.service import count_employees
 
 router = Router()
 
-# ========== Функция для главного меню (используется в start.py) ==========
+# ========== Функция для главного меню ==========
 async def show_main_menu(message: Message):
     employee = await get_employee(message.from_user.id)
     if not employee:
@@ -276,7 +276,6 @@ async def show_detailed_statistics(message: Message):
         await message.answer("Только для администратора и директора.")
         return
 
-    # Сбор данных
     total_open = await count_open_tasks()
     total_checking = await count_checking_tasks()
     total_closed = await count_tasks_by_status("closed")
@@ -284,17 +283,20 @@ async def show_detailed_statistics(message: Message):
     total_in_progress = await count_tasks_by_status("in_progress")
     total_accepted = await count_tasks_by_status("accepted")
 
-    # Приоритеты
-    tasks = await get_open_tasks(limit=1000)
+    # Приоритеты – используем все задачи (не только открытые)
+    all_tasks = []
+    for status in ["created", "accepted", "in_progress", "checking", "waiting", "paused", "closed"]:
+        tasks = await get_tasks_by_status(status, limit=1000)
+        all_tasks.extend(tasks)
     priority_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-    for t in tasks:
+    for t in all_tasks:
         if t.priority in priority_counts:
             priority_counts[t.priority] += 1
+    
 
-    # Исполнители (топ-5)
     from collections import Counter
     assignee_counter = Counter()
-    for t in tasks:
+    for t in all_tasks:
         if t.assigned_to:
             assignee_counter[t.assigned_to] += 1
     top_assignees = []
@@ -303,39 +305,37 @@ async def show_detailed_statistics(message: Message):
         if user:
             top_assignees.append(f"{user.full_name}: {count} задач")
 
-    # Команды
     team_task_counts = {}
     for team in Team:
-        team_tasks = await get_team_tasks(employee.id, limit=1000)
-        team_task_counts[team.value] = len(team_tasks)
+        count = 0
+        for t in all_tasks:
+            if t.assigned_team == team and t.status != "closed":
+                count += 1
+        team_task_counts[team.value] = count
 
-    # Пропуска
     active_passes = await count_passes_by_status("active")
     used_passes = await count_passes_by_status("used")
     expired_passes = await count_passes_by_status("expired")
+    completed_passes = await count_passes_by_status("completed")
+    completed_total = completed_passes + used_passes
 
-    # Доставки
     all_deliveries = await get_all_deliveries(limit=10000)
     pending_deliveries = len([d for d in all_deliveries if d.status == "pending"])
     received_deliveries = len([d for d in all_deliveries if d.status == "received"])
     completed_deliveries = len([d for d in all_deliveries if d.status == "completed"])
 
-    # Ключи
     issued_keys = len(await get_keys(status="issued", limit=10000))
     returned_keys = len(await get_keys(status="returned", limit=10000))
 
-    # Документы
     docs = await get_documents(limit=10000)
     doc_types = {}
     for d in docs:
         doc_types[d.doc_type] = doc_types.get(d.doc_type, 0) + 1
 
-    # Обходы
     patrols = await get_patrols(limit=10000)
     active_patrols = len([p for p in patrols if p.status == "active"])
     completed_patrols = len([p for p in patrols if p.status == "completed"])
 
-    # Сотрудники
     total_employees = await count_employees(active=None)
     active_employees = await count_employees(active=True)
     inactive_employees = total_employees - active_employees
@@ -366,6 +366,7 @@ async def show_detailed_statistics(message: Message):
         f"<b>🚗 Пропуска</b>\n"
         f"Активные: {active_passes}\n"
         f"Использованные: {used_passes}\n"
+        f"Выполненные: {completed_total}\n"
         f"Просроченные: {expired_passes}\n\n"
         f"<b>📦 Доставка</b>\n"
         f"Ожидают: {pending_deliveries}\n"
@@ -388,11 +389,18 @@ async def show_detailed_statistics(message: Message):
 
     await message.answer(text, parse_mode="HTML")
 
-# ========== Назад ==========
+# ========== ГЛОБАЛЬНЫЙ ОБРАБОТЧИК "⬅️ Назад" ==========
 @router.message(F.text == "⬅️ Назад")
-async def back_to_main_menu(message: Message):
+async def global_back_handler(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
         return
+    # Если пользователь в состоянии создания заявки или услуги – сбрасываем состояние и возвращаем в главное меню
+    current_state = await state.get_state()
+    if current_state and (current_state.startswith("TaskCreate:") or current_state.startswith("ServiceOrderState:")):
+        await state.clear()
+        await message.answer("Действие отменено.", reply_markup=main_menu_keyboard(employee.role))
+        return
+    # Иначе – просто главное меню
     await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))

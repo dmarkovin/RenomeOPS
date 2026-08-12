@@ -16,7 +16,7 @@ from app.services.employees.service import (
     get_default_team_for_role,
 )
 from app.keyboards.employees.admin import employees_admin_menu
-from app.keyboards.employees.list import employee_list_keyboard, employee_card_keyboard
+from app.keyboards.employees.list import employee_list_keyboard, employee_card_keyboard, search_result_keyboard
 from app.keyboards.employees.roles import role_selection_keyboard
 from app.keyboards.employees.teams import team_selection_keyboard
 from app.database.models import UserRole, Team
@@ -39,6 +39,13 @@ async def employees_menu(message: Message):
 
 # ===== Список сотрудников =====
 async def list_employees(message: Message, page: int = 1, user_id: int = None, include_inactive: bool = False):
+    if include_inactive:
+        employees = await get_all_employees(active=False, limit=limit, offset=offset)
+        total = await count_employees(active=False)
+    else:
+        employees = await get_all_employees(limit=limit, offset=offset)
+        total = await count_employees()
+
     if user_id is None:
         user_id = message.from_user.id
     admin = await get_employee(user_id)
@@ -62,12 +69,7 @@ async def list_employees(message: Message, page: int = 1, user_id: int = None, i
         status = "✅" if emp.active else "❌"
         text += f"ID: {emp.id} | {emp.full_name} | {emp.role.value} | {status}\n"
 
-    kb = employee_list_keyboard(employees, page, total_pages)
-    # Добавляем кнопку для переключения в архив, если сейчас активные
-    if not include_inactive:
-        kb.inline_keyboard.append([InlineKeyboardButton(text="📦 Архив", callback_data="emp_archive:1")])
-    else:
-        kb.inline_keyboard.append([InlineKeyboardButton(text="📋 Активные", callback_data="emp_active:1")])
+    kb = employee_list_keyboard(employees, page, total_pages, include_inactive=include_inactive)
     await message.answer(text, reply_markup=kb)
 
 @router.message(F.text == "📋 Список сотрудников")
@@ -78,23 +80,13 @@ async def list_employees_handler(message: Message):
 async def archive_employees_handler(message: Message):
     await list_employees(message, page=1, user_id=message.from_user.id, include_inactive=True)
 
-# ===== Пагинация и переключение =====
+# ===== Пагинация в списке =====
 @router.callback_query(F.data.startswith("emp_page:"))
 async def paginate_employees(callback: CallbackQuery):
     parts = callback.data.split(":")
     page = int(parts[1])
-    include_inactive = parts[2] == "1" if len(parts) > 2 else False
+    include_inactive = len(parts) > 2 and parts[2] == "1"
     await list_employees(callback.message, page=page, user_id=callback.from_user.id, include_inactive=include_inactive)
-    await callback.answer()
-
-@router.callback_query(F.data == "emp_archive")
-async def show_archive(callback: CallbackQuery):
-    await list_employees(callback.message, page=1, user_id=callback.from_user.id, include_inactive=True)
-    await callback.answer()
-
-@router.callback_query(F.data == "emp_active")
-async def show_active(callback: CallbackQuery):
-    await list_employees(callback.message, page=1, user_id=callback.from_user.id, include_inactive=False)
     await callback.answer()
 
 # ===== Карточка сотрудника =====
@@ -124,7 +116,7 @@ async def show_employee_card(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ===== Блокировка/деактивация =====
+# ===== Блокировка =====
 @router.callback_query(F.data.startswith("emp_block:"))
 async def block_employee_callback(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
@@ -142,6 +134,7 @@ async def block_employee_callback(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
+# ===== Активация =====
 @router.callback_query(F.data.startswith("emp_activate:"))
 async def activate_employee_callback(callback: CallbackQuery):
     user_id = int(callback.data.split(":")[1])
@@ -292,17 +285,53 @@ async def process_search(message: Message, state: FSMContext):
     if len(query) < 2:
         await message.answer("Введите минимум 2 символа.")
         return
+    admin = await get_employee(message.from_user.id)
+    if not admin or admin.role != UserRole.ADMIN:
+        await message.answer("У вас нет прав.")
+        await state.clear()
+        return
     employees = await get_all_employees(search=query)
     if not employees:
         await message.answer("Ничего не найдено.")
         await state.clear()
         return
-    text = "🔍 Результаты поиска:\n\n"
-    for emp in employees:
+    # Сохраняем результаты в состоянии
+    await state.update_data(search_query=query, search_results=employees, search_page=1)
+    # Показываем первую страницу
+    limit = 10
+    page = 1
+    total = len(employees)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    start = (page - 1) * limit
+    employees_page = employees[start:start+limit]
+    text = f"🔍 Результаты поиска (стр. {page}/{total_pages}):\n\n"
+    for emp in employees_page:
         status = "✅" if emp.active else "❌"
         text += f"{status} {emp.full_name} (ID: {emp.id}) | {emp.role.value}\n"
-    await message.answer(text)
-    await state.clear()
+    kb = search_result_keyboard(employees_page, page, total_pages, query)
+    await message.answer(text, reply_markup=kb)
+
+@router.callback_query(F.data.startswith("search_page:"))
+async def search_paginate(callback: CallbackQuery, state: FSMContext):
+    page = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    query = data.get("search_query")
+    employees = data.get("search_results", [])
+    if not query or not employees:
+        await callback.answer("Поиск не активен", show_alert=True)
+        return
+    limit = 10
+    total = len(employees)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    start = (page - 1) * limit
+    employees_page = employees[start:start+limit]
+    text = f"🔍 Результаты поиска (стр. {page}/{total_pages}):\n\n"
+    for emp in employees_page:
+        status = "✅" if emp.active else "❌"
+        text += f"{status} {emp.full_name} (ID: {emp.id}) | {emp.role.value}\n"
+    kb = search_result_keyboard(employees_page, page, total_pages, query)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
 
 @router.callback_query(F.data == "emp_search")
 async def search_from_list(callback: CallbackQuery, state: FSMContext):

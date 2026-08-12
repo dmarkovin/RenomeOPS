@@ -8,16 +8,10 @@ from app.services.tasks.service import (
     get_tasks_for_employee,
     get_team_tasks,
     get_checking_tasks,
-    count_open_tasks,
-    count_tasks_for_employee,
-    count_team_tasks,
-    count_checking_tasks,
     get_tasks_by_status,
     count_tasks_by_status,
     get_paid_closed_tasks,
-    count_paid_closed_tasks,
     get_regular_closed_tasks,
-    count_regular_closed_tasks,
     take_task,
 )
 from app.database.models import UserRole
@@ -57,7 +51,7 @@ def get_task_list_text(title: str, tasks, page, total_pages, show_assignee=True)
         priority_emoji = get_priority_emoji(task.priority)
         priority_name = get_priority_name(task.priority)
         paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
-        line = f"{status_emoji} {priority_emoji} #{task.id} <b>{paid_marker}{task.title[:30]}</b>"
+        line = f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**"
         if task.status == "waiting" and task.wait_until:
             line += f" ⏳ до {task.wait_until.strftime('%d.%m %H:%M')}"
         text += line + "\n"
@@ -79,28 +73,29 @@ async def show_list(
 ):
     try:
         if user_id is None:
-            if hasattr(target, 'from_user'):
+            if isinstance(target, CallbackQuery):
                 user_id = target.from_user.id
-            elif hasattr(target, 'message') and hasattr(target.message, 'from_user'):
-                user_id = target.message.from_user.id
+            elif isinstance(target, Message):
+                user_id = target.from_user.id
             else:
                 user_id = target.from_user.id
+
         employee = await get_employee(user_id)
         if not employee:
-            if hasattr(target, 'answer'):
+            if isinstance(target, CallbackQuery):
                 await target.answer("Вы не зарегистрированы.", show_alert=True)
             else:
                 await target.answer("Вы не зарегистрированы.")
             return
+
         limit = 10
         title = ""
         tasks = []
         show_assignee = True
 
-        # Получаем все задачи без пагинации (используем большой лимит)
         if list_type == "open":
             if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-                if hasattr(target, 'answer'):
+                if isinstance(target, CallbackQuery):
                     await target.answer("У вас нет прав на просмотр всех заявок.", show_alert=True)
                 else:
                     await target.answer("У вас нет прав на просмотр всех заявок.")
@@ -117,7 +112,7 @@ async def show_list(
             show_assignee = False
         elif list_type == "checking":
             if employee.role != UserRole.CONCIERGE:
-                if hasattr(target, 'answer'):
+                if isinstance(target, CallbackQuery):
                     await target.answer("Только для консьержей.", show_alert=True)
                 else:
                     await target.answer("Только для консьержей.")
@@ -137,7 +132,7 @@ async def show_list(
             show_assignee = False
         elif list_type == "archive_feedback":
             if employee.role != UserRole.ADMIN:
-                if hasattr(target, 'answer'):
+                if isinstance(target, CallbackQuery):
                     await target.answer("Только для администратора.", show_alert=True)
                 else:
                     await target.answer("Только для администратора.")
@@ -150,11 +145,8 @@ async def show_list(
             tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
 
-        # Фильтрация по приоритету
         if filter_priority is not None:
             tasks = [t for t in tasks if t.priority == filter_priority]
-
-        # Сортировка
         if sort_by == "priority":
             tasks = sorted(tasks, key=lambda t: t.priority, reverse=True)
         else:
@@ -165,23 +157,15 @@ async def show_list(
         start = (page - 1) * limit
         tasks_page = tasks[start:start+limit]
 
-        # Сохраняем текущие параметры списка для возврата из карточки
         await state.update_data(
-            list_type=list_type,
-            page=page,
-            sort_by=sort_by,
-            filter_priority=filter_priority,
-            current_list_type=list_type,
-            current_page=page,
-            current_sort=sort_by,
-            current_filter=filter_priority
+            list_type=list_type, page=page, sort_by=sort_by, filter_priority=filter_priority,
+            current_list_type=list_type, current_page=page, current_sort=sort_by, current_filter=filter_priority
         )
         await state.set_state(TaskContext.list_type)
 
         if not tasks_page:
             text = f"{title}\n\nНет записей."
-            if hasattr(target, 'message'):
-                await safe_delete_message(target.message)
+            if isinstance(target, CallbackQuery):
                 await target.message.answer(text, reply_markup=get_navigation_keyboard())
             else:
                 await target.answer(text, reply_markup=get_navigation_keyboard())
@@ -189,8 +173,8 @@ async def show_list(
 
         text = get_task_list_text(title, tasks_page, page, total_pages, show_assignee)
         reply_markup = task_list_keyboard(tasks_page, page, total_pages, list_type, filter_priority)
-        if hasattr(target, 'message'):
-            await safe_delete_message(target.message)
+
+        if isinstance(target, CallbackQuery):
             await target.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
             await target.message.answer("Выберите действие:", reply_markup=get_navigation_keyboard())
         else:
@@ -198,25 +182,27 @@ async def show_list(
             await target.answer("Выберите действие:", reply_markup=get_navigation_keyboard())
     except Exception as e:
         print(f"ERROR in show_list: {e}")
-        if hasattr(target, 'answer'):
-            await target.answer(f"❌ Ошибка при загрузке списка: {str(e)}", parse_mode=None)
+        if isinstance(target, CallbackQuery):
+            await target.message.answer(f"❌ Ошибка при загрузке списка: {str(e)}")
         else:
-            await target.message.answer(f"❌ Ошибка при загрузке списка: {str(e)}", parse_mode=None)
+            await target.answer(f"❌ Ошибка при загрузке списка: {str(e)}")
 
 async def show_archive_menu(target, state: FSMContext):
-    if hasattr(target, 'from_user'):
+    if isinstance(target, CallbackQuery):
         user_id = target.from_user.id
-    elif hasattr(target, 'message') and hasattr(target.message, 'from_user'):
-        user_id = target.message.from_user.id
+        message_obj = target.message
     else:
         user_id = target.from_user.id
+        message_obj = target
+
     employee = await get_employee(user_id)
     if not employee:
-        if hasattr(target, 'answer'):
+        if isinstance(target, CallbackQuery):
             await target.answer("Вы не зарегистрированы.", show_alert=True)
         else:
             await target.answer("Вы не зарегистрированы.")
         return
+
     buttons = [
         [InlineKeyboardButton(text="📋 Все закрытые", callback_data="archive_category:all")],
         [InlineKeyboardButton(text="💰 Платные услуги", callback_data="archive_category:paid")],
@@ -226,9 +212,9 @@ async def show_archive_menu(target, state: FSMContext):
         buttons.append([InlineKeyboardButton(text="📢 Обращения (проблемы)", callback_data="archive_category:feedback")])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="tasks_back")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-    if hasattr(target, 'message'):
-        await safe_delete_message(target.message)
-        await target.message.answer("Выберите категорию архива:", reply_markup=kb)
+
+    if isinstance(target, CallbackQuery):
+        await message_obj.answer("Выберите категорию архива:", reply_markup=kb)
     else:
         await target.answer("Выберите категорию архива:", reply_markup=kb)
 
@@ -292,7 +278,7 @@ async def show_statistics(message: Message):
     orders = await get_all_orders(limit=1000)
     total_orders = len([o for o in orders if o.status == "pending"])
     text = (
-        f"📊 <b>Статистика системы</b>\n\n"
+        f"📊 **Статистика системы**\n\n"
         f"👥 Активных сотрудников: {total_employees}\n"
         f"📋 Открытых заявок: {total_open}\n"
         f"⏳ Ожидают: {total_waiting}\n"
@@ -357,7 +343,6 @@ async def take_from_list(callback: CallbackQuery, state: FSMContext):
     filter_priority = data.get("filter_priority")
     await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
 
-# ===== ИСПРАВЛЕННАЯ КНОПКА "НАЗАД" =====
 @router.callback_query(F.data == "tasks_back")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -404,7 +389,7 @@ async def back_to_main_menu(message: Message, state: FSMContext):
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
         await message.answer("Только для администратора и консьержа.")
         return
     await state.set_state(TaskSearch.query)
@@ -429,7 +414,7 @@ async def process_search(message: Message, state: FSMContext):
         priority_name = get_priority_name(task.priority)
         assignee_name = task.assignee.full_name if task.assignee else "не назначен"
         paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
-        text += f"{status_emoji} {priority_emoji} #{task.id} <b>{paid_marker}{task.title[:30]}</b>\n"
+        text += f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**\n"
         text += f"   Приоритет: {priority_name} | Исполнитель: {assignee_name}\n\n"
     await message.answer(text, parse_mode="HTML")
     await state.clear()

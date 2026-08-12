@@ -68,7 +68,7 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
     text = (
         f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
         f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-        f"🏢 <b>Объект:</b> {task.building or '—'}, кв. {task.apartment or '—'}\n"
+        f"🏢 <b>Адрес:</b> {task.building or '—'} {task.apartment or '—'}\n"
         f"🔢 <b>Приоритет:</b> {task.priority}\n"
         f"📊 <b>Статус:</b> {task.status}\n\n"
         f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
@@ -274,10 +274,10 @@ async def process_add_comment(message: Message, state: FSMContext):
         )
 
 @router.callback_query(F.data.startswith("task_comment_back:"))
-async def comment_back_to_task(callback: CallbackQuery):
+async def comment_back_to_task(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
     await safe_delete_message(callback.message)
-    await show_task_card(callback, await callback.bot.get_state(callback.from_user.id))
+    await show_task_card(callback, state)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("task_history:"))
@@ -328,6 +328,24 @@ async def history_back_to_task(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
     await safe_delete_message(callback.message)
     await show_task_card(callback, state)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("task_video:"))
+async def show_task_videos(callback: CallbackQuery):
+    task_id = int(callback.data.split(":")[1])
+    task = await get_task(task_id)
+    if not task or not task.video_ids:
+        await callback.answer("Нет видео", show_alert=True)
+        return
+    await safe_delete_message(callback.message)
+    for video_id in task.video_ids:
+        await callback.message.answer_video(video_id)
+    await callback.message.answer(
+        "⬅️ Назад",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task:{task_id}")]
+        ])
+    )
     await callback.answer()
 
 @router.callback_query(F.data.startswith("task_photo:"))

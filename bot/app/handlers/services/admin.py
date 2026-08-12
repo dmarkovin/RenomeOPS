@@ -189,7 +189,7 @@ async def service_edit_category_start(callback: CallbackQuery, state: FSMContext
     await callback.answer()
 
 @router.callback_query(F.data.startswith("service_edit_active:"))
-async def service_edit_active(callback: CallbackQuery):
+async def service_edit_active(callback: CallbackQuery, state: FSMContext):
     service_id = int(callback.data.split(":")[1])
     service = await get_service(service_id)
     if not service:
@@ -197,11 +197,11 @@ async def service_edit_active(callback: CallbackQuery):
         return
     await update_service(service_id, active=not service.active)
     await callback.answer(f"✅ Статус изменён на {'активна' if not service.active else 'неактивна'}")
-    await service_admin_edit_start(callback, await callback.bot.get_state(callback.from_user.id))
+    # Обновляем карточку редактирования
+    await service_admin_edit_start(callback, state)
 
 @router.callback_query(F.data.startswith("service_edit_back:"))
 async def service_edit_back(callback: CallbackQuery, state: FSMContext):
-    service_id = int(callback.data.split(":")[1])
     await callback.message.delete()
     await service_admin_menu(callback.message, state)
     await callback.answer()

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, Union
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, cast, String, and_
 from app.database import AsyncSessionLocal
 from app.database.models import Pass, User, Team
 
@@ -32,6 +32,10 @@ async def create_pass(
     assigned_team: str = None
 ) -> Pass:
     async with AsyncSessionLocal() as db:
+        if assigned_to:
+            user = await db.get(User, assigned_to)
+            if not user or not user.active:
+                raise ValueError("Назначенный сотрудник не активен")
         p = Pass(
             type=type,
             guest_name=guest_name,
@@ -158,20 +162,31 @@ async def get_pass_history(pass_id: int) -> List[dict]:
         return p.history or []
 
 
-async def search_passes(query: str, limit: int = 20) -> List[Pass]:
+async def search_passes(query: str, limit: int = 20, status: str = None) -> List[Pass]:
     async with AsyncSessionLocal() as db:
-        if query.isdigit():
-            result = await db.execute(select(Pass).where(Pass.id == int(query)).limit(limit))
-            return result.scalars().all()
         like = f"%{query}%"
-        stmt = select(Pass).where(
-            or_(
-                Pass.guest_name.ilike(like),
-                Pass.car_number.ilike(like),
-                Pass.apartment.cast().ilike(like),
-                Pass.purpose.ilike(like),
-                Pass.comment.ilike(like)
-            )
-        ).order_by(Pass.created_at.desc()).limit(limit)
+        conditions = [
+            Pass.guest_name.ilike(like),
+            Pass.car_number.ilike(like),
+            cast(Pass.apartment, String).ilike(like),
+            Pass.purpose.ilike(like),
+            Pass.comment.ilike(like)
+        ]
+        if query.startswith("#"):
+            try:
+                pass_id = int(query[1:])
+                stmt = select(Pass).where(Pass.id == pass_id)
+                if status:
+                    stmt = stmt.where(Pass.status == status)
+                result = await db.execute(stmt)
+                return result.scalars().all()
+            except ValueError:
+                return []
+        stmt = select(Pass)
+        if status:
+            stmt = stmt.where(and_(Pass.status == status, or_(*conditions)))
+        else:
+            stmt = stmt.where(or_(*conditions))
+        stmt = stmt.order_by(Pass.created_at.desc()).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all()

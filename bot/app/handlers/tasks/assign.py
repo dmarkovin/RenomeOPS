@@ -31,6 +31,9 @@ router = Router()
 async def start_assign(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
+    if not employee or not employee.active:
+        await callback.answer("Сотрудник не активен", show_alert=True)
+        return
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
         await callback.answer("У вас нет прав для назначения", show_alert=True)
         return
@@ -137,6 +140,9 @@ async def skip_assign(callback: CallbackQuery, state: FSMContext):
 async def start_transfer(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
+    if not employee or not employee.active:
+        await callback.answer("Сотрудник не активен", show_alert=True)
+        return
     if not employee:
         await callback.answer("Вы не зарегистрированы", show_alert=True)
         return

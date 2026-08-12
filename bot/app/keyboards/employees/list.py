@@ -6,7 +6,6 @@ def employee_list_keyboard(
     employees: List,
     page: int,
     total_pages: int,
-    filters: dict = None,
     include_inactive: bool = False,
 ) -> InlineKeyboardMarkup:
     buttons = []
@@ -28,21 +27,11 @@ def employee_list_keyboard(
     if nav_buttons:
         buttons.append(nav_buttons)
 
-    # Кнопки переключения между активными и архивом
-    if not include_inactive:
-        buttons.append([InlineKeyboardButton(text="📦 Архив", callback_data="emp_archive")])
-    else:
-        buttons.append([InlineKeyboardButton(text="📋 Активные", callback_data="emp_active")])
-
-    buttons.append([
-        InlineKeyboardButton(text="🔍 Поиск", callback_data="emp_search"),
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="emp_back"),
-    ])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="emp_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def employee_card_keyboard(user_id: int, active: bool) -> InlineKeyboardMarkup:
-    """Клавиатура для карточки сотрудника"""
     buttons = []
     if active:
         buttons.append(InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"emp_block:{user_id}"))
@@ -53,9 +42,7 @@ def employee_card_keyboard(user_id: int, active: bool) -> InlineKeyboardMarkup:
     buttons.append(InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="emp_back"))
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
-
 def search_result_keyboard(employees: List, page: int, total_pages: int, query: str) -> InlineKeyboardMarkup:
-    """Клавиатура для результатов поиска"""
     buttons = []
     for emp in employees:
         status = "✅" if emp.active else "❌"
@@ -75,8 +62,6 @@ def search_result_keyboard(employees: List, page: int, total_pages: int, query: 
     if nav_buttons:
         buttons.append(nav_buttons)
 
-    buttons.append([
-        InlineKeyboardButton(text="🔍 Новый поиск", callback_data="emp_search"),
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="emp_back"),
-    ])
+    buttons.append([InlineKeyboardButton(text="🔍 Новый поиск", callback_data="emp_search")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="emp_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
