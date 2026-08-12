@@ -32,24 +32,16 @@ async def main():
     logger.info("Database initialized.")
     logger.info("All routers registered successfully.")
     logger.info("Renome OPS bot started polling...")
-    
-    # Запуск HTTP-сервера для метрик на порту 8000
+    bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    set_bot(bot)
     start_http_server(8000)
-    logger.info("Metrics server started on port 8000")
-    
     # Фоновое обновление uptime и бизнес-метрик
     async def background_metrics():
         while True:
             update_uptime()
-            try:
-                await update_business_metrics()
-            except Exception as e:
-                logger.error(f"Error updating business metrics: {e}")
+            await update_business_metrics()
             await asyncio.sleep(60)  # раз в минуту
     asyncio.create_task(background_metrics())
-    
-    bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-    set_bot(bot)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

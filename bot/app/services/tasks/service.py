@@ -14,6 +14,7 @@ from app.database.models import (
     UserRole,
     Team,
 )
+from app.metrics import tasks_created_total, tasks_closed_total
 
 
 # ==========================
@@ -106,6 +107,7 @@ async def create_task(
         db.add(history)
         await db.commit()
         await db.refresh(task)
+        tasks_created_total.inc()
         return task
 
 
@@ -354,6 +356,7 @@ async def change_status(
             task.updated_at = datetime.utcnow()
             if new_status == "closed":
                 task.closed_at = datetime.utcnow()
+                tasks_closed_total.inc()
             if new_status == "waiting" and wait_until:
                 task.wait_until = wait_until
             else:

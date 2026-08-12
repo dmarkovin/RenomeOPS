@@ -331,7 +331,7 @@ async def confirm_create_pass(message: Message, state: FSMContext):
         await notify_concierges(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await notify_security(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await message.answer(f"✅ Пропуск #{p.id} создан!", reply_markup=pass_main_menu_keyboard())
-        await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
+        
     except Exception as e:
         bot_errors_total.labels(error_type=type(e).__name__).inc()
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)

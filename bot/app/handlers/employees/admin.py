@@ -39,13 +39,6 @@ async def employees_menu(message: Message):
 
 # ===== Список сотрудников =====
 async def list_employees(message: Message, page: int = 1, user_id: int = None, include_inactive: bool = False):
-    if include_inactive:
-        employees = await get_all_employees(active=False, limit=limit, offset=offset)
-        total = await count_employees(active=False)
-    else:
-        employees = await get_all_employees(limit=limit, offset=offset)
-        total = await count_employees()
-
     if user_id is None:
         user_id = message.from_user.id
     admin = await get_employee(user_id)

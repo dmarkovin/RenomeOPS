@@ -2,7 +2,7 @@ from typing import Callable, Awaitable, Dict, Any
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery
 import time
-from app.metrics import bot_requests_total, bot_update_latency, bot_errors_total
+from app.metrics import bot_requests_total, bot_update_latency, bot_errors_total, bot_updates_processed
 
 class MetricsMiddleware(BaseMiddleware):
     async def __call__(
@@ -25,6 +25,7 @@ class MetricsMiddleware(BaseMiddleware):
             result = await handler(event, data)
             # Обработка успешна
             bot_update_latency.labels(handler=command).observe(time.time() - start_time)
+            bot_updates_processed.inc()
             return result
         except Exception as e:
             # Логируем ошибку в метрики
