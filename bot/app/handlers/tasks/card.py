@@ -30,6 +30,10 @@ class TaskCommentState(StatesGroup):
 class TaskPhotoState(StatesGroup):
     waiting_for_photos = State()
 
+class TaskCheckState(StatesGroup):
+    waiting_for_comment = State()
+    waiting_for_photo = State()
+
 async def safe_delete_message(message):
     try:
         await message.delete()
@@ -133,6 +137,74 @@ async def resume_task(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.answer("❌ Ошибка", show_alert=True)
 
+@router.callback_query(F.data.startswith("task_check_start:"))
+async def start_check_task(callback: CallbackQuery, state: FSMContext):
+    task_id = int(callback.data.split(":")[1])
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    task = await get_task(task_id)
+    if not task or task.assigned_to != employee.id:
+        await callback.answer("Вы не исполнитель", show_alert=True)
+        return
+    await state.update_data(task_id=task_id)
+    await state.set_state(TaskCheckState.waiting_for_comment)
+    await callback.message.delete()
+    await callback.message.answer("✍️ Введите комментарий (обязательно):")
+    await callback.answer()
+
+@router.message(StateFilter(TaskCheckState.waiting_for_comment), F.text)
+async def process_check_comment(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if not text:
+        await message.answer("Комментарий обязателен. Введите текст:")
+        return
+    await state.update_data(comment=text)
+    await state.set_state(TaskCheckState.waiting_for_photo)
+    await message.answer("🖼 Пришлите фото (опционально) или нажмите **Готово**:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="✅ Готово")]],
+            resize_keyboard=True
+        ))
+
+@router.message(StateFilter(TaskCheckState.waiting_for_photo), F.photo)
+async def process_check_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("photos", [])
+    photos.append(message.photo[-1].file_id)
+    await state.update_data(photos=photos)
+    await message.answer(f"✅ Добавлено фото ({len(photos)})")
+
+@router.message(StateFilter(TaskCheckState.waiting_for_photo), F.text == "✅ Готово")
+async def finish_check_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    task_id = data.get("task_id")
+    comment = data.get("comment")
+    photos = data.get("photos", [])
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Ошибка")
+        await state.clear()
+        return
+    # Сохраняем комментарий
+    if comment:
+        await add_comment(task_id, employee.id, comment)
+    # Сохраняем фото
+    for file_id in photos:
+        await add_photo(task_id, employee.id, file_id)
+    # Меняем статус на checking
+    task = await change_status(task_id, "checking", employee.id, comment)
+    if task:
+        await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}\nКомментарий: {comment}")
+        await message.answer("✅ Задача отправлена на проверку")
+        await message.answer(f"📋 Карточка задачи #{task_id}:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
+        ]))
+    else:
+        await message.answer("❌ Ошибка изменения статуса")
+    await state.clear()
+
 @router.callback_query(F.data.startswith("task_status:"))
 async def change_task_status(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
@@ -141,7 +213,7 @@ async def change_task_status(callback: CallbackQuery, state: FSMContext):
     status_map = {
         "accept": "accepted",
         "start": "in_progress",
-        "check": "checking",
+        "check": "checking",  # больше не используется, но оставим для совместимости
         "close": "closed",
         "rework": "in_progress",
         "pause": "paused",
@@ -188,20 +260,7 @@ async def change_task_status(callback: CallbackQuery, state: FSMContext):
         await notify_admins(f"🔄 Задача #{task_id} возвращена на доработку исполнителем {employee.full_name}")
     await show_task_card(callback, state)
 
-@router.callback_query(F.data.startswith("task_comment_menu:"))
-async def comment_menu(callback: CallbackQuery, state: FSMContext):
-    task_id = int(callback.data.split(":")[1])
-    await safe_delete_message(callback.message)
-    await callback.message.answer(
-        "💬 Меню комментариев:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"task_comment_list:{task_id}")],
-            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"task_comment_add:{task_id}")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task_comment_back:{task_id}")],
-        ])
-    )
-    await callback.answer()
-
+# ========== Комментарии (сразу показываем список) ==========
 @router.callback_query(F.data.startswith("task_comment_list:"))
 async def show_comments(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -223,7 +282,8 @@ async def show_comments(callback: CallbackQuery, state: FSMContext):
         text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"task_comment_menu:{task_id}")]
+            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"task_comment_add:{task_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task_comment_back:{task_id}")],
         ])
     )
     await callback.answer()
@@ -256,24 +316,11 @@ async def process_add_comment(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Ошибка добавления комментария.")
     await state.clear()
-    task = await get_task(task_id)
-    if task:
-        comments = task.comments
-        if not comments:
-            text = "💬 Комментариев пока нет."
-        else:
-            text = f"💬 <b>Комментарии к задаче #{task_id}</b>\n\n"
-            for c in comments:
-                user_name = c.author.full_name if c.author else "—"
-                text += f"👤 {user_name} | {c.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-                text += f"{c.text}\n\n"
-        await message.answer(
-            text,
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"task_comment_menu:{task_id}")]
-            ])
-        )
+    # Показываем обновлённый список комментариев
+    await message.answer("💬 Комментарии:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"task_comment_list:{task_id}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task_comment_back:{task_id}")],
+    ]))
 
 @router.callback_query(F.data.startswith("task_comment_back:"))
 async def comment_back_to_task(callback: CallbackQuery, state: FSMContext):
@@ -282,6 +329,7 @@ async def comment_back_to_task(callback: CallbackQuery, state: FSMContext):
     await show_task_card(callback, state)
     await callback.answer()
 
+# ========== История ==========
 @router.callback_query(F.data.startswith("task_history:"))
 async def show_task_history(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -332,6 +380,7 @@ async def history_back_to_task(callback: CallbackQuery, state: FSMContext):
     await show_task_card(callback, state)
     await callback.answer()
 
+# ========== Фото и видео ==========
 @router.callback_query(F.data.startswith("task_video:"))
 async def show_task_videos(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -473,6 +522,7 @@ async def finish_add_photo(message: Message, state: FSMContext):
     else:
         await message.answer("Возврат в меню.")
 
+# ========== Ожидание ==========
 @router.callback_query(F.data.startswith("task_wait:"))
 async def start_wait(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
