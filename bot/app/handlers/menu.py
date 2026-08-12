@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
@@ -20,11 +20,20 @@ from app.keyboards.main_menu import main_menu_keyboard
 from app.keyboards.settings import settings_keyboard
 from app.keyboards.employees.roles import role_selection_keyboard
 from app.keyboards.employees.teams import team_selection_keyboard
+from app.keyboards.tasks import tasks_menu_keyboard
+from app.keyboards.passes import pass_main_menu_keyboard
+from app.keyboards.reception import reception_menu_keyboard
+from app.keyboards.reception_keys import key_main_menu_keyboard
+from app.keyboards.reception_documents import doc_main_menu_keyboard
+from app.keyboards.services import service_admin_keyboard, service_catalog_keyboard
+from app.keyboards.employees.admin import employees_admin_menu
 from app.states.employees.role_change import RoleChange
 from app.states.employees.team_change import TeamChange
 from app.states.feedback import Feedback
 from app.services.settings.service import get_user_settings, update_setting
 from app.services.employees.service import count_employees
+from app.services.services.service import get_all_services
+from app.keyboards.patrol import patrol_main_menu_keyboard
 
 router = Router()
 
@@ -283,16 +292,10 @@ async def show_detailed_statistics(message: Message):
     total_in_progress = await count_tasks_by_status("in_progress")
     total_accepted = await count_tasks_by_status("accepted")
 
-    # Приоритеты – используем все задачи (не только открытые)
     all_tasks = []
     for status in ["created", "accepted", "in_progress", "checking", "waiting", "paused", "closed"]:
         tasks = await get_tasks_by_status(status, limit=1000)
         all_tasks.extend(tasks)
-    priority_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-    for t in all_tasks:
-        if t.priority in priority_counts:
-            priority_counts[t.priority] += 1
-    
 
     from collections import Counter
     assignee_counter = Counter()
@@ -353,12 +356,6 @@ async def show_detailed_statistics(message: Message):
         f"Ожидают: {total_waiting}\n"
         f"Закрыто: {total_closed}\n"
         f"Принято: {total_accepted}\n\n"
-        f"<b>Приоритеты заявок:</b>\n"
-        f"🔴 Критический (5): {priority_counts.get(5, 0)}\n"
-        f"🟠 Высокий (4): {priority_counts.get(4, 0)}\n"
-        f"🟡 Средний (3): {priority_counts.get(3, 0)}\n"
-        f"🟢 Низкий (2): {priority_counts.get(2, 0)}\n"
-        f"⚪ Неважно (1): {priority_counts.get(1, 0)}\n\n"
         f"<b>Топ исполнителей:</b>\n"
         + ("\n".join(top_assignees) if top_assignees else "Нет данных") + "\n\n"
         f"<b>Задачи по командам:</b>\n"
@@ -377,9 +374,6 @@ async def show_detailed_statistics(message: Message):
         f"Возвращены: {returned_keys}\n\n"
         f"<b>📄 Документы</b>\n"
         + "\n".join([f"{doc_type}: {count}" for doc_type, count in doc_types.items()]) + "\n\n"
-        f"<b>🚶 Обходы</b>\n"
-        f"Активные: {active_patrols}\n"
-        f"Завершены: {completed_patrols}\n\n"
         f"<b>👥 Сотрудники</b>\n"
         f"Всего: {total_employees}\n"
         f"Активные: {active_employees}\n"
@@ -396,11 +390,43 @@ async def global_back_handler(message: Message, state: FSMContext):
     if not employee:
         await message.answer("Вы не зарегистрированы.")
         return
-    # Если пользователь в состоянии создания заявки или услуги – сбрасываем состояние и возвращаем в главное меню
+
     current_state = await state.get_state()
-    if current_state and (current_state.startswith("TaskCreate:") or current_state.startswith("ServiceOrderState:")):
-        await state.clear()
-        await message.answer("Действие отменено.", reply_markup=main_menu_keyboard(employee.role))
-        return
-    # Иначе – просто главное меню
+    if current_state:
+        if current_state.startswith("TaskCreate:") or current_state.startswith("TaskCommentState:"):
+            await state.clear()
+            await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
+            return
+        elif current_state.startswith("PassCreate:") or current_state.startswith("PassCommentState:"):
+            await state.clear()
+            await message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
+            return
+        elif current_state.startswith("DeliveryCreate:") or current_state.startswith("DeliveryCommentState:"):
+            await state.clear()
+            await message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
+            return
+        elif current_state.startswith("KeyCreate:") or current_state.startswith("KeyCommentState:"):
+            await state.clear()
+            await message.answer("🔑 Меню ключей:", reply_markup=key_main_menu_keyboard())
+            return
+        elif current_state.startswith("DocumentCreate:"):
+            await state.clear()
+            await message.answer("📄 Меню документов:", reply_markup=doc_main_menu_keyboard())
+            return
+        elif current_state.startswith("ServiceOrderState:") or current_state.startswith("ServiceEdit:"):
+            await state.clear()
+            if employee.role == UserRole.ADMIN:
+                await message.answer("💳 Управление услугами:", reply_markup=service_admin_keyboard())
+            else:
+                await message.answer("💳 Каталог услуг:", reply_markup=service_catalog_keyboard(await get_all_services()))
+            return
+        elif current_state.startswith("EmployeeSearch:"):
+            await state.clear()
+            await message.answer("👥 Управление сотрудниками:", reply_markup=employees_admin_menu())
+            return
+        elif current_state.startswith("PatrolCreate:"):
+            await state.clear()
+            await message.answer("🚶 Меню обходов:", reply_markup=patrol_main_menu_keyboard())
+            return
+
     await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))

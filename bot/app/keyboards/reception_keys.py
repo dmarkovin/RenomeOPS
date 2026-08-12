@@ -18,3 +18,14 @@ def key_list_keyboard(keys: List[Key], page: int, total_pages: int, status: str)
         buttons.append(nav_buttons)
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def key_main_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➕ Выдать ключ")],
+            [KeyboardButton(text="📋 Список выданных")],
+            [KeyboardButton(text="📋 Возвращённые")],
+            [KeyboardButton(text="⬅️ Назад")],
+        ],
+        resize_keyboard=True
+    )

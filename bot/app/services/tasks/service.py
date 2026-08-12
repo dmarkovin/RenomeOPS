@@ -34,7 +34,7 @@ def can_transition(old_status: str, new_status: str) -> bool:
 
 
 # ==========================
-# Создание заявки (с поддержкой видео)
+# Создание заявки (единственная версия)
 # ==========================
 async def create_task(
     title: str,
@@ -53,7 +53,6 @@ async def create_task(
     applicant_phone: str = None,
     priority: int = 3,
     photo_ids: List[str] = None,
-    video_ids: List[str] = None,
     is_paid: bool = False,
     is_feedback: bool = False,
     is_role_change: bool = False,
@@ -84,8 +83,7 @@ async def create_task(
             service_order_id=service_order_id,
             assigned_to=assigned_to,
             assigned_team=assigned_team,
-            status="created",
-            video_ids=video_ids or []  # сохраняем видео
+            status="created"
         )
         db.add(task)
         await db.flush()
@@ -225,7 +223,6 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            # Проверяем, что задача может быть назначена
             if task.status not in ('created', 'waiting'):
                 return None
             task.assigned_team = team
@@ -243,7 +240,7 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
 
 
 # ==========================
-# Назначение на конкретного сотрудника (с блокировкой)
+# Назначение на конкретного сотрудника (с блокировкой и перехватом)
 # ==========================
 async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
@@ -275,7 +272,7 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
 
 
 # ==========================
-# Взять задачу (исполнитель из команды) с блокировкой
+# Взять задачу (исполнитель из команды) с блокировкой и перехватом
 # ==========================
 async def take_task(task_id: int, user_id: int) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
@@ -283,15 +280,19 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            # Проверяем, что задача не назначена и находится в подходящем статусе
-            if task.assigned_to is not None or task.status not in ('created', 'waiting', 'accepted'):
-                return None
             employee = await db.get(User, user_id)
             if not employee or not employee.active:
                 return None
-            # Проверяем, что сотрудник из нужной команды
-            if task.assigned_team and employee.team != task.assigned_team:
+            # Разрешаем брать задачу, если она не закрыта и не на проверке
+            if task.status in ("closed", "checking"):
                 return None
+            # Если задача уже назначена, перехват разрешён только админу/консьержу/директору
+            if task.assigned_to is not None and employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+                return None
+            # Проверка команды для обычных исполнителей
+            if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+                if task.assigned_team and employee.team != task.assigned_team:
+                    return None
             task.assigned_to = user_id
             if task.status == "created":
                 task.status = "accepted"
@@ -360,7 +361,6 @@ async def change_status(
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            # Валидация перехода
             if not can_transition(task.status, new_status):
                 return None
             old_status = task.status
@@ -448,35 +448,6 @@ async def add_photo(
         await db.commit()
         await db.refresh(photo)
         return photo
-
-
-# ==========================
-# Добавить видео
-# ==========================
-async def add_video(
-    task_id: int,
-    user_id: int,
-    file_id: str,
-) -> Optional[Task]:
-    """Добавляет видео к задаче (сохраняет file_id в JSON-поле video_ids)"""
-    async with AsyncSessionLocal() as db:
-        task = await db.get(Task, task_id)
-        if not task:
-            return None
-        if task.video_ids is None:
-            task.video_ids = []
-        task.video_ids.append(file_id)
-        task.updated_at = datetime.utcnow()
-        history = TaskHistory(
-            task_id=task_id,
-            user_id=user_id,
-            action="VIDEO",
-            description=f"Добавлено видео (file_id: {file_id[:10]}...)",
-        )
-        db.add(history)
-        await db.commit()
-        await db.refresh(task)
-        return task
 
 
 # ==========================

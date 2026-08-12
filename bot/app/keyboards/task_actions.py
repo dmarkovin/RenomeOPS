@@ -34,10 +34,10 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
 
     # ====== Если пользователь является исполнителем ======
     if task.assigned_to == employee.id:
-        # Приостановить
+        # Приостановить (если задача в работе или принята)
         if status in ("accepted", "in_progress"):
             buttons.append([InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"task_pause:{task_id}")])
-        # Возобновить
+        # Возобновить (если на паузе)
         if status == "paused":
             buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
         # Выполнено (на проверку)

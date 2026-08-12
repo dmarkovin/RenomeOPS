@@ -175,6 +175,7 @@ async def confirm_create(message: Message, state: FSMContext):
         )
         await state.clear()
         await message.answer(f"✅ Документ #{doc.id} создан.", reply_markup=doc_main_menu_keyboard())
+        await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()

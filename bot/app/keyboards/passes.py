@@ -44,25 +44,31 @@ def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> Inlin
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def pass_action_keyboard(pass_id: int, status: str, user_role: str) -> InlineKeyboardMarkup:
+def pass_action_keyboard(pass_id: int, status: str, user_role: str, checked_in: bool = False, checked_out: bool = False) -> InlineKeyboardMarkup:
     buttons = []
-    # Динамическая кнопка в зависимости от статуса
+    # Определяем, какую кнопку показывать
     if status == "active":
-        # Если нет отметки въезда, показываем "Въезд"
-        # В реальности мы не знаем, есть ли checked_in_at, поэтому используем статус
-        # Но мы можем проверить по полю checked_in_at, но в модели оно есть
-        # Однако здесь мы не имеем доступа к объекту Pass, только к статусу.
-        # Мы добавим логику в обработчик, а здесь просто кнопка "Действие"
-        buttons.append([InlineKeyboardButton(text="✅ Въезд", callback_data=f"pass_checkin:{pass_id}")])
+        if not checked_in:
+            buttons.append([InlineKeyboardButton(text="✅ Въезд", callback_data=f"pass_checkin:{pass_id}")])
+        elif not checked_out:
+            buttons.append([InlineKeyboardButton(text="🚗 Выезд", callback_data=f"pass_checkout:{pass_id}")])
+        else:
+            # Если и въезд и выезд отмечены, показываем "Выполнено"
+            if user_role in ("CONCIERGE", "ADMIN", "DIRECTOR", "SECURITY"):
+                buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"pass_complete:{pass_id}")])
     elif status == "used":
-        buttons.append([InlineKeyboardButton(text="🚗 Выезд", callback_data=f"pass_checkout:{pass_id}")])
+        # Если статус used, но выезд не отмечен – показываем выезд
+        if not checked_out:
+            buttons.append([InlineKeyboardButton(text="🚗 Выезд", callback_data=f"pass_checkout:{pass_id}")])
+        else:
+            if user_role in ("CONCIERGE", "ADMIN", "DIRECTOR", "SECURITY"):
+                buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"pass_complete:{pass_id}")])
     elif status == "completed":
-        # Если уже выполнено, показываем только историю и комментарии
+        # Уже выполнено – никаких действий
         pass
+
     # Дополнительные кнопки
-    if user_role in ("CONCIERGE", "ADMIN", "DIRECTOR", "SECURITY") and status not in ("completed", "expired"):
-        buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"pass_complete:{pass_id}")])
-    if status not in ("expired", "completed") and user_role in ("CONCIERGE", "ADMIN", "DIRECTOR"):
+    if status not in ("completed", "expired") and user_role in ("CONCIERGE", "ADMIN", "DIRECTOR"):
         buttons.append([InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"pass_close:{pass_id}")])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="pass_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

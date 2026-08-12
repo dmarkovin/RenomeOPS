@@ -389,8 +389,8 @@ async def back_to_main_menu(message: Message, state: FSMContext):
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
-        await message.answer("Только для администратора и консьержа.")
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+        await message.answer("Только для администратора, консьержа и директора.")
         return
     await state.set_state(TaskSearch.query)
     await message.answer("Введите текст для поиска (ID, название, исполнитель):")

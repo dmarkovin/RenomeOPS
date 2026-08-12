@@ -332,6 +332,7 @@ async def confirm_create(message: Message, state: FSMContext):
             f"✅ Заявка #{task.id} создана!",
             reply_markup=kb
         )
+        # Сбрасываем клавиатуру
         await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
