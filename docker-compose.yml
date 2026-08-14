@@ -28,6 +28,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - TZ=Europe/Moscow
     depends_on:
       - postgres
       - redis
@@ -44,6 +46,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - TZ=Europe/Moscow
     depends_on:
       - postgres
       - redis

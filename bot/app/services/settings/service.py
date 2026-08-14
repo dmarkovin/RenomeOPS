@@ -29,7 +29,7 @@ async def update_setting(user_id: int, setting_name: str, value: bool) -> Option
             db.add(settings)
         if hasattr(settings, setting_name):
             setattr(settings, setting_name, value)
-            settings.updated_at = datetime.utcnow()
+            settings.updated_at = datetime.now()
             await db.commit()
             await db.refresh(settings)
             return settings

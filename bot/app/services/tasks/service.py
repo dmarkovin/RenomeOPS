@@ -218,7 +218,7 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
                 return None
             task.assigned_team = team
             task.assigned_to = None
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now()
             history = TaskHistory(
                 task_id=task.id,
                 user_id=assigned_by,
@@ -250,7 +250,7 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
             task.assigned_team = employee.team
             if task.status == "created":
                 task.status = "accepted"
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now()
             history = TaskHistory(
                 task_id=task.id,
                 user_id=assigned_by,
@@ -284,7 +284,7 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
             task.assigned_to = user_id
             if task.status == "created":
                 task.status = "accepted"
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now()
             history = TaskHistory(
                 task_id=task.id,
                 user_id=user_id,
@@ -319,7 +319,7 @@ async def transfer_task(
             old_name = old_assignee.full_name if old_assignee else "неизвестно"
             task.assigned_to = to_user_id
             task.assigned_team = new_assignee.team
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now()
             history_text = f"Передано от {old_name} к {new_assignee.full_name}"
             if comment:
                 history_text += f"\nКомментарий: {comment}"
@@ -353,9 +353,9 @@ async def change_status(
                 return None
             old_status = task.status
             task.status = new_status
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now()
             if new_status == "closed":
-                task.closed_at = datetime.utcnow()
+                task.closed_at = datetime.now()
                 tasks_closed_total.inc()
             if new_status == "waiting" and wait_until:
                 task.wait_until = wait_until
@@ -745,3 +745,12 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
             query = query.where(cast(Task.status, String) != "closed")
         result = await db.execute(query)
         return result.scalar()
+
+async def count_tasks_by_status(status: str, user_id: int = None) -> int:
+    """Возвращает количество задач с указанным статусом (опционально для пользователя)"""
+    async with AsyncSessionLocal() as db:
+        query = select(func.count(Task.id)).where(Task.status == status)
+        if user_id is not None:
+            query = query.where(or_(Task.assigned_to == user_id, Task.created_by == user_id))
+        result = await db.execute(query)
+        return result.scalar() or 0

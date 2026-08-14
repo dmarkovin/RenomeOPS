@@ -2,9 +2,10 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import TelegramObject
 
 from app.config import settings
-from app.database.db import init_db
+from app.database.db import init_db, close_db
 from app.handlers import routers
 from app.middlewares.db import DatabaseMiddleware
 from app.middlewares.auth import AuthMiddleware
@@ -26,6 +27,14 @@ dp.update.middleware(MetricsMiddleware())
 for router in routers:
     dp.include_router(router)
 
+# Глобальный обработчик ошибок
+@dp.errors()
+async def global_error_handler(update: TelegramObject, exception: Exception):
+    logger.error(f"Global error: {exception}", exc_info=True)
+    # Метрика уже инкрементится в MetricsMiddleware
+    # Можно добавить уведомление админам при критических ошибках
+    return True
+
 async def main():
     logger.info("Initializing database...")
     await init_db()
@@ -42,10 +51,15 @@ async def main():
             await update_business_metrics()
             await asyncio.sleep(60)  # раз в минуту
     asyncio.create_task(background_metrics())
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await close_db()
+        await bot.session.close()
+        logger.info("Bot stopped gracefully.")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped.")
+        logger.info("Bot stopped by user.")

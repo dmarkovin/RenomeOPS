@@ -32,23 +32,38 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
     if can_take and status not in ("closed", "checking"):
         buttons.append([InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take:{task_id}")])
 
-    # ====== Если пользователь является исполнителем ======
-    if task.assigned_to == employee.id:
-        # Приостановить
-        if status in ("accepted", "in_progress"):
+    # ====== Если пользователь является исполнителем или имеет право на управление ======
+    is_assignee = (task.assigned_to == employee.id)
+    is_team_member = (task.assigned_team == employee.team and task.assigned_to is None)
+    is_admin_concierge = (role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR))
+
+    # Приостановить (только для исполнителя или админа/консьержа/директора)
+    if status in ("accepted", "in_progress"):
+        if is_assignee or is_admin_concierge:
             buttons.append([InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"task_pause:{task_id}")])
-        # Возобновить
-        if status == "paused":
-            buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
-        # Выполнено (на проверку) – теперь через отдельный обработчик
-        if status in ("in_progress", "paused"):
+
+    # Возобновить (только для исполнителя)
+    if status == "paused" and is_assignee:
+        buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
+
+    # Выполнено (отправить на проверку) – расширенное условие
+    if status in ("in_progress", "paused"):
+        can_check = False
+        if is_assignee:
+            can_check = True
+        elif is_admin_concierge:
+            can_check = True
+        elif is_team_member:
+            can_check = True
+        if can_check:
             buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task_check_start:{task_id}")])
-        # Передать
-        if status != "closed":
-            buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
+
+    # Передать (только для исполнителя)
+    if status != "closed" and is_assignee:
+        buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
 
     # ====== Для администратора, консьержа, директора ======
-    if role in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
+    if is_admin_concierge:
         if status != "closed":
             buttons.append([InlineKeyboardButton(text="👤 Назначить", callback_data=f"task_assign:{task_id}")])
         if status == "checking":

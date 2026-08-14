@@ -13,7 +13,7 @@ def _add_history(pass_obj, action: str, user_id: int = None, details: str = "", 
         "user_id": user_id,
         "user_name": user_name or "Система",
         "details": details,
-        "created_at": datetime.utcnow().isoformat()
+        "created_at": datetime.now().isoformat()
     }
     pass_obj.history.append(entry)
 
@@ -32,6 +32,9 @@ async def create_pass(
     assigned_to: int = None,
     assigned_team: str = None
 ) -> Pass:
+    # Валидация дат
+    if start_date and end_date and end_date < start_date:
+        raise ValueError("Дата окончания не может быть раньше даты начала")
     async with AsyncSessionLocal() as db:
         if assigned_to:
             user = await db.get(User, assigned_to)
@@ -109,7 +112,7 @@ async def update_pass_status(pass_id: int, status: str, user_id: int = None) -> 
             return None
         old_status = p.status
         p.status = status
-        p.updated_at = datetime.utcnow()
+        p.updated_at = datetime.now()
         user_name = None
         if user_id:
             user = await db.get(User, user_id)
@@ -126,8 +129,8 @@ async def check_in(pass_id: int, user_id: int = None) -> Optional[Pass]:
         p = await db.get(Pass, pass_id)
         if not p or p.status != "active":
             return None
-        p.checked_in_at = datetime.utcnow()
-        p.updated_at = datetime.utcnow()
+        p.checked_in_at = datetime.now()
+        p.updated_at = datetime.now()
         user_name = None
         if user_id:
             user = await db.get(User, user_id)
@@ -144,8 +147,8 @@ async def check_out(pass_id: int, user_id: int = None) -> Optional[Pass]:
         p = await db.get(Pass, pass_id)
         if not p or p.status != "active":
             return None
-        p.checked_out_at = datetime.utcnow()
-        p.updated_at = datetime.utcnow()
+        p.checked_out_at = datetime.now()
+        p.updated_at = datetime.now()
         user_name = None
         if user_id:
             user = await db.get(User, user_id)
@@ -168,9 +171,9 @@ async def add_pass_comment(pass_id: int, user_id: int, author_name: str, text: s
             "author_id": user_id,
             "author_name": author_name,
             "text": text,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.now().isoformat()
         })
-        p.updated_at = datetime.utcnow()
+        p.updated_at = datetime.now()
         _add_history(p, "COMMENT", user_id, f"Добавлен комментарий: {text[:50]}", author_name)
         await db.commit()
         return True

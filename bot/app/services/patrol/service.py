@@ -57,8 +57,8 @@ async def complete_patrol(patrol_id: int) -> Optional[Patrol]:
         if not patrol:
             return None
         patrol.status = "completed"
-        patrol.end_time = datetime.utcnow()
-        patrol.updated_at = datetime.utcnow()
+        patrol.end_time = datetime.now()
+        patrol.updated_at = datetime.now()
         await db.commit()
         await db.refresh(patrol)
         return patrol

@@ -47,7 +47,7 @@ async def update_delivery_status(delivery_id: int, status: str) -> Optional[Deli
         if not delivery:
             return None
         delivery.status = status
-        delivery.updated_at = datetime.utcnow()
+        delivery.updated_at = datetime.now()
         await db.commit()
         await db.refresh(delivery)
         return delivery
@@ -63,9 +63,9 @@ async def add_delivery_comment(delivery_id: int, user_id: int, author_name: str,
             "author_id": user_id,
             "author_name": author_name,
             "text": text,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.now().isoformat()
         })
-        delivery.updated_at = datetime.utcnow()
+        delivery.updated_at = datetime.now()
         await db.commit()
         return True
 

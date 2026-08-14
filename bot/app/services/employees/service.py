@@ -36,7 +36,7 @@ async def activate_employee(user_id: int, telegram_id: int, username: str) -> Op
             user.telegram_id = telegram_id
             user.username = username
             user.active = True
-            user.registered_at = datetime.utcnow()
+            user.registered_at = datetime.now()
             # Инвайт-код остаётся прежним, но после активации он больше не используется
             await db.commit()
             await db.refresh(user)

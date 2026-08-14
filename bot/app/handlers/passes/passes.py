@@ -22,7 +22,6 @@ from app.keyboards.date_picker import date_selection_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
 from app.services.notification_service import notify_user, notify_concierges, notify_security, notify_team
 from app.database import AsyncSessionLocal
-from app.metrics import bot_errors_total
 
 router = Router()
 
@@ -55,8 +54,7 @@ async def safe_delete_message(message):
 async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
     try:
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-    except Exception as e:
-        bot_errors_total.labels(error_type=type(e).__name__).inc()
+    except Exception:
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
@@ -97,11 +95,13 @@ async def process_type(message: Message, state: FSMContext):
     if text not in ("👤 Гость", "🚗 Автомобиль"):
         await message.answer("Пожалуйста, выберите кнопкой.")
         return
-    await state.update_data(type="guest" if text == "👤 Гость" else "car")
-    await state.set_state(PassCreate.guest_name if text == "👤 Гость" else PassCreate.car_number)
     if text == "👤 Гость":
+        await state.update_data(type="guest", car_number="")  # <-- устанавливаем пустую строку для car_number
+        await state.set_state(PassCreate.guest_name)
         await message.answer("Введите имя гостя:", reply_markup=ReplyKeyboardRemove())
-    else:
+    else:  # Автомобиль
+        await state.update_data(type="car", guest_name="")  # <-- устанавливаем пустую строку для guest_name
+        await state.set_state(PassCreate.car_number)
         await message.answer("Введите номер автомобиля:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(PassCreate.guest_name)
@@ -306,19 +306,32 @@ async def confirm_create_pass(message: Message, state: FSMContext):
         await state.clear()
         return
     try:
+        # Подготовка данных с гарантией не-None для обязательных полей
+        pass_type = data.get("type")
+        guest_name = data.get("guest_name") or ""
+        car_number = data.get("car_number") or ""
+        apartment = data.get("apartment")
+        purpose = data.get("purpose") or ""
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")
+        comment = data.get("comment", "")
+        photo_ids = data.get("photos", [])
+        assigned_to = data.get("assigned_to")
+        assigned_team = data.get("assigned_team")
+
         p = await create_pass(
-            type=data.get("type"),
-            guest_name=data.get("guest_name"),
-            car_number=data.get("car_number"),
-            apartment=data.get("apartment"),
-            purpose=data.get("purpose"),
-            start_date=data.get("start_date"),
-            end_date=data.get("end_date"),
-            comment=data.get("comment", ""),
-            photo_ids=data.get("photos", []),
+            type=pass_type,
+            guest_name=guest_name,
+            car_number=car_number,
+            apartment=apartment,
+            purpose=purpose,
+            start_date=start_date,
+            end_date=end_date,
+            comment=comment,
+            photo_ids=photo_ids,
             created_by=employee.id,
-            assigned_to=data.get("assigned_to"),
-            assigned_team=data.get("assigned_team")
+            assigned_to=assigned_to,
+            assigned_team=assigned_team
         )
         await state.clear()
         if p.assigned_to:
@@ -332,8 +345,9 @@ async def confirm_create_pass(message: Message, state: FSMContext):
         await message.answer(f"✅ Пропуск #{p.id} создан!", reply_markup=pass_main_menu_keyboard())
         await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
-        bot_errors_total.labels(error_type=type(e).__name__).inc()
-        await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
+        # Показываем детальную ошибку
+        error_text = str(e) if str(e) else "Неизвестная ошибка при создании пропуска"
+        await message.answer(f"❌ Ошибка: {error_text}", parse_mode=None)
         await state.clear()
 
 @router.message(StateFilter(PassCreate.confirm), F.text == "❌ Отмена")

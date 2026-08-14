@@ -119,7 +119,7 @@ async def update_order_status(order_id: int, status: str) -> Optional[ServiceOrd
         if not order:
             return None
         order.status = status
-        order.updated_at = datetime.utcnow()
+        order.updated_at = datetime.now()
         await db.commit()
         await db.refresh(order)
         return order

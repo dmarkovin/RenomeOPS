@@ -15,6 +15,7 @@ from app.keyboards.services import (
     service_admin_list_keyboard,
     service_admin_edit_keyboard
 )
+import logging
 
 router = Router()
 
@@ -27,8 +28,19 @@ class ServiceEdit(StatesGroup):
 
 # ===== Вспомогательная функция проверки прав =====
 async def check_admin(user_id: int) -> bool:
-    employee = await get_employee(user_id)
-    return employee is not None and employee.role == UserRole.ADMIN
+    try:
+        employee = await get_employee(user_id)
+        if not employee:
+            logging.warning(f"check_admin: пользователь {user_id} не найден")
+            return False
+        # Сравниваем со значением Enum или строкой
+        is_admin = employee.role == UserRole.ADMIN or str(employee.role) == "ADMIN"
+        if not is_admin:
+            logging.warning(f"check_admin: пользователь {user_id} имеет роль {employee.role}, требуется ADMIN")
+        return is_admin
+    except Exception as e:
+        logging.error(f"check_admin: ошибка {e}")
+        return False
 
 # ===== Главное меню управления услугами =====
 @router.message(F.text == "💳 Управление услугами")
@@ -70,8 +82,6 @@ async def service_admin_create(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ServiceEdit.name)
     await callback.message.answer("Введите название услуги:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
-
-# ... (остальные обработчики без изменений, но я дам полный файл)
 
 @router.message(ServiceEdit.name)
 async def service_edit_name(message: Message, state: FSMContext):

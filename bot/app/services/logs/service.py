@@ -25,7 +25,7 @@ async def add_log(
 
             description=description,
 
-            created_at=datetime.utcnow()
+            created_at=datetime.now()
 
         )
 

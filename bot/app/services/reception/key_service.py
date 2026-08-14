@@ -45,8 +45,8 @@ async def return_key(key_id: int) -> Optional[Key]:
         if not key or key.status == "returned":
             return None
         key.status = "returned"
-        key.returned_at = datetime.utcnow()
-        key.updated_at = datetime.utcnow()
+        key.returned_at = datetime.now()
+        key.updated_at = datetime.now()
         await db.commit()
         await db.refresh(key)
         return key
@@ -62,9 +62,9 @@ async def add_key_comment(key_id: int, user_id: int, author_name: str, text: str
             "author_id": user_id,
             "author_name": author_name,
             "text": text,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.now().isoformat()
         })
-        key.updated_at = datetime.utcnow()
+        key.updated_at = datetime.now()
         await db.commit()
         return True
 

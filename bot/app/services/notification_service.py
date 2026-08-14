@@ -6,9 +6,11 @@ from app.services.settings.service import get_user_settings
 from app.database.models import UserRole, Team
 import asyncio
 import logging
+import time
 
 bot: Bot = None
-_settings_cache = {}  # простой кеш для настроек уведомлений
+_settings_cache = {}  # кеш: ключ = f"{telegram_id}:{notification_type}", значение = (результат, время)
+CACHE_TTL = 300  # 5 минут
 
 def set_bot(bot_instance: Bot):
     global bot
@@ -17,20 +19,27 @@ def set_bot(bot_instance: Bot):
 async def _can_send(telegram_id: int, notification_type: str) -> bool:
     """Проверяет, включены ли уведомления данного типа для пользователя по его telegram_id"""
     try:
-        # Кешируем настройки на время жизни сессии (или на 5 минут)
         cache_key = f"{telegram_id}:{notification_type}"
+        now = time.time()
+        # Проверяем кеш
         if cache_key in _settings_cache:
-            return _settings_cache[cache_key]
+            value, cached_at = _settings_cache[cache_key]
+            if now - cached_at < CACHE_TTL:
+                return value
+            else:
+                # Кеш устарел, удаляем
+                del _settings_cache[cache_key]
+
         employee = await get_employee(telegram_id)
         if not employee:
-            _settings_cache[cache_key] = False
+            _settings_cache[cache_key] = (False, now)
             return False
         settings = await get_user_settings(employee.id)
         if not settings:
-            _settings_cache[cache_key] = True
+            _settings_cache[cache_key] = (True, now)
             return True
         result = getattr(settings, notification_type, True)
-        _settings_cache[cache_key] = result
+        _settings_cache[cache_key] = (result, now)
         return result
     except Exception as e:
         logging.error(f"Ошибка в _can_send для telegram_id {telegram_id}: {e}")
@@ -94,7 +103,6 @@ async def notify_concierges(text: str, notification_type: str = "notify_checking
         if emp.telegram_id and await _can_send(emp.telegram_id, notification_type):
             await _send_message(emp.telegram_id, text)
 
-# ===== ДОБАВЛЕНА ФУНКЦИЯ notify_security =====
 async def notify_security(text: str, notification_type: str = "notify_security"):
     if not bot:
         return
