@@ -5,12 +5,13 @@ from app.database import AsyncSessionLocal
 from app.database.models import Pass, User, Team
 
 
-def _add_history(pass_obj, action: str, user_id: int = None, details: str = ""):
+def _add_history(pass_obj, action: str, user_id: int = None, details: str = "", user_name: str = None):
     if pass_obj.history is None:
         pass_obj.history = []
     entry = {
         "action": action,
         "user_id": user_id,
+        "user_name": user_name or "Система",
         "details": details,
         "created_at": datetime.utcnow().isoformat()
     }
@@ -36,6 +37,12 @@ async def create_pass(
             user = await db.get(User, assigned_to)
             if not user or not user.active:
                 raise ValueError("Назначенный сотрудник не активен")
+        # Получаем имя создателя
+        creator_name = None
+        if created_by:
+            creator = await db.get(User, created_by)
+            if creator:
+                creator_name = creator.full_name
         p = Pass(
             type=type,
             guest_name=guest_name,
@@ -55,7 +62,7 @@ async def create_pass(
         )
         db.add(p)
         await db.flush()
-        _add_history(p, "CREATED", created_by, f"Создан пропуск типа {type}")
+        _add_history(p, "CREATED", created_by, f"Создан пропуск типа {type}", creator_name)
         await db.commit()
         await db.refresh(p)
         return p
@@ -103,7 +110,12 @@ async def update_pass_status(pass_id: int, status: str, user_id: int = None) -> 
         old_status = p.status
         p.status = status
         p.updated_at = datetime.utcnow()
-        _add_history(p, "STATUS_CHANGE", user_id, f"Статус изменён с {old_status} на {status}")
+        user_name = None
+        if user_id:
+            user = await db.get(User, user_id)
+            if user:
+                user_name = user.full_name
+        _add_history(p, "STATUS_CHANGE", user_id, f"Статус изменён с {old_status} на {status}", user_name)
         await db.commit()
         await db.refresh(p)
         return p
@@ -116,7 +128,12 @@ async def check_in(pass_id: int, user_id: int = None) -> Optional[Pass]:
             return None
         p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
-        _add_history(p, "CHECK_IN", user_id, "Отмечен въезд")
+        user_name = None
+        if user_id:
+            user = await db.get(User, user_id)
+            if user:
+                user_name = user.full_name
+        _add_history(p, "CHECK_IN", user_id, "Отмечен въезд", user_name)
         await db.commit()
         await db.refresh(p)
         return p
@@ -129,7 +146,12 @@ async def check_out(pass_id: int, user_id: int = None) -> Optional[Pass]:
             return None
         p.checked_out_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
-        _add_history(p, "CHECK_OUT", user_id, "Отмечен выезд")
+        user_name = None
+        if user_id:
+            user = await db.get(User, user_id)
+            if user:
+                user_name = user.full_name
+        _add_history(p, "CHECK_OUT", user_id, "Отмечен выезд", user_name)
         await db.commit()
         await db.refresh(p)
         return p
@@ -149,7 +171,7 @@ async def add_pass_comment(pass_id: int, user_id: int, author_name: str, text: s
             "created_at": datetime.utcnow().isoformat()
         })
         p.updated_at = datetime.utcnow()
-        _add_history(p, "COMMENT", user_id, f"Добавлен комментарий: {text[:50]}")
+        _add_history(p, "COMMENT", user_id, f"Добавлен комментарий: {text[:50]}", author_name)
         await db.commit()
         return True
 

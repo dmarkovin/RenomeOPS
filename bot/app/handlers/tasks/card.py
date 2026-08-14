@@ -71,10 +71,29 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
             await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
             return
     status_emoji = get_task_status_emoji(task.status)
+    # Формируем адрес
+    address_parts = []
+    if task.building:
+        address_parts.append(f"корп. {task.building}")
+    if task.entrance:
+        address_parts.append(f"под. {task.entrance}")
+    if task.floor:
+        address_parts.append(f"эт. {task.floor}")
+    if task.apartment:
+        address_parts.append(f"кв. {task.apartment}")
+    elif task.location_type == "common_area":
+        address_parts.append(f"общая зона")
+    elif task.location_type == "parking":
+        if task.parking_level is not None and task.parking_spot is not None:
+            address_parts.append(f"паркинг {task.parking_level} эт., место {task.parking_spot}")
+    elif task.location_type == "cellar" and task.cellar is not None:
+        address_parts.append(f"келлер {task.cellar}")
+    address = ", ".join(address_parts) if address_parts else "—"
+
     text = (
         f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
         f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-        f"🏢 <b>Адрес:</b> {task.building or '—'} {task.apartment or '—'}\n"
+        f"🏢 <b>Адрес:</b> {address}\n"
         f"🔢 <b>Приоритет:</b> {task.priority}\n"
         f"📊 <b>Статус:</b> {task.status}\n\n"
         f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
@@ -85,6 +104,12 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
     if task.closed_at:
         text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
+
+    # Добавляем информацию о вложениях
+    if task.photos:
+        text += f"📷 Фото: {len(task.photos)} шт.\n"
+    if task.video_ids:
+        text += f"📹 Видео: {len(task.video_ids)} шт.\n"
 
     await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
     await callback.answer()
@@ -187,13 +212,10 @@ async def finish_check_photo(message: Message, state: FSMContext):
         await message.answer("Ошибка")
         await state.clear()
         return
-    # Сохраняем комментарий
     if comment:
         await add_comment(task_id, employee.id, comment)
-    # Сохраняем фото
     for file_id in photos:
         await add_photo(task_id, employee.id, file_id)
-    # Меняем статус на checking
     task = await change_status(task_id, "checking", employee.id, comment)
     if task:
         await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}\nКомментарий: {comment}")
@@ -213,7 +235,6 @@ async def change_task_status(callback: CallbackQuery, state: FSMContext):
     status_map = {
         "accept": "accepted",
         "start": "in_progress",
-        "check": "checking",  # больше не используется, но оставим для совместимости
         "close": "closed",
         "rework": "in_progress",
         "pause": "paused",
@@ -316,7 +337,6 @@ async def process_add_comment(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Ошибка добавления комментария.")
     await state.clear()
-    # Показываем обновлённый список комментариев
     await message.answer("💬 Комментарии:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"task_comment_list:{task_id}")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"task_comment_back:{task_id}")],

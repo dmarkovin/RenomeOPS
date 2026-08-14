@@ -130,7 +130,6 @@ async def process_apartment(message: Message, state: FSMContext):
 async def process_purpose(message: Message, state: FSMContext):
     text = message.text.strip()
     await state.update_data(purpose=text if text != "-" else "")
-    # Переходим к выбору даты начала
     await state.set_state(PassCreate.select_start_date)
     await message.answer("Выберите дату начала действия пропуска:", reply_markup=date_selection_keyboard("start"))
 
@@ -331,7 +330,7 @@ async def confirm_create_pass(message: Message, state: FSMContext):
         await notify_concierges(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await notify_security(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await message.answer(f"✅ Пропуск #{p.id} создан!", reply_markup=pass_main_menu_keyboard())
-        
+        await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         bot_errors_total.labels(error_type=type(e).__name__).inc()
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
@@ -505,7 +504,6 @@ async def show_pass_card(callback: CallbackQuery):
     history_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{p.id}")]
     ])
-    # Формируем клавиатуру действий с учётом статуса и отметок
     action_kb = pass_action_keyboard(
         p.id,
         p.status,
@@ -527,12 +525,7 @@ async def show_pass_history(callback: CallbackQuery):
     text = f"📜 <b>История пропуска #{pass_id}</b>\n\n"
     for entry in history:
         action = entry.get("action", "—")
-        user_id = entry.get("user_id")
-        user_name = "Система"
-        if user_id:
-            user = await get_employee_by_id(user_id)
-            if user:
-                user_name = user.full_name
+        user_name = entry.get("user_name", "Система")
         details = entry.get("details", "")
         created_at = entry.get("created_at")
         if isinstance(created_at, str):
@@ -558,7 +551,7 @@ async def show_pass_history(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== Действия с пропуском ==========
+# ========== Действия ==========
 @router.callback_query(F.data.startswith("pass_checkin:"))
 async def pass_checkin(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])

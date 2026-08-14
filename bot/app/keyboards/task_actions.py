@@ -34,15 +34,15 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
 
     # ====== Если пользователь является исполнителем ======
     if task.assigned_to == employee.id:
-        # Приостановить (если задача в работе или принята)
+        # Приостановить
         if status in ("accepted", "in_progress"):
             buttons.append([InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"task_pause:{task_id}")])
-        # Возобновить (если на паузе)
+        # Возобновить
         if status == "paused":
             buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
-        # Выполнено (на проверку)
+        # Выполнено (на проверку) – теперь через отдельный обработчик
         if status in ("in_progress", "paused"):
-            buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task_status:{task_id}:check")])
+            buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task_check_start:{task_id}")])
         # Передать
         if status != "closed":
             buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
@@ -63,7 +63,7 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
 
     # ====== Общие кнопки ======
     buttons.append([
-        InlineKeyboardButton(text="💬 Комментарии", callback_data=f"task_comment_menu:{task_id}"),
+        InlineKeyboardButton(text="💬 Комментарии", callback_data=f"task_comment_list:{task_id}"),
         InlineKeyboardButton(text="📷 Фото", callback_data=f"task_photo:{task_id}"),
     ])
     buttons.append([

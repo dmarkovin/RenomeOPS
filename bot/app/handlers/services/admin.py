@@ -25,10 +25,15 @@ class ServiceEdit(StatesGroup):
     category = State()
     confirm_delete = State()
 
+# ===== Вспомогательная функция проверки прав =====
+async def check_admin(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    return employee is not None and employee.role == UserRole.ADMIN
+
+# ===== Главное меню управления услугами =====
 @router.message(F.text == "💳 Управление услугами")
 async def service_admin_menu(message: Message, state: FSMContext, page: int = 1):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role != UserRole.ADMIN:
+    if not await check_admin(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     await state.update_data(service_admin_page=page)
@@ -48,20 +53,31 @@ async def service_admin_menu(message: Message, state: FSMContext, page: int = 1)
 
 @router.callback_query(F.data.startswith("service_admin_page:"))
 async def service_admin_page(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     page = int(callback.data.split(":")[1])
     await service_admin_menu(callback.message, state, page)
     await callback.answer()
 
 @router.callback_query(F.data == "service_admin_create")
 async def service_admin_create(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     await callback.message.delete()
     await state.clear()
     await state.set_state(ServiceEdit.name)
     await callback.message.answer("Введите название услуги:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
+# ... (остальные обработчики без изменений, но я дам полный файл)
+
 @router.message(ServiceEdit.name)
 async def service_edit_name(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        return
     data = await state.get_data()
     service_id = data.get("service_id")
     if service_id:
@@ -76,6 +92,9 @@ async def service_edit_name(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.description)
 async def service_edit_description(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        return
     data = await state.get_data()
     service_id = data.get("service_id")
     if service_id:
@@ -90,6 +109,9 @@ async def service_edit_description(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.price)
 async def service_edit_price(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        return
     data = await state.get_data()
     service_id = data.get("service_id")
     try:
@@ -111,6 +133,9 @@ async def service_edit_price(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.category)
 async def service_edit_category(message: Message, state: FSMContext):
+    if not await check_admin(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        return
     data = await state.get_data()
     service_id = data.get("service_id")
     if service_id:
@@ -135,6 +160,9 @@ async def service_edit_category(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_admin_edit:"))
 async def service_admin_edit_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     service_id = int(callback.data.split(":")[1])
     service = await get_service(service_id)
     if not service:
@@ -154,6 +182,9 @@ async def service_admin_edit_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_name:"))
 async def service_edit_name_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     service_id = int(callback.data.split(":")[1])
     await state.update_data(service_id=service_id)
     await state.set_state(ServiceEdit.name)
@@ -163,6 +194,9 @@ async def service_edit_name_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_description:"))
 async def service_edit_description_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     service_id = int(callback.data.split(":")[1])
     await state.update_data(service_id=service_id)
     await state.set_state(ServiceEdit.description)
@@ -172,6 +206,9 @@ async def service_edit_description_start(callback: CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data.startswith("service_edit_price:"))
 async def service_edit_price_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     service_id = int(callback.data.split(":")[1])
     await state.update_data(service_id=service_id)
     await state.set_state(ServiceEdit.price)
@@ -181,6 +218,9 @@ async def service_edit_price_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_category:"))
 async def service_edit_category_start(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     service_id = int(callback.data.split(":")[1])
     await state.update_data(service_id=service_id)
     await state.set_state(ServiceEdit.category)
@@ -190,6 +230,9 @@ async def service_edit_category_start(callback: CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data.startswith("service_edit_active:"))
 async def service_edit_active(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     service_id = int(callback.data.split(":")[1])
     service = await get_service(service_id)
     if not service:
@@ -201,12 +244,18 @@ async def service_edit_active(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_back:"))
 async def service_edit_back(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     await callback.message.delete()
     await service_admin_menu(callback.message, state)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("service_admin_delete:"))
 async def service_admin_delete(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     service_id = int(callback.data.split(":")[1])
     service = await get_service(service_id)
     if not service:
@@ -226,6 +275,9 @@ async def service_admin_delete(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(StateFilter(ServiceEdit.confirm_delete), F.data == "service_admin_delete_confirm")
 async def service_admin_delete_confirm(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     data = await state.get_data()
     service_id = data.get("service_id")
     success = await delete_service(service_id)
@@ -239,6 +291,9 @@ async def service_admin_delete_confirm(callback: CallbackQuery, state: FSMContex
 
 @router.callback_query(StateFilter(ServiceEdit.confirm_delete), F.data == "service_admin_delete_cancel")
 async def service_admin_delete_cancel(callback: CallbackQuery, state: FSMContext):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     await state.clear()
     await callback.message.delete()
     await service_admin_menu(callback.message, state)
@@ -246,6 +301,9 @@ async def service_admin_delete_cancel(callback: CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data == "service_admin_back")
 async def service_admin_back(callback: CallbackQuery):
+    if not await check_admin(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
     if employee and employee.role == UserRole.ADMIN:
@@ -255,6 +313,9 @@ async def service_admin_back(callback: CallbackQuery):
 
 @router.message(F.text == "⬅️ Назад")
 async def back_from_services(message: Message):
+    if not await check_admin(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        return
     employee = await get_employee(message.from_user.id)
     if employee and employee.role == UserRole.ADMIN:
         from app.keyboards.admin import admin_keyboard
