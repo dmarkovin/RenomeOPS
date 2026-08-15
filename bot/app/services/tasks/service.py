@@ -146,7 +146,11 @@ async def get_open_tasks(limit: int = 20, offset: int = 0, user_id: int = None) 
                 query = query.where(Task.is_feedback == False)
         query = query.order_by(Task.priority.desc(), Task.created_at.desc())
         query = query.limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.photos)
+        )
         result = await db.execute(query)
         return result.scalars().all()
 
@@ -157,25 +161,26 @@ async def get_tasks_for_employee(
     limit: int = 20,
     offset: int = 0,
 ) -> List[Task]:
+    """Возвращает только личные задачи пользователя (где он исполнитель)."""
     async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
             return []
-
-        query = select(Task).where(
-            or_(
-                Task.assigned_to == user_id,
-                cast(Task.assigned_team, String) == employee.team.value,
-            )
-        )
+        query = select(Task).where(Task.assigned_to == user_id)
         if employee.role != UserRole.ADMIN:
             query = query.where(Task.is_feedback == False)
-        if employee.role != UserRole.ADMIN:
             query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
         if status:
             query = query.where(cast(Task.status, String) == status)
+        else:
+            # Не показываем закрытые задачи в основном списке
+            query = query.where(cast(Task.status, String) != "closed")
         query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.photos)
+        )
         result = await db.execute(query)
         return result.scalars().all()
 
@@ -193,15 +198,9 @@ async def count_tasks_for_employee(user_id: int, status: str = None) -> int:
         employee = await db.get(User, user_id)
         if not employee:
             return 0
-        query = select(func.count()).select_from(Task).where(
-            or_(
-                Task.assigned_to == user_id,
-                cast(Task.assigned_team, String) == employee.team.value,
-            )
-        )
+        query = select(func.count()).select_from(Task).where(Task.assigned_to == user_id)
         if employee.role != UserRole.ADMIN:
             query = query.where(Task.is_feedback == False)
-        if employee.role != UserRole.ADMIN:
             query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
         if status:
             query = query.where(cast(Task.status, String) == status)
@@ -363,6 +362,8 @@ async def change_status(
                 task.closed_at = datetime.now()
             if new_status == "waiting" and wait_until:
                 task.wait_until = wait_until
+            elif new_status == "paused" and wait_until:
+                task.wait_until = wait_until
             else:
                 task.wait_until = None
 
@@ -518,7 +519,11 @@ async def get_tasks_by_status(status: str, limit: int = 20, offset: int = 0, use
                 query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
 
         query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.photos)
+        )
         result = await db.execute(query)
         return result.scalars().all()
 
@@ -571,7 +576,11 @@ async def get_paid_closed_tasks(limit: int = 20, offset: int = 0, user_id: int =
                 query = query.where(Task.is_feedback == False)
                 query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
         query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.photos)
+        )
         result = await db.execute(query)
         return result.scalars().all()
 
@@ -629,7 +638,11 @@ async def get_regular_closed_tasks(limit: int = 20, offset: int = 0, user_id: in
                 query = query.where(Task.is_feedback == False)
                 query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
         query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.photos)
+        )
         result = await db.execute(query)
         return result.scalars().all()
 
@@ -687,7 +700,11 @@ async def get_checking_tasks(limit: int = 20, offset: int = 0) -> List[Task]:
             .order_by(Task.created_at.desc())
             .limit(limit)
             .offset(offset)
-            .options(selectinload(Task.creator), selectinload(Task.assignee))
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.photos)
+            )
         )
         return result.scalars().all()
 
@@ -706,6 +723,7 @@ async def get_team_tasks(
     limit: int = 20,
     offset: int = 0,
 ) -> List[Task]:
+    """Возвращает задачи команды, у которых ещё нет исполнителя (новые задачи)."""
     async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
@@ -724,7 +742,42 @@ async def get_team_tasks(
         else:
             query = query.where(cast(Task.status, String) != "closed")
         query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.photos)
+        )
+        result = await db.execute(query)
+        return result.scalars().all()
+
+
+async def get_team_all_tasks(
+    user_id: int,
+    status: str = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[Task]:
+    """Возвращает все задачи команды, включая те, у которых уже есть исполнитель."""
+    async with AsyncSessionLocal() as db:
+        employee = await db.get(User, user_id)
+        if not employee:
+            return []
+        query = select(Task).where(
+            cast(Task.assigned_team, String) == employee.team.value
+        )
+        if employee.role != UserRole.ADMIN:
+            query = query.where(Task.is_feedback == False)
+            query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
+        if status:
+            query = query.where(cast(Task.status, String) == status)
+        else:
+            query = query.where(cast(Task.status, String) != "closed")
+        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.photos)
+        )
         result = await db.execute(query)
         return result.scalars().all()
 
@@ -749,72 +802,3 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
             query = query.where(cast(Task.status, String) != "closed")
         result = await db.execute(query)
         return result.scalar()
-
-
-async def get_team_all_tasks(
-    user_id: int,
-    status: str = None,
-    limit: int = 20,
-    offset: int = 0,
-) -> List[Task]:
-    """Возвращает все задачи команды пользователя, включая назначенные."""
-    async with AsyncSessionLocal() as db:
-        employee = await db.get(User, user_id)
-        if not employee:
-            return []
-        query = select(Task).where(
-            cast(Task.assigned_team, String) == employee.team.value
-        )
-        if status:
-            query = query.where(cast(Task.status, String) == status)
-        else:
-            query = query.where(cast(Task.status, String) != "closed")
-        
-        if employee.role != UserRole.ADMIN:
-            query = query.where(Task.is_feedback == False)
-            query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
-        
-        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(
-            selectinload(Task.creator),
-            selectinload(Task.assignee),
-            selectinload(Task.comments).selectinload(Comment.author),
-            selectinload(Task.photos),
-            selectinload(Task.history).selectinload(TaskHistory.user),
-        )
-        result = await db.execute(query)
-        return result.scalars().all()
-
-async def get_team_all_tasks(
-    user_id: int,
-    status: str = None,
-    limit: int = 20,
-    offset: int = 0,
-) -> List[Task]:
-    """Возвращает все задачи команды пользователя, включая назначенные."""
-    async with AsyncSessionLocal() as db:
-        employee = await db.get(User, user_id)
-        if not employee:
-            return []
-        query = select(Task).where(
-            cast(Task.assigned_team, String) == employee.team.value
-        )
-        if status:
-            query = query.where(cast(Task.status, String) == status)
-        else:
-            query = query.where(cast(Task.status, String) != "closed")
-        
-        if employee.role != UserRole.ADMIN:
-            query = query.where(Task.is_feedback == False)
-            query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
-        
-        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(
-            selectinload(Task.creator),
-            selectinload(Task.assignee),
-            selectinload(Task.comments).selectinload(Comment.author),
-            selectinload(Task.photos),
-            selectinload(Task.history).selectinload(TaskHistory.user),
-        )
-        result = await db.execute(query)
-        return result.scalars().all()

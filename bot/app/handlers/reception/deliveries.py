@@ -39,7 +39,6 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
-# ===== Проверка прав для доставки =====
 def has_delivery_access(role) -> bool:
     if hasattr(role, 'value'):
         role = role.value
@@ -159,6 +158,7 @@ async def list_active_deliveries(message: Message, state: FSMContext, page: int 
         return
     await show_delivery_list(message, state, status=["pending", "received"], title="📦 Активные посылки", page=page)
 
+# ========== Архив доставок ==========
 @router.message(F.text == "📦 Архив доставок")
 async def list_completed_deliveries(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)

@@ -3,18 +3,39 @@ from app.database.models import Task
 from typing import List
 
 def tasks_menu_keyboard(role: str) -> ReplyKeyboardMarkup:
-    buttons = [
-        [KeyboardButton(text="➕ Создать заявку")],
-        [KeyboardButton(text="📋 Список заявок")],
-        [KeyboardButton(text="📋 Мои задачи")],
-        [KeyboardButton(text="📋 Все задачи")],  # изменено с "Новые задачи"
-    ]
+    buttons = []
+    
+    # Кнопка создания заявки только для администраторов, консьержей и директоров
+    if role in ("ADMIN", "CONCIERGE", "DIRECTOR"):
+        buttons.append([KeyboardButton(text="➕ Создать заявку")])
+    
+    # Список заявок (все открытые) только для администраторов, консьержей и директоров
+    if role in ("ADMIN", "CONCIERGE", "DIRECTOR"):
+        buttons.append([KeyboardButton(text="📋 Список заявок")])
+    
+    # Мои задачи – для всех (только личные задачи, где пользователь исполнитель)
+    buttons.append([KeyboardButton(text="📋 Мои задачи")])
+    
+    # Все задачи команды – для всех, кто состоит в команде
+    if role not in ("ADMIN", "DIRECTOR"):  # для админов и директоров это дублирует "Список заявок", но можно оставить
+        buttons.append([KeyboardButton(text="📋 Все задачи")])
+    else:
+        # Для админов/директоров тоже добавим, чтобы они могли видеть задачи команды
+        buttons.append([KeyboardButton(text="📋 Все задачи")])
+    
+    # Ожидают проверки – только для администраторов, консьержей и директоров
     if role in ("ADMIN", "CONCIERGE", "DIRECTOR"):
         buttons.append([KeyboardButton(text="📋 Ожидают проверки")])
         buttons.append([KeyboardButton(text="📦 Архив")])
+    
+    # Статистика – только для ADMIN и DIRECTOR
     if role in ("ADMIN", "DIRECTOR"):
         buttons.append([KeyboardButton(text="📊 Статистика")])
-    buttons.append([KeyboardButton(text="🔍 Поиск по заявкам")])
+    
+    # Поиск – для администраторов, консьержей и директоров
+    if role in ("ADMIN", "CONCIERGE", "DIRECTOR"):
+        buttons.append([KeyboardButton(text="🔍 Поиск по заявкам")])
+    
     buttons.append([KeyboardButton(text="⬅️ Назад")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
@@ -24,7 +45,7 @@ def task_list_keyboard(
     total_pages: int,
     list_type: str = "open",
     filter_priority: int = None,
-    is_admin: bool = False  # новый параметр
+    is_admin: bool = False
 ) -> InlineKeyboardMarkup:
     buttons = []
     for task in tasks[:10]:
@@ -34,7 +55,6 @@ def task_list_keyboard(
         text = f"{status_emoji} {priority_emoji} #{task.id} {task.title[:25]}"
         buttons.append([InlineKeyboardButton(text=text, callback_data=f"task:{task.id}")])
 
-    # Навигация
     nav_buttons = []
     if page > 1:
         nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"task_page:{page-1}"))
@@ -44,7 +64,6 @@ def task_list_keyboard(
     if nav_buttons:
         buttons.append(nav_buttons)
 
-    # Кнопки сортировки и фильтра – только для админов/консьержей/директоров
     if is_admin:
         sort_buttons = []
         sort_buttons.append(InlineKeyboardButton(text="📅 По дате", callback_data="task_sort:date"))
