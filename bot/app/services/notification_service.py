@@ -17,17 +17,14 @@ def set_bot(bot_instance: Bot):
     bot = bot_instance
 
 async def _can_send(telegram_id: int, notification_type: str) -> bool:
-    """Проверяет, включены ли уведомления данного типа для пользователя по его telegram_id"""
     try:
         cache_key = f"{telegram_id}:{notification_type}"
         now = time.time()
-        # Проверяем кеш
         if cache_key in _settings_cache:
             value, cached_at = _settings_cache[cache_key]
             if now - cached_at < CACHE_TTL:
                 return value
             else:
-                # Кеш устарел, удаляем
                 del _settings_cache[cache_key]
 
         employee = await get_employee(telegram_id)
@@ -43,10 +40,9 @@ async def _can_send(telegram_id: int, notification_type: str) -> bool:
         return result
     except Exception as e:
         logging.error(f"Ошибка в _can_send для telegram_id {telegram_id}: {e}")
-        return True  # в случае ошибки лучше отправить, чем не отправить
+        return True
 
 async def _send_message(telegram_id: int, text: str, reply_markup=None, retries: int = 3):
-    """Отправляет сообщение с повторными попытками"""
     if not bot:
         logging.error("Bot не инициализирован, уведомление не отправлено")
         return
@@ -60,27 +56,53 @@ async def _send_message(telegram_id: int, text: str, reply_markup=None, retries:
                 await asyncio.sleep(1)
     logging.error(f"Не удалось отправить сообщение пользователю {telegram_id} после {retries} попыток")
 
-async def notify_admins(text: str, notification_type: str = "notify_admin"):
+def _task_view_button(task_id: int) -> InlineKeyboardMarkup:
+    """Создаёт кнопку для просмотра задачи"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
+    ])
+
+async def notify_admins(text: str, task_id: int = None, notification_type: str = "notify_admin"):
     if not bot:
         return
     admins = await get_all_employees(role=UserRole.ADMIN)
+    if not admins:
+        return
+    reply_markup = _task_view_button(task_id) if task_id else None
     for admin in admins:
         if admin.telegram_id and await _can_send(admin.telegram_id, notification_type):
-            await _send_message(admin.telegram_id, text)
+            await _send_message(admin.telegram_id, text, reply_markup)
 
-async def notify_user(telegram_id: int, text: str, notification_type: str = "notify_task_assigned"):
+async def notify_concierges(text: str, task_id: int = None, notification_type: str = "notify_checking"):
+    if not bot:
+        return
+    employees = await get_all_employees(role=UserRole.CONCIERGE, active=True)
+    if not employees:
+        return
+    reply_markup = _task_view_button(task_id) if task_id else None
+    for emp in employees:
+        if emp.telegram_id and await _can_send(emp.telegram_id, notification_type):
+            await _send_message(emp.telegram_id, text, reply_markup)
+
+async def notify_user(telegram_id: int, text: str, task_id: int = None, notification_type: str = "notify_task_assigned", reply_markup=None):
     if not bot or not telegram_id:
         return
+    if reply_markup is None and task_id:
+        reply_markup = _task_view_button(task_id)
     if await _can_send(telegram_id, notification_type):
-        await _send_message(telegram_id, text)
+        await _send_message(telegram_id, text, reply_markup)
 
-async def notify_team(team: Team, text: str, notification_type: str = "notify_new_task_team"):
+async def notify_team(team: Team, text: str, task_id: int = None, notification_type: str = "notify_new_task_team", reply_markup=None):
     if not bot:
         return
     employees = await get_all_employees(team=team, active=True)
+    if not employees:
+        return
+    if reply_markup is None and task_id:
+        reply_markup = _task_view_button(task_id)
     for emp in employees:
         if emp.telegram_id and await _can_send(emp.telegram_id, notification_type):
-            await _send_message(emp.telegram_id, text)
+            await _send_message(emp.telegram_id, text, reply_markup)
 
 async def notify_team_with_button(team: Team, text: str, task_id: int, notification_type: str = "notify_new_task_team"):
     if not bot:
@@ -95,19 +117,10 @@ async def notify_team_with_button(team: Team, text: str, task_id: int, notificat
         if emp.telegram_id and await _can_send(emp.telegram_id, notification_type):
             await _send_message(emp.telegram_id, text, keyboard)
 
-async def notify_concierges(text: str, notification_type: str = "notify_checking"):
-    if not bot:
-        return
-    employees = await get_all_employees(role=UserRole.CONCIERGE, active=True)
-    for emp in employees:
-        if emp.telegram_id and await _can_send(emp.telegram_id, notification_type):
-            await _send_message(emp.telegram_id, text)
-
 async def notify_security(text: str, notification_type: str = "notify_security"):
     if not bot:
         return
     employees = await get_all_employees(role=UserRole.SECURITY, active=True)
     for emp in employees:
         if emp.telegram_id:
-            # У охраны пока нет отдельного типа уведомлений, используем notify_admin как запасной
             await _send_message(emp.telegram_id, text)

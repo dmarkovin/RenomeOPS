@@ -329,7 +329,7 @@ async def confirm_create(message: Message, state: FSMContext):
             video_ids=data.get('videos', [])
         )
         await state.clear()
-        await notify_admins(f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}")
+        await notify_admins(f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}", task_id=task.id)
         if employee.role != UserRole.CONCIERGE:
             await notify_team_with_button(
                 Team.TEAM_CONCIERGE,

@@ -20,7 +20,6 @@ class PatrolCreate(StatesGroup):
     photo = State()
     confirm = State()
 
-# ========== Безопасное редактирование ==========
 async def safe_delete_message(message):
     try:
         await message.delete()
@@ -144,8 +143,8 @@ async def confirm_create(message: Message, state: FSMContext):
         )
 
         await notify_concierges(
-            f"🚶 Новый обход #{patrol.id} от {employee.full_name} создан. "
-            f"Задача #{task.id} назначена на вашу команду."
+            f"🚶 Новый обход #{patrol.id} от {employee.full_name} создан. Задача #{task.id} назначена на вашу команду.",
+            task_id=task.id
         )
 
         await state.clear()
@@ -180,10 +179,18 @@ async def show_patrol_card(callback: CallbackQuery):
         f"Задача: #{p.task_id if p.task_id else '—'}"
     )
     kb = patrol_action_keyboard(p.id, p.status)
-    # Добавляем кнопку видео, если есть видео
     if p.video_ids:
         kb.inline_keyboard.append([InlineKeyboardButton(text="📹 Видео", callback_data=f"patrol_video:{p.id}")])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="patrol_back_to_list")])
     await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+@router.callback_query(F.data == "patrol_back_to_list")
+async def patrol_back_to_list(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    employee = await get_employee(callback.from_user.id)
+    if employee:
+        await patrol_menu(callback.message, state, 1)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("patrol_video:"))
@@ -220,7 +227,18 @@ async def paginate_patrols(callback: CallbackQuery, state: FSMContext):
     await patrol_menu(callback.message, state, page)
     await callback.answer()
 
-@router.callback_query(F.data == "patrol_back")
+@router.callback_query(F.data == "patrol_back_to_menu")
 async def back_to_patrol_menu(callback: CallbackQuery, state: FSMContext):
-    await patrol_menu(callback.message, state, 1)
+    await callback.message.delete()
+    employee = await get_employee(callback.from_user.id)
+    if employee:
+        await callback.message.answer("🚶 Меню обходов:", reply_markup=patrol_main_menu_keyboard())
     await callback.answer()
+
+@router.message(F.text == "⬅️ Назад")
+async def back_from_patrol(message: Message):
+    employee = await get_employee(message.from_user.id)
+    if employee:
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
+    else:
+        await message.answer("Возврат...")

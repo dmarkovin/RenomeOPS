@@ -135,7 +135,6 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
     await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
     await callback.answer()
 
-# ========== Остальные обработчики (все остальные кнопки) ==========
 @router.callback_query(F.data.startswith("task_take:"))
 async def take_task_callback(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -149,7 +148,7 @@ async def take_task_callback(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer("✅ Задача взята в работу")
     await show_task_card(callback, state)
-    await notify_admins(f"📢 Сотрудник {employee.full_name} взял задачу #{task_id} в работу.")
+    await notify_admins(f"📢 Сотрудник {employee.full_name} взял задачу #{task_id} в работу.", task_id=task_id)
 
 @router.callback_query(F.data.startswith("task_pause:"))
 async def pause_task(callback: CallbackQuery, state: FSMContext):
@@ -192,7 +191,7 @@ async def process_pause_comment(message: Message, state: FSMContext):
     task = await change_status(task_id, "paused", employee.id, comment)
     if task:
         await message.answer("✅ Заявка приостановлена.")
-        await notify_admins(f"⏸ Задача #{task_id} приостановлена исполнителем {employee.full_name}\nПричина: {comment}")
+        await notify_admins(f"⏸ Задача #{task_id} приостановлена исполнителем {employee.full_name}\nПричина: {comment}", task_id=task_id)
         task = await get_task(task_id)
         if task:
             await message.answer(f"📋 Карточка задачи #{task_id}", reply_markup=task_actions_keyboard(task, employee))
@@ -214,7 +213,7 @@ async def resume_task(callback: CallbackQuery, state: FSMContext):
     task = await change_status(task_id, "in_progress", employee.id)
     if task:
         await callback.answer("✅ Задача возобновлена")
-        await notify_admins(f"▶ Задача #{task_id} возобновлена исполнителем {employee.full_name}")
+        await notify_admins(f"▶ Задача #{task_id} возобновлена исполнителем {employee.full_name}", task_id=task_id)
         await show_task_card(callback, state)
     else:
         await callback.answer("❌ Ошибка", show_alert=True)
@@ -288,7 +287,7 @@ async def finish_check_photo(message: Message, state: FSMContext):
         await add_photo(task_id, employee.id, file_id)
     task = await change_status(task_id, "checking", employee.id, comment)
     if task:
-        await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}\nКомментарий: {comment}")
+        await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}\nКомментарий: {comment}", task_id=task_id)
         await message.answer("✅ Задача отправлена на проверку")
         await message.answer(f"📋 Карточка задачи #{task_id}:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
@@ -342,13 +341,13 @@ async def change_task_status(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer(f"✅ Статус изменён на {new_status}")
     if new_status == "checking":
-        await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}")
+        await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}", task_id=task_id)
     elif new_status == "closed":
-        await notify_concierges(f"✅ Задача #{task_id} закрыта. Проверил: {employee.full_name}")
+        await notify_concierges(f"✅ Задача #{task_id} закрыта. Проверил: {employee.full_name}", task_id=task_id)
     elif new_status == "paused":
-        await notify_admins(f"⏸ Задача #{task_id} приостановлена исполнителем {employee.full_name}")
+        await notify_admins(f"⏸ Задача #{task_id} приостановлена исполнителем {employee.full_name}", task_id=task_id)
     elif new_status == "in_progress" and status_str == "rework":
-        await notify_admins(f"🔄 Задача #{task_id} возвращена на доработку исполнителем {employee.full_name}")
+        await notify_admins(f"🔄 Задача #{task_id} возвращена на доработку исполнителем {employee.full_name}", task_id=task_id)
     await show_task_card(callback, state)
 
 @router.callback_query(F.data.startswith("task_comment_list:"))
@@ -655,7 +654,7 @@ async def process_wait_comment(message: Message, state: FSMContext):
     task = await change_status(task_id, "waiting", employee.id, comment, wait_until)
     if task:
         await message.answer(f"✅ Задача отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}")
-        await notify_concierges(f"⏳ Задача #{task_id} отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}. Комментарий: {comment}")
+        await notify_concierges(f"⏳ Задача #{task_id} отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}. Комментарий: {comment}", task_id=task_id)
     else:
         await message.answer("❌ Ошибка")
     await state.clear()
