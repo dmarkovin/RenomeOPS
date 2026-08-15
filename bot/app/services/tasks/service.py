@@ -749,3 +749,72 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
             query = query.where(cast(Task.status, String) != "closed")
         result = await db.execute(query)
         return result.scalar()
+
+
+async def get_team_all_tasks(
+    user_id: int,
+    status: str = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[Task]:
+    """Возвращает все задачи команды пользователя, включая назначенные."""
+    async with AsyncSessionLocal() as db:
+        employee = await db.get(User, user_id)
+        if not employee:
+            return []
+        query = select(Task).where(
+            cast(Task.assigned_team, String) == employee.team.value
+        )
+        if status:
+            query = query.where(cast(Task.status, String) == status)
+        else:
+            query = query.where(cast(Task.status, String) != "closed")
+        
+        if employee.role != UserRole.ADMIN:
+            query = query.where(Task.is_feedback == False)
+            query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
+        
+        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.comments).selectinload(Comment.author),
+            selectinload(Task.photos),
+            selectinload(Task.history).selectinload(TaskHistory.user),
+        )
+        result = await db.execute(query)
+        return result.scalars().all()
+
+async def get_team_all_tasks(
+    user_id: int,
+    status: str = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> List[Task]:
+    """Возвращает все задачи команды пользователя, включая назначенные."""
+    async with AsyncSessionLocal() as db:
+        employee = await db.get(User, user_id)
+        if not employee:
+            return []
+        query = select(Task).where(
+            cast(Task.assigned_team, String) == employee.team.value
+        )
+        if status:
+            query = query.where(cast(Task.status, String) == status)
+        else:
+            query = query.where(cast(Task.status, String) != "closed")
+        
+        if employee.role != UserRole.ADMIN:
+            query = query.where(Task.is_feedback == False)
+            query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
+        
+        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
+        query = query.options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.comments).selectinload(Comment.author),
+            selectinload(Task.photos),
+            selectinload(Task.history).selectinload(TaskHistory.user),
+        )
+        result = await db.execute(query)
+        return result.scalars().all()

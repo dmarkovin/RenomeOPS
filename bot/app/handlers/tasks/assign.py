@@ -80,9 +80,11 @@ async def assign_team_confirm(callback: CallbackQuery, state: FSMContext):
     await notify_team(team, f"📢 Заявка #{task_id} назначена на вашу команду.", task_id=task_id)
     await callback.answer(f"✅ Заявка #{task_id} назначена на команду {team.value}")
     await safe_edit_or_reply(callback, f"✅ Заявка #{task_id} назначена на команду {team.value}")
+    # Получаем задачу с подгрузкой всех отношений
+    task_full = await get_task(task_id)
     await callback.message.answer(
         f"📋 Карточка заявки #{task_id}:",
-        reply_markup=task_actions_keyboard(task, employee)
+        reply_markup=task_actions_keyboard(task_full, employee)
     )
 
 @router.callback_query(F.data.startswith("task_assign_user:"))
@@ -129,9 +131,11 @@ async def assign_user_confirm(callback: CallbackQuery, state: FSMContext):
         )
     await callback.answer(f"✅ Заявка #{task_id} назначена на {assignee.full_name if assignee else 'сотрудника'}")
     await safe_edit_or_reply(callback, f"✅ Заявка #{task_id} назначена на {assignee.full_name if assignee else 'сотрудника'}")
+    # Получаем задачу с подгрузкой всех отношений
+    task_full = await get_task(task_id)
     await callback.message.answer(
         f"📋 Карточка заявки #{task_id}:",
-        reply_markup=task_actions_keyboard(task, employee)
+        reply_markup=task_actions_keyboard(task_full, employee)
     )
 
 # ---------- Передача ----------
@@ -186,9 +190,11 @@ async def transfer_task_confirm(callback: CallbackQuery, state: FSMContext):
         )
     await callback.answer(f"✅ Заявка #{task_id} передана {new_assignee.full_name if new_assignee else 'сотруднику'}")
     await safe_edit_or_reply(callback, f"✅ Заявка #{task_id} передана {new_assignee.full_name if new_assignee else 'сотруднику'}")
+    # Получаем задачу с подгрузкой всех отношений
+    task_full = await get_task(task_id)
     await callback.message.answer(
         f"📋 Карточка заявки #{task_id}:",
-        reply_markup=task_actions_keyboard(task, employee)
+        reply_markup=task_actions_keyboard(task_full, employee)
     )
 
 # ---------- Отмена ----------

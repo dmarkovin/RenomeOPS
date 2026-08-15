@@ -2,25 +2,15 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import Task
 from typing import List
 
-def tasks_menu_keyboard(role: str, team=None) -> ReplyKeyboardMarkup:
+def tasks_menu_keyboard(role: str) -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="➕ Создать заявку")],
+        [KeyboardButton(text="📋 Список заявок")],
+        [KeyboardButton(text="📋 Мои задачи")],
+        [KeyboardButton(text="📋 Все задачи")],  # изменено с "Новые задачи"
     ]
-    # Для администраторов, консьержей, директоров — полный доступ
     if role in ("ADMIN", "CONCIERGE", "DIRECTOR"):
-        buttons.append([KeyboardButton(text="📋 Список заявок")])
-        buttons.append([KeyboardButton(text="📋 Мои задачи")])
-        if team is not None:
-            buttons.append([KeyboardButton(text="📋 Все задачи")])
-        else:
-            buttons.append([KeyboardButton(text="📋 Все задачи")])
         buttons.append([KeyboardButton(text="📋 Ожидают проверки")])
-        buttons.append([KeyboardButton(text="📦 Архив")])
-    else:
-        # Для обычных сотрудников (техников, охраны, клининга)
-        buttons.append([KeyboardButton(text="📋 Мои задачи")])
-        if team is not None:
-            buttons.append([KeyboardButton(text="📋 Все задачи")])
         buttons.append([KeyboardButton(text="📦 Архив")])
     if role in ("ADMIN", "DIRECTOR"):
         buttons.append([KeyboardButton(text="📊 Статистика")])
@@ -33,7 +23,8 @@ def task_list_keyboard(
     page: int,
     total_pages: int,
     list_type: str = "open",
-    filter_priority: int = None
+    filter_priority: int = None,
+    is_admin: bool = False  # новый параметр
 ) -> InlineKeyboardMarkup:
     buttons = []
     for task in tasks[:10]:
@@ -43,6 +34,7 @@ def task_list_keyboard(
         text = f"{status_emoji} {priority_emoji} #{task.id} {task.title[:25]}"
         buttons.append([InlineKeyboardButton(text=text, callback_data=f"task:{task.id}")])
 
+    # Навигация
     nav_buttons = []
     if page > 1:
         nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"task_page:{page-1}"))
@@ -52,19 +44,21 @@ def task_list_keyboard(
     if nav_buttons:
         buttons.append(nav_buttons)
 
-    sort_buttons = []
-    sort_buttons.append(InlineKeyboardButton(text="📅 По дате", callback_data="task_sort:date"))
-    sort_buttons.append(InlineKeyboardButton(text="🔥 По приоритету", callback_data="task_sort:priority"))
-    buttons.append(sort_buttons)
+    # Кнопки сортировки и фильтра – только для админов/консьержей/директоров
+    if is_admin:
+        sort_buttons = []
+        sort_buttons.append(InlineKeyboardButton(text="📅 По дате", callback_data="task_sort:date"))
+        sort_buttons.append(InlineKeyboardButton(text="🔥 По приоритету", callback_data="task_sort:priority"))
+        buttons.append(sort_buttons)
 
-    filter_buttons = []
-    filter_buttons.append(InlineKeyboardButton(text="🔽 Все", callback_data="task_filter:all"))
-    for p in [1, 2, 3, 4, 5]:
-        label = f"{p}★"
-        if filter_priority == p:
-            label = f"✅ {p}★"
-        filter_buttons.append(InlineKeyboardButton(text=label, callback_data=f"task_filter:{p}"))
-    buttons.append(filter_buttons)
+        filter_buttons = []
+        filter_buttons.append(InlineKeyboardButton(text="🔽 Все", callback_data="task_filter:all"))
+        for p in [1, 2, 3, 4, 5]:
+            label = f"{p}★"
+            if filter_priority == p:
+                label = f"✅ {p}★"
+            filter_buttons.append(InlineKeyboardButton(text=label, callback_data=f"task_filter:{p}"))
+        buttons.append(filter_buttons)
 
     buttons.append([InlineKeyboardButton(text="⬅️ В главное меню", callback_data="tasks_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

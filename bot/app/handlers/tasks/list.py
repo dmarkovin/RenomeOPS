@@ -7,6 +7,7 @@ from app.services.tasks.service import (
     get_open_tasks,
     get_tasks_for_employee,
     get_team_tasks,
+    get_team_all_tasks,  # новая функция
     get_checking_tasks,
     get_tasks_by_status,
     count_tasks_by_status,
@@ -92,9 +93,10 @@ async def show_list(
         title = ""
         tasks = []
         show_assignee = True
+        is_admin = employee.role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR)
 
         if list_type == "open":
-            if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+            if not is_admin:
                 if isinstance(target, CallbackQuery):
                     await target.answer("У вас нет прав на просмотр всех заявок.", show_alert=True)
                 else:
@@ -107,11 +109,17 @@ async def show_list(
             title = "📋 Мои задачи"
             show_assignee = False
         elif list_type == "team":
+            # Все задачи команды (включая назначенные)
+            tasks = await get_team_all_tasks(employee.id, limit=1000, offset=0)
+            title = "📋 Все задачи команды"
+            show_assignee = True
+        elif list_type == "team_new":
+            # Новые задачи (без исполнителя) – оставляем для обратной совместимости
             tasks = await get_team_tasks(employee.id, limit=1000, offset=0)
-            title = "📋 Новые задачи"
-            show_assignee = False
+            title = "📋 Новые задачи команды"
+            show_assignee = True
         elif list_type == "checking":
-            if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+            if not is_admin:
                 if isinstance(target, CallbackQuery):
                     await target.answer("Только для консьержей, админов и директоров.", show_alert=True)
                 else:
@@ -172,7 +180,7 @@ async def show_list(
             return
 
         text = get_task_list_text(title, tasks_page, page, total_pages, show_assignee)
-        reply_markup = task_list_keyboard(tasks_page, page, total_pages, list_type, filter_priority)
+        reply_markup = task_list_keyboard(tasks_page, page, total_pages, list_type, filter_priority, is_admin)
 
         if isinstance(target, CallbackQuery):
             await target.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -249,8 +257,8 @@ async def show_all_open_tasks(message: Message, state: FSMContext):
 async def show_my_tasks(message: Message, state: FSMContext):
     await show_list(message, state, "my", user_id=message.from_user.id)
 
-@router.message(F.text.startswith("📋 Новые задачи"))
-async def show_team_tasks(message: Message, state: FSMContext):
+@router.message(F.text.startswith("📋 Все задачи"))
+async def show_team_all_tasks(message: Message, state: FSMContext):
     await show_list(message, state, "team", user_id=message.from_user.id)
 
 @router.message(F.text.startswith("📋 Ожидают проверки"))

@@ -252,7 +252,7 @@ async def process_assign_type(message: Message, state: FSMContext):
             await message.answer("Нет доступных сотрудников охраны. Выберите другой вариант.")
             return
         await state.set_state(PassCreate.assign_employee)
-        await message.answer("Выберите сотрудника охраны:", reply_markup=employee_selection_keyboard(employees, "pass_assign", "pass_assign_emp"))
+        await message.answer("Выберите сотрудника охраны:", reply_markup=employee_selection_keyboard(employees, 0, "pass_assign_emp"))
         return
 
 @router.callback_query(StateFilter(PassCreate.assign_employee), F.data.startswith("pass_assign_emp:"))
@@ -498,7 +498,8 @@ async def show_pass_card(callback: CallbackQuery):
     if not p:
         await callback.answer("Не найден", show_alert=True)
         return
-    employee = await get_employee(callback.from_user.id)
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
     user_role = employee.role.value if employee else None
     text = (
         f"🪪 Пропуск #{p.id}\n"
@@ -569,7 +570,7 @@ async def show_pass_history(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("pass_checkin:"))
 async def pass_checkin(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
-    p = await check_in(pass_id, callback.from_user.id)
+    p = await check_in(pass_id, get_user_id_from_callback(callback))
     if p:
         await callback.answer("✅ Въезд отмечен")
         await show_pass_card(callback)
@@ -579,7 +580,7 @@ async def pass_checkin(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("pass_checkout:"))
 async def pass_checkout(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
-    p = await check_out(pass_id, callback.from_user.id)
+    p = await check_out(pass_id, get_user_id_from_callback(callback))
     if p:
         await callback.answer("✅ Выезд отмечен")
         await show_pass_card(callback)
@@ -589,11 +590,12 @@ async def pass_checkout(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("pass_complete:"))
 async def pass_complete(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
     if not employee or not has_pass_access(employee.role):
         await callback.answer("Только для консьержа/админа/директора/охраны", show_alert=True)
         return
-    p = await update_pass_status(pass_id, "completed", callback.from_user.id)
+    p = await update_pass_status(pass_id, "completed", user_id)
     if p:
         await callback.answer("✅ Пропуск выполнен")
         await show_pass_card(callback)
@@ -603,7 +605,7 @@ async def pass_complete(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("pass_close:"))
 async def pass_close(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
-    p = await update_pass_status(pass_id, "expired", callback.from_user.id)
+    p = await update_pass_status(pass_id, "expired", get_user_id_from_callback(callback))
     if p:
         await callback.answer("✅ Пропуск закрыт")
         await show_pass_card(callback)
@@ -655,7 +657,8 @@ async def pass_comment_list(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("pass_comment_add:"))
 async def pass_comment_add(callback: CallbackQuery, state: FSMContext):
     pass_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
     if not employee:
         await callback.answer("Ошибка", show_alert=True)
         return

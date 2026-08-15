@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
 from datetime import datetime, timedelta
+import logging
 
 from app.services.tasks.service import (
     get_task,
@@ -21,6 +22,7 @@ from app.services.notification_service import notify_user, notify_admins, notify
 from app.states.tasks.waiting import TaskWaiting
 from app.states.tasks.photo import TaskAddPhoto
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 class TaskCommentState(StatesGroup):
@@ -40,94 +42,110 @@ class TaskPauseState(StatesGroup):
 async def safe_delete_message(message):
     try:
         await message.delete()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"safe_delete_message error: {e}")
 
 async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
     try:
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-    except Exception:
+    except Exception as e:
+        logger.error(f"safe_edit_or_reply error: {e}")
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
+def safe_str(value, default="—"):
+    if value is None:
+        return default
+    return str(value)
+
 @router.callback_query(F.data.startswith("task:"))
 async def show_task_card(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    prev_list_type = data.get("current_list_type")
-    prev_page = data.get("current_page", 1)
-    prev_sort = data.get("current_sort", "date")
-    prev_filter = data.get("current_filter")
-    await state.update_data(prev_list_type=prev_list_type, prev_page=prev_page, prev_sort=prev_sort, prev_filter=prev_filter)
+    try:
+        data = await state.get_data()
+        prev_list_type = data.get("current_list_type")
+        prev_page = data.get("current_page", 1)
+        prev_sort = data.get("current_sort", "date")
+        prev_filter = data.get("current_filter")
+        await state.update_data(prev_list_type=prev_list_type, prev_page=prev_page, prev_sort=prev_sort, prev_filter=prev_filter)
 
-    task_id = int(callback.data.split(":")[1])
-    task = await get_task(task_id)
-    if not task:
-        await callback.answer("Заявка не найдена", show_alert=True)
-        return
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
-
-    if employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
-        if task.assigned_to != employee.id and task.assigned_team != employee.team:
-            await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
+        task_id = int(callback.data.split(":")[1])
+        task = await get_task(task_id)
+        if not task:
+            await callback.answer("Заявка не найдена", show_alert=True)
             return
 
-    status_emoji = get_task_status_emoji(task.status)
+        employee = await get_employee(callback.from_user.id)
+        if not employee:
+            await callback.answer("Вы не зарегистрированы", show_alert=True)
+            return
 
-    # ===== ИСПРАВЛЕННЫЙ АДРЕС =====
-    address_parts = []
-    if task.building:
-        address_parts.append(f"корп. {task.building}")
-    if task.entrance:
-        address_parts.append(f"под. {task.entrance}")
-    if task.floor:
-        address_parts.append(f"эт. {task.floor}")
-    if task.apartment:
-        address_parts.append(f"кв. {task.apartment}")
-    address = ", ".join(address_parts) if address_parts else "—"
+        # Проверка доступа
+        if employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
+            if task.assigned_to != employee.id and task.assigned_team != employee.team:
+                await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
+                return
 
-    location_info = ""
-    if task.location_type:
-        loc_type = task.location_type
-        if loc_type == "common_area" and task.common_area:
-            location_info = f"Общая зона: {task.common_area}"
-        elif loc_type == "parking":
+        status_emoji = get_task_status_emoji(task.status)
+
+        # ===== ФОРМИРУЕМ ПОЛНЫЙ АДРЕС =====
+        address_parts = []
+        if task.building:
+            address_parts.append(f"корп. {task.building}")
+        if task.entrance:
+            address_parts.append(f"под. {task.entrance}")
+        if task.floor:
+            address_parts.append(f"эт. {task.floor}")
+
+        # Добавляем информацию о типе объекта
+        if task.location_type == "apartment" and task.apartment:
+            address_parts.append(f"кв. {task.apartment}")
+        elif task.location_type == "common_area" and task.common_area:
+            address_parts.append(f"общая зона: {task.common_area}")
+        elif task.location_type == "parking":
             if task.parking_level is not None and task.parking_spot is not None:
-                location_info = f"Паркинг: уровень {task.parking_level}, место {task.parking_spot}"
-        elif loc_type == "cellar" and task.cellar is not None:
-            location_info = f"Келлер: {task.cellar}"
-        elif loc_type == "apartment":
-            location_info = "Квартира"
-        else:
-            location_info = f"Тип: {loc_type}"
+                address_parts.append(f"паркинг: уровень {task.parking_level}, место {task.parking_spot}")
+        elif task.location_type == "cellar" and task.cellar is not None:
+            address_parts.append(f"келлер {task.cellar}")
 
-    team_name = task.assigned_team.value if task.assigned_team else "не назначена"
+        address = ", ".join(address_parts) if address_parts else "—"
 
-    text = f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
-    text += f"🔢 <b>Приоритет:</b> {task.priority}\n"
-    text += f"📊 <b>Статус:</b> {task.status}\n"
-    text += f"🏢 <b>Адрес:</b> {address}\n"
-    if location_info:
-        text += f"📍 <b>{location_info}</b>\n"
-    text += "\n"
-    text += f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-    text += f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
-    text += f"👥 <b>Команда:</b> {team_name}\n"
-    text += f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
-    text += f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-    if task.wait_until:
-        text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
-    if task.closed_at:
-        text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
-    if task.photos:
-        text += f"📷 Фото: {len(task.photos)} шт.\n"
-    if task.video_ids:
-        text += f"📹 Видео: {len(task.video_ids)} шт.\n"
+        team_name = task.assigned_team.value if task.assigned_team else "не назначена"
 
-    await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
-    await callback.answer()
+        # Собираем текст
+        lines = []
+        lines.append(f"{status_emoji} <b>#{task.id} {safe_str(task.title, 'Без названия')}</b>")
+        lines.append("")
+        lines.append(f"🔢 <b>Приоритет:</b> {safe_str(task.priority, '0')}")
+        lines.append(f"📊 <b>Статус:</b> {safe_str(task.status, '—')}")
+        lines.append(f"🏢 <b>Адрес:</b> {address}")
+        lines.append("")
+        lines.append(f"📄 <b>Описание:</b>")
+        lines.append(safe_str(task.description, '—'))
+        lines.append("")
+        lines.append(f"👤 <b>Создал:</b> {safe_str(task.creator.full_name if task.creator else None, '—')}")
+        lines.append(f"👥 <b>Команда:</b> {team_name}")
+        lines.append(f"👥 <b>Исполнитель:</b> {safe_str(task.assignee.full_name if task.assignee else None, 'не назначен')}")
+        lines.append(f"🕒 <b>Создана:</b> {safe_str(task.created_at.strftime('%d.%m.%Y %H:%M') if task.created_at else None, '—')}")
+
+        if task.wait_until:
+            lines.append(f"⏳ <b>Приостановлена до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}")
+        if task.closed_at:
+            lines.append(f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}")
+
+        if task.photos:
+            lines.append(f"📷 Фото: {len(task.photos)} шт.")
+        if task.video_ids:
+            lines.append(f"📹 Видео: {len(task.video_ids)} шт.")
+
+        text = "\n".join(lines)
+
+        logger.info(f"show_task_card: task_id={task_id}, status={task.status}, text_len={len(text)}")
+        await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"show_task_card exception: {e}", exc_info=True)
+        await callback.answer("Произошла ошибка при открытии карточки", show_alert=True)
 
 # ========== ПРИОСТАНОВКА С ВЫБОРОМ ВРЕМЕНИ ==========
 @router.callback_query(F.data.startswith("task_pause:"))
@@ -358,7 +376,6 @@ async def change_task_status(callback: CallbackQuery, state: FSMContext):
         await notify_admins(f"🔄 Задача #{task_id} возвращена на доработку исполнителем {employee.full_name}", task_id=task_id)
     await show_task_card(callback, state)
 
-# ========== Комментарии ==========
 @router.callback_query(F.data.startswith("task_comment_list:"))
 async def show_comments(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -426,7 +443,6 @@ async def comment_back_to_task(callback: CallbackQuery, state: FSMContext):
     await show_task_card(callback, state)
     await callback.answer()
 
-# ========== История ==========
 @router.callback_query(F.data.startswith("task_history:"))
 async def show_task_history(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -483,7 +499,6 @@ async def history_back_to_task(callback: CallbackQuery, state: FSMContext):
     await show_task_card(callback, state)
     await callback.answer()
 
-# ========== Фото и видео ==========
 @router.callback_query(F.data.startswith("task_video:"))
 async def show_task_videos(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
