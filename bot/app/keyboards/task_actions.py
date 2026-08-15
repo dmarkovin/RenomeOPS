@@ -32,7 +32,7 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
     if can_take and status not in ("closed", "checking"):
         buttons.append([InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take:{task_id}")])
 
-    # ====== Если пользователь является исполнителем или имеет право на управление ======
+    # ====== Кто является исполнителем или имеет право на управление ======
     is_assignee = (task.assigned_to == employee.id)
     is_team_member = (task.assigned_team == employee.team and task.assigned_to is None)
     is_admin_concierge = (role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR))
@@ -46,13 +46,16 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
     if status == "paused" and is_assignee:
         buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
 
-    # Выполнено (отправить на проверку) – расширенное условие
+    # ====== ВЫПОЛНЕНО (отправить на проверку) – расширенное условие ======
     if status in ("in_progress", "paused"):
         can_check = False
+        # Исполнитель
         if is_assignee:
             can_check = True
+        # Админ/консьерж/директор могут отправить любую задачу
         elif is_admin_concierge:
             can_check = True
+        # Член команды, если задача назначена на команду
         elif is_team_member:
             can_check = True
         if can_check:

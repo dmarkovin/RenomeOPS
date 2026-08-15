@@ -21,6 +21,7 @@ from app.keyboards.assign import employee_selection_keyboard
 from app.keyboards.date_picker import date_selection_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
 from app.services.notification_service import notify_user, notify_concierges, notify_security, notify_team
+from app.metrics import bot_errors_total
 from app.database import AsyncSessionLocal
 
 router = Router()

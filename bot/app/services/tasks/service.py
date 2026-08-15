@@ -35,7 +35,7 @@ def can_transition(old_status: str, new_status: str) -> bool:
 
 
 # ==========================
-# Создание заявки (единственная версия)
+# Создание заявки (с поддержкой видео)
 # ==========================
 async def create_task(
     title: str,
@@ -54,6 +54,7 @@ async def create_task(
     applicant_phone: str = None,
     priority: int = 3,
     photo_ids: List[str] = None,
+    video_ids: List[str] = None,
     is_paid: bool = False,
     is_feedback: bool = False,
     is_role_change: bool = False,
@@ -61,6 +62,9 @@ async def create_task(
     assigned_to: int = None,
     assigned_team: Team = None
 ) -> Task:
+    # Валидация приоритета
+    if priority < 1 or priority > 5:
+        raise ValueError("Приоритет должен быть от 1 до 5")
     async with AsyncSessionLocal() as db:
         task = Task(
             title=title,
@@ -84,7 +88,8 @@ async def create_task(
             service_order_id=service_order_id,
             assigned_to=assigned_to,
             assigned_team=assigned_team,
-            status="created"
+            status="created",
+            video_ids=video_ids or []
         )
         db.add(task)
         await db.flush()
@@ -282,8 +287,8 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
                 if task.assigned_team and employee.team != task.assigned_team:
                     return None
             task.assigned_to = user_id
-            if task.status == "created":
-                task.status = "accepted"
+            if task.status in ("created", "accepted"):
+                task.status = "in_progress"
             task.updated_at = datetime.now()
             history = TaskHistory(
                 task_id=task.id,
@@ -355,8 +360,8 @@ async def change_status(
             task.status = new_status
             task.updated_at = datetime.now()
             if new_status == "closed":
-                task.closed_at = datetime.now()
                 tasks_closed_total.inc()
+                task.closed_at = datetime.now()
             if new_status == "waiting" and wait_until:
                 task.wait_until = wait_until
             else:
@@ -745,12 +750,3 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
             query = query.where(cast(Task.status, String) != "closed")
         result = await db.execute(query)
         return result.scalar()
-
-async def count_tasks_by_status(status: str, user_id: int = None) -> int:
-    """Возвращает количество задач с указанным статусом (опционально для пользователя)"""
-    async with AsyncSessionLocal() as db:
-        query = select(func.count(Task.id)).where(Task.status == status)
-        if user_id is not None:
-            query = query.where(or_(Task.assigned_to == user_id, Task.created_by == user_id))
-        result = await db.execute(query)
-        return result.scalar() or 0

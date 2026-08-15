@@ -45,7 +45,7 @@ async def safe_delete_message(message):
 async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
     try:
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-    except Exception as e:
+    except Exception:
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
@@ -72,7 +72,6 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
             await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
             return
     status_emoji = get_task_status_emoji(task.status)
-    # Формируем адрес
     address_parts = []
     if task.building:
         address_parts.append(f"корп. {task.building}")
@@ -177,6 +176,7 @@ async def process_pause_comment(message: Message, state: FSMContext):
     task = await change_status(task_id, "paused", employee.id, comment)
     if task:
         await message.answer("✅ Заявка приостановлена.")
+        await notify_admins(f"⏸ Задача #{task_id} приостановлена исполнителем {employee.full_name}\nПричина: {comment}")
         task = await get_task(task_id)
         if task:
             await message.answer(f"📋 Карточка задачи #{task_id}", reply_markup=task_actions_keyboard(task, employee))
@@ -198,6 +198,7 @@ async def resume_task(callback: CallbackQuery, state: FSMContext):
     task = await change_status(task_id, "in_progress", employee.id)
     if task:
         await callback.answer("✅ Задача возобновлена")
+        await notify_admins(f"▶ Задача #{task_id} возобновлена исполнителем {employee.full_name}")
         await show_task_card(callback, state)
     else:
         await callback.answer("❌ Ошибка", show_alert=True)
@@ -634,7 +635,7 @@ async def process_wait_comment(message: Message, state: FSMContext):
         await message.answer("Ошибка")
         await state.clear()
         return
-    wait_until = datetime.now() + timedelta(hours=hours)
+    wait_until = datetime.utcnow() + timedelta(hours=hours)
     task = await change_status(task_id, "waiting", employee.id, comment, wait_until)
     if task:
         await message.answer(f"✅ Задача отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}")

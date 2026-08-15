@@ -33,8 +33,8 @@ async def check_admin(user_id: int) -> bool:
         if not employee:
             logging.warning(f"check_admin: пользователь {user_id} не найден")
             return False
-        # Сравниваем со значением Enum или строкой
-        is_admin = employee.role == UserRole.ADMIN or str(employee.role) == "ADMIN"
+        # Простое сравнение с Enum
+        is_admin = (employee.role == UserRole.ADMIN)
         if not is_admin:
             logging.warning(f"check_admin: пользователь {user_id} имеет роль {employee.role}, требуется ADMIN")
         return is_admin
