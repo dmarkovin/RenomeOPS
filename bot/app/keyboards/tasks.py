@@ -16,17 +16,15 @@ def tasks_menu_keyboard(role: str) -> ReplyKeyboardMarkup:
     # Мои задачи – для всех (только личные задачи, где пользователь исполнитель)
     buttons.append([KeyboardButton(text="📋 Мои задачи")])
     
-    # Все задачи команды – для всех, кто состоит в команде
-    if role not in ("ADMIN", "DIRECTOR"):  # для админов и директоров это дублирует "Список заявок", но можно оставить
-        buttons.append([KeyboardButton(text="📋 Все задачи")])
-    else:
-        # Для админов/директоров тоже добавим, чтобы они могли видеть задачи команды
-        buttons.append([KeyboardButton(text="📋 Все задачи")])
+    # Все задачи команды – для всех
+    buttons.append([KeyboardButton(text="📋 Все задачи")])
     
     # Ожидают проверки – только для администраторов, консьержей и директоров
     if role in ("ADMIN", "CONCIERGE", "DIRECTOR"):
         buttons.append([KeyboardButton(text="📋 Ожидают проверки")])
-        buttons.append([KeyboardButton(text="📦 Архив")])
+    
+    # Архив – для всех (но фильтрация по правам будет в show_list)
+    buttons.append([KeyboardButton(text="📦 Архив")])
     
     # Статистика – только для ADMIN и DIRECTOR
     if role in ("ADMIN", "DIRECTOR"):
