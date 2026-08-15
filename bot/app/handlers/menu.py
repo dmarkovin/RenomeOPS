@@ -82,7 +82,6 @@ class SettingsStates(StatesGroup):
     notification_settings = State()
 
 async def show_notification_settings(target, user_id: int, state: FSMContext):
-    """Показывает настройки уведомлений для указанного пользователя"""
     employee = await get_employee(user_id)
     if not employee:
         if isinstance(target, CallbackQuery):
@@ -93,7 +92,6 @@ async def show_notification_settings(target, user_id: int, state: FSMContext):
 
     settings = await get_user_settings(employee.id)
     if not settings:
-        # Создаём настройки по умолчанию
         from app.database.models import UserSettings
         settings = UserSettings(user_id=employee.id)
         async with AsyncSessionLocal() as db:
@@ -117,7 +115,6 @@ async def show_notification_settings(target, user_id: int, state: FSMContext):
     ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="notif_back")]])
 
     await state.set_state(SettingsStates.notification_settings)
-    # Сохраняем user_id в состоянии, чтобы использовать в callback'ах
     await state.update_data(notif_user_id=user_id)
 
     if isinstance(target, CallbackQuery):
@@ -136,7 +133,6 @@ async def toggle_notification(callback: CallbackQuery, state: FSMContext):
     logger.info(f"TOGGLE NOTIFICATION CALLED: user_id={callback.from_user.id}")
     setting = callback.data.split(":")[1]
 
-    # Получаем user_id из состояния (сохранённого при открытии настроек)
     data = await state.get_data()
     user_id = data.get("notif_user_id")
     if not user_id:
@@ -156,7 +152,6 @@ async def toggle_notification(callback: CallbackQuery, state: FSMContext):
     await update_setting(employee.id, setting, not current)
     await callback.answer("✅ Настройка обновлена")
 
-    # Показываем обновлённые настройки
     await show_notification_settings(callback, user_id, state)
 
 @router.callback_query(F.data == "notif_back", StateFilter(SettingsStates.notification_settings))

@@ -25,14 +25,22 @@ from app.handlers.tasks.card import safe_edit_or_reply
 
 router = Router()
 
+# ===== ПРОВЕРКА ПРАВ НА НАЗНАЧЕНИЕ =====
+async def can_assign(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    if not employee:
+        return False
+    role_str = employee.role.value if hasattr(employee.role, 'value') else str(employee.role)
+    return role_str in ("ADMIN", "CONCIERGE", "DIRECTOR")
+
 # ---------- Назначение ----------
 @router.callback_query(F.data.startswith("task_assign:"))
 async def assign_task_start(callback: CallbackQuery, state: FSMContext):
-    task_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+    # Проверка прав только здесь
+    if not await can_assign(callback.from_user.id):
         await callback.answer("У вас нет прав на назначение.", show_alert=True)
         return
+    task_id = int(callback.data.split(":")[1])
     task = await get_task(task_id)
     if not task:
         await callback.answer("Заявка не найдена", show_alert=True)
@@ -47,11 +55,8 @@ async def assign_task_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("task_assign_team:"))
 async def assign_team_start(callback: CallbackQuery, state: FSMContext):
+    # Внутренние обработчики больше не проверяют права
     task_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        await callback.answer("У вас нет прав.", show_alert=True)
-        return
     teams = await get_teams_with_members()
     if not teams:
         await callback.answer("Нет доступных команд.", show_alert=True)
@@ -80,20 +85,14 @@ async def assign_team_confirm(callback: CallbackQuery, state: FSMContext):
     await notify_team(team, f"📢 Заявка #{task_id} назначена на вашу команду.", task_id=task_id)
     await callback.answer(f"✅ Заявка #{task_id} назначена на команду {team.value}")
     await safe_edit_or_reply(callback, f"✅ Заявка #{task_id} назначена на команду {team.value}")
-    # Получаем задачу с подгрузкой всех отношений
-    task_full = await get_task(task_id)
     await callback.message.answer(
         f"📋 Карточка заявки #{task_id}:",
-        reply_markup=task_actions_keyboard(task_full, employee)
+        reply_markup=task_actions_keyboard(task, employee)
     )
 
 @router.callback_query(F.data.startswith("task_assign_user:"))
 async def assign_user_start(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        await callback.answer("У вас нет прав.", show_alert=True)
-        return
     employees = await get_available_employees()
     if not employees:
         await callback.answer("Нет доступных сотрудников.", show_alert=True)
@@ -131,16 +130,15 @@ async def assign_user_confirm(callback: CallbackQuery, state: FSMContext):
         )
     await callback.answer(f"✅ Заявка #{task_id} назначена на {assignee.full_name if assignee else 'сотрудника'}")
     await safe_edit_or_reply(callback, f"✅ Заявка #{task_id} назначена на {assignee.full_name if assignee else 'сотрудника'}")
-    # Получаем задачу с подгрузкой всех отношений
-    task_full = await get_task(task_id)
     await callback.message.answer(
         f"📋 Карточка заявки #{task_id}:",
-        reply_markup=task_actions_keyboard(task_full, employee)
+        reply_markup=task_actions_keyboard(task, employee)
     )
 
 # ---------- Передача ----------
 @router.callback_query(F.data.startswith("task_transfer:"))
 async def transfer_task_start(callback: CallbackQuery, state: FSMContext):
+    # Права уже проверены при входе в карточку, но мы проверим, что пользователь – исполнитель
     task_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
     if not employee:
@@ -190,11 +188,9 @@ async def transfer_task_confirm(callback: CallbackQuery, state: FSMContext):
         )
     await callback.answer(f"✅ Заявка #{task_id} передана {new_assignee.full_name if new_assignee else 'сотруднику'}")
     await safe_edit_or_reply(callback, f"✅ Заявка #{task_id} передана {new_assignee.full_name if new_assignee else 'сотруднику'}")
-    # Получаем задачу с подгрузкой всех отношений
-    task_full = await get_task(task_id)
     await callback.message.answer(
         f"📋 Карточка заявки #{task_id}:",
-        reply_markup=task_actions_keyboard(task_full, employee)
+        reply_markup=task_actions_keyboard(task, employee)
     )
 
 # ---------- Отмена ----------

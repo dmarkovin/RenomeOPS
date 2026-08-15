@@ -25,11 +25,18 @@ from app.states.employees.search import EmployeeSearch
 
 router = Router()
 
+# ===== ПРОВЕРКА ПРАВ ТОЛЬКО ПРИ ВХОДЕ =====
+async def check_admin_access(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    if not employee:
+        return False
+    role_str = employee.role.value if hasattr(employee.role, 'value') else str(employee.role)
+    return role_str == "ADMIN"
+
 # ===== Главное меню администратора =====
 @router.message(F.text == "👥 Сотрудники")
 async def employees_menu(message: Message):
-    admin = await get_employee(message.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
+    if not await check_admin_access(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     await message.answer(
@@ -38,11 +45,18 @@ async def employees_menu(message: Message):
     )
 
 # ===== Список сотрудников =====
+@router.message(F.text == "📋 Список сотрудников")
+async def list_employees_handler(message: Message):
+    await list_employees(message, page=1, user_id=message.from_user.id, include_inactive=False)
+
+@router.message(F.text == "📦 Архив сотрудников")
+async def archive_employees_handler(message: Message):
+    await list_employees(message, page=1, user_id=message.from_user.id, include_inactive=True)
+
 async def list_employees(message: Message, page: int = 1, user_id: int = None, include_inactive: bool = False):
     if user_id is None:
         user_id = message.from_user.id
-    admin = await get_employee(user_id)
-    if not admin or admin.role != UserRole.ADMIN:
+    if not await check_admin_access(user_id):
         await message.answer("У вас нет прав.")
         return
 
@@ -65,15 +79,6 @@ async def list_employees(message: Message, page: int = 1, user_id: int = None, i
     kb = employee_list_keyboard(employees, page, total_pages, include_inactive=include_inactive)
     await message.answer(text, reply_markup=kb)
 
-@router.message(F.text == "📋 Список сотрудников")
-async def list_employees_handler(message: Message):
-    await list_employees(message, page=1, user_id=message.from_user.id, include_inactive=False)
-
-@router.message(F.text == "📦 Архив сотрудников")
-async def archive_employees_handler(message: Message):
-    await list_employees(message, page=1, user_id=message.from_user.id, include_inactive=True)
-
-# ===== Пагинация в списке =====
 @router.callback_query(F.data.startswith("emp_page:"))
 async def paginate_employees(callback: CallbackQuery):
     parts = callback.data.split(":")
@@ -85,6 +90,9 @@ async def paginate_employees(callback: CallbackQuery):
 # ===== Карточка сотрудника =====
 @router.callback_query(F.data.startswith("emp_card:"))
 async def show_employee_card(callback: CallbackQuery):
+    if not await check_admin_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     user_id = int(callback.data.split(":")[1])
     emp = await get_employee_by_id(user_id)
     if not emp:
@@ -112,11 +120,11 @@ async def show_employee_card(callback: CallbackQuery):
 # ===== Блокировка =====
 @router.callback_query(F.data.startswith("emp_block:"))
 async def block_employee_callback(callback: CallbackQuery):
-    user_id = int(callback.data.split(":")[1])
-    admin = await get_employee(callback.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
+    if not await check_admin_access(callback.from_user.id):
         await callback.answer("Нет прав", show_alert=True)
         return
+    user_id = int(callback.data.split(":")[1])
+    admin = await get_employee(callback.from_user.id)
     if user_id == admin.id:
         await callback.answer("Вы не можете заблокировать самого себя!", show_alert=True)
         return
@@ -130,11 +138,11 @@ async def block_employee_callback(callback: CallbackQuery):
 # ===== Активация =====
 @router.callback_query(F.data.startswith("emp_activate:"))
 async def activate_employee_callback(callback: CallbackQuery):
-    user_id = int(callback.data.split(":")[1])
-    admin = await get_employee(callback.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
+    if not await check_admin_access(callback.from_user.id):
         await callback.answer("Нет прав", show_alert=True)
         return
+    user_id = int(callback.data.split(":")[1])
+    admin = await get_employee(callback.from_user.id)
     if user_id == admin.id:
         await callback.answer("Вы уже активны.", show_alert=True)
         return
@@ -148,11 +156,11 @@ async def activate_employee_callback(callback: CallbackQuery):
 # ===== Удаление (деактивация) =====
 @router.callback_query(F.data.startswith("emp_delete:"))
 async def delete_employee_callback(callback: CallbackQuery):
-    user_id = int(callback.data.split(":")[1])
-    admin = await get_employee(callback.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
+    if not await check_admin_access(callback.from_user.id):
         await callback.answer("Нет прав", show_alert=True)
         return
+    user_id = int(callback.data.split(":")[1])
+    admin = await get_employee(callback.from_user.id)
     if user_id == admin.id:
         await callback.answer("Вы не можете деактивировать самого себя!", show_alert=True)
         return
@@ -167,11 +175,10 @@ async def delete_employee_callback(callback: CallbackQuery):
 # ===== Смена роли =====
 @router.callback_query(F.data.startswith("emp_change_role:"))
 async def change_role_start(callback: CallbackQuery):
-    user_id = int(callback.data.split(":")[1])
-    admin = await get_employee(callback.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
+    if not await check_admin_access(callback.from_user.id):
         await callback.answer("Нет прав", show_alert=True)
         return
+    user_id = int(callback.data.split(":")[1])
     emp = await get_employee_by_id(user_id)
     if not emp:
         await callback.answer("Сотрудник не найден", show_alert=True)
@@ -184,13 +191,12 @@ async def change_role_start(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("emp_set_role:"))
 async def set_role(callback: CallbackQuery):
+    if not await check_admin_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     _, user_id_str, role_str = callback.data.split(":")
     user_id = int(user_id_str)
     new_role = UserRole(role_str)
-    admin = await get_employee(callback.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
-        await callback.answer("Нет прав", show_alert=True)
-        return
     emp = await update_employee_role(user_id, new_role)
     if not emp:
         await callback.answer("Ошибка", show_alert=True)
@@ -209,11 +215,10 @@ async def set_role(callback: CallbackQuery):
 # ===== Смена команды =====
 @router.callback_query(F.data.startswith("emp_change_team:"))
 async def change_team_start(callback: CallbackQuery):
-    user_id = int(callback.data.split(":")[1])
-    admin = await get_employee(callback.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
+    if not await check_admin_access(callback.from_user.id):
         await callback.answer("Нет прав", show_alert=True)
         return
+    user_id = int(callback.data.split(":")[1])
     emp = await get_employee_by_id(user_id)
     if not emp:
         await callback.answer("Сотрудник не найден", show_alert=True)
@@ -226,13 +231,12 @@ async def change_team_start(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("emp_set_team:"))
 async def set_team(callback: CallbackQuery):
+    if not await check_admin_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     _, user_id_str, team_str = callback.data.split(":")
     user_id = int(user_id_str)
     new_team = Team(team_str) if team_str != "None" else None
-    admin = await get_employee(callback.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
-        await callback.answer("Нет прав", show_alert=True)
-        return
     emp = await update_employee_team(user_id, new_team)
     if not emp:
         await callback.answer("Ошибка", show_alert=True)
@@ -250,24 +254,11 @@ async def back_to_employees_list(callback: CallbackQuery):
     await list_employees(callback.message, page=1, user_id=callback.from_user.id, include_inactive=False)
     await callback.answer()
 
-# ===== Назад в главное меню =====
-@router.message(F.text == "⬅️ Назад")
-async def back_to_admin_menu(message: Message):
-    admin = await get_employee(message.from_user.id)
-    if admin and admin.role == UserRole.ADMIN:
-        await message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())
-    else:
-        await message.answer("Возврат...")
-
 # ===== Поиск =====
 @router.message(F.text == "🔍 Поиск")
 async def start_search(message: Message, state: FSMContext):
-    admin = await get_employee(message.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
+    if not await check_admin_access(message.from_user.id):
         await message.answer("Нет прав.")
-        return
-    if not admin.active:
-        await message.answer("Ваш аккаунт неактивен. Обратитесь к администратору.")
         return
     await state.set_state(EmployeeSearch.query)
     await message.answer("Введите ФИО или телефон для поиска:")
@@ -278,9 +269,8 @@ async def process_search(message: Message, state: FSMContext):
     if len(query) < 2:
         await message.answer("Введите минимум 2 символа.")
         return
-    admin = await get_employee(message.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
-        await message.answer("У вас нет прав.")
+    if not await check_admin_access(message.from_user.id):
+        await message.answer("Нет прав.")
         await state.clear()
         return
     employees = await get_all_employees(search=query)
@@ -288,9 +278,7 @@ async def process_search(message: Message, state: FSMContext):
         await message.answer("Ничего не найдено.")
         await state.clear()
         return
-    # Сохраняем результаты в состоянии
     await state.update_data(search_query=query, search_results=employees, search_page=1)
-    # Показываем первую страницу
     limit = 10
     page = 1
     total = len(employees)
@@ -331,3 +319,12 @@ async def search_from_list(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await start_search(callback.message, state)
     await callback.answer()
+
+# ===== Назад в главное меню =====
+@router.message(F.text == "⬅️ Назад")
+async def back_to_admin_menu(message: Message):
+    admin = await get_employee(message.from_user.id)
+    if admin and admin.role == UserRole.ADMIN:
+        await message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())
+    else:
+        await message.answer("Возврат...")

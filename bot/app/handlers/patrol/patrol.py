@@ -26,11 +26,23 @@ async def safe_delete_message(message):
     except Exception:
         pass
 
+# ===== ПРОВЕРКА ПРАВ ТОЛЬКО ПРИ ВХОДЕ =====
+async def check_patrol_access(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    if not employee:
+        return False
+    role_str = employee.role.value if hasattr(employee.role, 'value') else str(employee.role)
+    return role_str in ("SECURITY", "ADMIN", "CONCIERGE")
+
 @router.message(F.text == "🚶 Обходы")
 async def patrol_menu(message: Message, state: FSMContext, page: int = 1):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.SECURITY, UserRole.ADMIN, UserRole.CONCIERGE):
+    if not await check_patrol_access(message.from_user.id):
         await message.answer("У вас нет прав.")
+        return
+
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
 
     limit = 10
@@ -53,6 +65,7 @@ async def patrol_menu(message: Message, state: FSMContext, page: int = 1):
 
 @router.message(F.text == "➕ Новый обход")
 async def start_create_patrol(message: Message, state: FSMContext):
+    # Проверяем, что пользователь – охрана (это специальное требование)
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role != UserRole.SECURITY:
         await message.answer("Только для охраны.")

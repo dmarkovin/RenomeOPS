@@ -14,8 +14,6 @@ from app.keyboards.object_navigation import (
     cellar_keyboard, apartment_keyboard, entrance_keyboard, floor_keyboard
 )
 from app.keyboards.assign import (
-    employee_selection_keyboard,
-    team_selection_keyboard,
     service_team_selection_keyboard,
     service_employee_selection_keyboard
 )
@@ -38,10 +36,17 @@ class ServiceOrderState(StatesGroup):
     photo = State()
     confirm = State()
 
+# ===== ПРОВЕРКА ПРАВ ТОЛЬКО ПРИ ВХОДЕ =====
+async def check_service_access(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    if not employee:
+        return False
+    role_str = employee.role.value if hasattr(employee.role, 'value') else str(employee.role)
+    return role_str in ("ADMIN", "DIRECTOR", "CONCIERGE")
+
 @router.message(F.text == "💳 Платные услуги")
 async def show_service_catalog(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
+    if not await check_service_access(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     await state.clear()
@@ -413,7 +418,6 @@ async def service_back(callback: CallbackQuery, state: FSMContext):
     if not employee:
         await callback.answer("Ошибка", show_alert=True)
         return
-    # Возвращаем в главное меню
     await callback.message.delete()
     await callback.message.answer(
         "Главное меню:",

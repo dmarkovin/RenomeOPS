@@ -45,28 +45,20 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
-# ===== Проверка прав для документов =====
-def has_document_access(role) -> bool:
-    if hasattr(role, 'value'):
-        role = role.value
-    return role in ("ADMIN", "CONCIERGE")
-
-# ========== Главное меню документов ==========
 @router.message(F.text == "📄 Документы")
 async def documents_menu(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or not has_document_access(employee.role):
-        await message.answer("У вас нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     await state.clear()
     await message.answer("📄 Управление документами:", reply_markup=doc_main_menu_keyboard())
 
-# ========== Создание документа ==========
 @router.message(F.text == "➕ Новый документ")
 async def start_create_document(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or not has_document_access(employee.role):
-        await message.answer("Нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     await state.clear()
     await state.set_state(DocumentCreate.name)
@@ -104,7 +96,10 @@ async def process_type(message: Message, state: FSMContext):
 async def cancel_create(message: Message, state: FSMContext):
     await state.clear()
     employee = await get_employee(message.from_user.id)
-    await message.answer("Создание отменено", reply_markup=doc_main_menu_keyboard())
+    if employee:
+        await message.answer("Создание отменено", reply_markup=doc_main_menu_keyboard())
+    else:
+        await message.answer("Создание отменено")
 
 @router.message(StateFilter(DocumentCreate.doc_type))
 async def invalid_type(message: Message):
@@ -176,7 +171,10 @@ async def finish_photo(message: Message, state: FSMContext):
 async def cancel_photo(message: Message, state: FSMContext):
     await state.clear()
     employee = await get_employee(message.from_user.id)
-    await message.answer("Создание отменено", reply_markup=doc_main_menu_keyboard())
+    if employee:
+        await message.answer("Создание отменено", reply_markup=doc_main_menu_keyboard())
+    else:
+        await message.answer("Создание отменено")
 
 @router.message(DocumentCreate.confirm, F.text == "✅ Да, создать")
 async def confirm_create(message: Message, state: FSMContext):
@@ -208,29 +206,47 @@ async def confirm_create(message: Message, state: FSMContext):
 async def cancel_create(message: Message, state: FSMContext):
     await state.clear()
     employee = await get_employee(message.from_user.id)
-    await message.answer("Отменено", reply_markup=doc_main_menu_keyboard())
+    if employee:
+        await message.answer("Отменено", reply_markup=doc_main_menu_keyboard())
+    else:
+        await message.answer("Отменено")
 
-# ========== Списки документов ==========
 @router.message(F.text == "📋 Входящие")
 async def list_incoming(message: Message, state: FSMContext, page: int = 1):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
     await show_doc_list(message, state, doc_type="incoming", title="📥 Входящие документы", page=page)
 
 @router.message(F.text == "📋 Исходящие")
 async def list_outgoing(message: Message, state: FSMContext, page: int = 1):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
     await show_doc_list(message, state, doc_type="outgoing", title="📤 Исходящие документы", page=page)
 
 @router.message(F.text == "📋 На хранении")
 async def list_storage(message: Message, state: FSMContext, page: int = 1):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
     await show_doc_list(message, state, doc_type="storage", status="active", title="📦 На хранении", page=page)
 
 @router.message(F.text == "📋 Выданные")
 async def list_issued(message: Message, state: FSMContext, page: int = 1):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
     await show_doc_list(message, state, doc_type="issued", status="active", title="📋 Выданные", page=page)
 
 async def show_doc_list(message: Message, state: FSMContext, doc_type: str = None, status: str = None, title: str = "Документы", page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee or not has_document_access(employee.role):
-        await message.answer("Нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     limit = 10
     offset = (page - 1) * limit
@@ -252,6 +268,11 @@ async def show_doc_list(message: Message, state: FSMContext, doc_type: str = Non
 
 @router.callback_query(F.data.startswith("doc_page:"))
 async def paginate_docs(callback: CallbackQuery, state: FSMContext, bot):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
+        return
     page = int(callback.data.split(":")[1])
     data = await state.get_data()
     doc_type = data.get('doc_type')
@@ -288,13 +309,12 @@ async def paginate_docs(callback: CallbackQuery, state: FSMContext, bot):
     await callback.answer()
     await state.update_data(doc_page=page)
 
-# ========== Карточка документа ==========
 @router.callback_query(F.data.startswith("doc:"))
 async def show_doc_card(callback: CallbackQuery):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     doc_id = int(callback.data.split(":")[1])
     d = await get_document(doc_id)
@@ -325,8 +345,8 @@ async def show_doc_card(callback: CallbackQuery):
 async def doc_back_to_list(callback: CallbackQuery, state: FSMContext):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     data = await state.get_data()
     doc_type = data.get('doc_type')
@@ -340,8 +360,8 @@ async def doc_back_to_list(callback: CallbackQuery, state: FSMContext):
 async def doc_return(callback: CallbackQuery):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     doc_id = int(callback.data.split(":")[1])
     d = await update_document_status(doc_id, "returned")
@@ -355,21 +375,22 @@ async def doc_return(callback: CallbackQuery):
 async def back_to_doc_menu(callback: CallbackQuery, state: FSMContext):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     await state.clear()
     await callback.message.delete()
-    await callback.message.answer("📄 Управление документами:", reply_markup=doc_main_menu_keyboard())
+    employee = await get_employee(user_id)
+    if employee:
+        await callback.message.answer("📄 Управление документами:", reply_markup=doc_main_menu_keyboard())
     await callback.answer()
 
-# ========== Комментарии ==========
 @router.callback_query(F.data.startswith("doc_comment_menu:"))
 async def doc_comment_menu(callback: CallbackQuery):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     doc_id = int(callback.data.split(":")[1])
     await callback.message.delete()
@@ -385,8 +406,8 @@ async def doc_comment_menu(callback: CallbackQuery):
 async def doc_comment_list(callback: CallbackQuery):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     doc_id = int(callback.data.split(":")[1])
     d = await get_document(doc_id)
@@ -417,8 +438,8 @@ async def doc_comment_list(callback: CallbackQuery):
 async def doc_comment_add(callback: CallbackQuery, state: FSMContext):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     doc_id = int(callback.data.split(":")[1])
     await state.set_state(DocumentCommentState.waiting_for_comment)
@@ -455,21 +476,20 @@ async def doc_comment_process(message: Message, state: FSMContext):
 async def doc_comment_back(callback: CallbackQuery):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     doc_id = int(callback.data.split(":")[1])
     await callback.message.delete()
     await show_doc_card(callback)
     await callback.answer()
 
-# ========== История ==========
 @router.callback_query(F.data.startswith("doc_history:"))
 async def doc_history(callback: CallbackQuery):
     user_id = get_user_id_from_callback(callback)
     employee = await get_employee(user_id)
-    if not employee or not has_document_access(employee.role):
-        await callback.answer("Нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     doc_id = int(callback.data.split(":")[1])
     history = await get_document_history(doc_id)
@@ -492,7 +512,6 @@ async def doc_history(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== Обработчик для кнопки "Назад" из меню ==========
 @router.message(F.text == "⬅️ Назад" and F.chat.type == "private")
 async def back_from_documents(message: Message, state: FSMContext):
     await state.clear()
