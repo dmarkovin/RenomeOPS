@@ -119,7 +119,6 @@ async def assign_user_confirm(callback: CallbackQuery, state: FSMContext):
         return
     assignee = await get_employee_by_id(user_id)
     if assignee and assignee.telegram_id:
-        # Добавляем кнопку для просмотра задачи
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
@@ -127,6 +126,7 @@ async def assign_user_confirm(callback: CallbackQuery, state: FSMContext):
         await notify_user(
             assignee.telegram_id,
             f"📢 Вам назначена заявка #{task_id}.",
+            task_id=task_id,
             reply_markup=keyboard
         )
     await callback.answer(f"✅ Заявка #{task_id} назначена на {assignee.full_name if assignee else 'сотрудника'}")
@@ -175,17 +175,16 @@ async def transfer_task_confirm(callback: CallbackQuery, state: FSMContext):
         return
     new_assignee = await get_employee_by_id(to_user_id)
     if new_assignee and new_assignee.telegram_id:
-        # Добавляем кнопку для просмотра задачи
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
         ])
-        # Получаем имя текущего сотрудника для текста
         current_user = await get_employee(callback.from_user.id)
         sender_name = current_user.full_name if current_user else "Сотрудник"
         await notify_user(
             new_assignee.telegram_id,
             f"📢 Вам передана задача #{task_id}: {task.title}\nОт: {sender_name}\nКомментарий: Требуется помощь",
+            task_id=task_id,
             reply_markup=keyboard
         )
     await callback.answer(f"✅ Заявка #{task_id} передана {new_assignee.full_name if new_assignee else 'сотруднику'}")

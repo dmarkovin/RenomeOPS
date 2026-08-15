@@ -13,6 +13,7 @@ from app.services.tasks.service import (
     get_paid_closed_tasks,
     get_regular_closed_tasks,
     take_task,
+    get_all_team_tasks,
 )
 from app.database.models import UserRole
 from app.keyboards.tasks import (
@@ -94,6 +95,7 @@ async def show_list(
         show_assignee = True
 
         if list_type == "open":
+            # Все открытые задачи (для администраторов, консьержей, директоров)
             if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
                 if isinstance(target, CallbackQuery):
                     await target.answer("У вас нет прав на просмотр всех заявок.", show_alert=True)
@@ -103,25 +105,44 @@ async def show_list(
             tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
         elif list_type == "my":
-            tasks = await get_tasks_for_employee(employee.id, limit=1000, offset=0)
+            # Мои задачи (только где пользователь исполнитель, включая проверку)
+            tasks = await get_tasks_for_employee(employee.id, limit=1000, offset=0, include_closed=False)
             title = "📋 Мои задачи"
             show_assignee = False
         elif list_type == "team":
-            tasks = await get_team_tasks(employee.id, limit=1000, offset=0)
-            title = "📋 Новые задачи"
-            show_assignee = False
+            # Все задачи команды (включая взятые другими) – "Все задачи"
+            tasks = await get_all_team_tasks(employee.id, limit=1000, offset=0, include_closed=False)
+            title = "📋 Все задачи"
+            show_assignee = True
         elif list_type == "checking":
-            if employee.role != UserRole.CONCIERGE:
+            if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
                 if isinstance(target, CallbackQuery):
-                    await target.answer("Только для консьержей.", show_alert=True)
+                    await target.answer("Только для консьержей, админов и директоров.", show_alert=True)
                 else:
-                    await target.answer("Только для консьержей.")
+                    await target.answer("Только для консьержей, админов и директоров.")
                 return
             tasks = await get_checking_tasks(limit=1000, offset=0)
             title = "📋 Задачи на проверке"
         elif list_type == "archive_all":
+            # Все закрытые задачи для админов/консьержей/директоров
+            if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+                if isinstance(target, CallbackQuery):
+                    await target.answer("У вас нет прав на просмотр всех закрытых.", show_alert=True)
+                else:
+                    await target.answer("У вас нет прав на просмотр всех закрытых.")
+                return
             tasks = await get_tasks_by_status("closed", limit=1000, offset=0, user_id=employee.id)
             title = "📦 Архив (все закрытые заявки)"
+        elif list_type == "archive_team":
+            # Архив задач команды (закрытые задачи команды)
+            tasks = await get_all_team_tasks(employee.id, limit=1000, offset=0, include_closed=True)
+            title = "📦 Архив задач команды"
+            show_assignee = True
+        elif list_type == "archive_my":
+            # Архив личных задач (закрытые задачи, где исполнитель – пользователь)
+            tasks = await get_tasks_for_employee(employee.id, limit=1000, offset=0, include_closed=True)
+            title = "📦 Архив личных задач"
+            show_assignee = False
         elif list_type == "archive_paid":
             tasks = await get_paid_closed_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "💰 Архив платных заявок"
@@ -166,9 +187,9 @@ async def show_list(
         if not tasks_page:
             text = f"{title}\n\nНет записей."
             if isinstance(target, CallbackQuery):
-                await target.message.answer(text, reply_markup=get_navigation_keyboard())
+                await target.message.answer(text, reply_markup=get_navigation_keyboard(), parse_mode=None)
             else:
-                await target.answer(text, reply_markup=get_navigation_keyboard())
+                await target.answer(text, reply_markup=get_navigation_keyboard(), parse_mode=None)
             return
 
         text = get_task_list_text(title, tasks_page, page, total_pages, show_assignee)
@@ -183,9 +204,9 @@ async def show_list(
     except Exception as e:
         print(f"ERROR in show_list: {e}")
         if isinstance(target, CallbackQuery):
-            await target.message.answer(f"❌ Ошибка при загрузке списка: {str(e)}")
+            await target.message.answer(f"❌ Ошибка при загрузке списка: {str(e)}", parse_mode=None)
         else:
-            await target.answer(f"❌ Ошибка при загрузке списка: {str(e)}")
+            await target.answer(f"❌ Ошибка при загрузке списка: {str(e)}", parse_mode=None)
 
 async def show_archive_menu(target, state: FSMContext):
     if isinstance(target, CallbackQuery):
@@ -203,12 +224,17 @@ async def show_archive_menu(target, state: FSMContext):
             await target.answer("Вы не зарегистрированы.")
         return
 
-    buttons = [
-        [InlineKeyboardButton(text="📋 Все закрытые", callback_data="archive_category:all")],
-        [InlineKeyboardButton(text="💰 Платные услуги", callback_data="archive_category:paid")],
-        [InlineKeyboardButton(text="📋 Личные задачи", callback_data="archive_category:regular")],
-    ]
+    buttons = []
+    # Для администраторов, консьержей, директоров – все закрытые
+    if employee.role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+        buttons.append([InlineKeyboardButton(text="📋 Все закрытые", callback_data="archive_category:all")])
+    # Для всех сотрудников – архив команды
+    if employee.team is not None:
+        buttons.append([InlineKeyboardButton(text="📦 Архив команды", callback_data="archive_category:team")])
+    # Архив личных задач – для всех
+    buttons.append([InlineKeyboardButton(text="📋 Мои закрытые", callback_data="archive_category:my")])
     if employee.role == UserRole.ADMIN:
+        buttons.append([InlineKeyboardButton(text="💰 Платные услуги", callback_data="archive_category:paid")])
         buttons.append([InlineKeyboardButton(text="📢 Обращения (проблемы)", callback_data="archive_category:feedback")])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="tasks_back")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -223,6 +249,8 @@ async def archive_category_selected(callback: CallbackQuery, state: FSMContext):
     category = callback.data.split(":")[1]
     list_type_map = {
         "all": "archive_all",
+        "team": "archive_team",
+        "my": "archive_my",
         "paid": "archive_paid",
         "regular": "archive_regular",
         "feedback": "archive_feedback"
@@ -239,7 +267,7 @@ async def tasks_menu(message: Message, state: FSMContext):
         await message.answer("Вы не зарегистрированы.")
         return
     await state.clear()
-    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
+    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role, employee.team))
 
 @router.message(F.text.startswith("📋 Список заявок"))
 async def show_all_open_tasks(message: Message, state: FSMContext):
@@ -249,7 +277,7 @@ async def show_all_open_tasks(message: Message, state: FSMContext):
 async def show_my_tasks(message: Message, state: FSMContext):
     await show_list(message, state, "my", user_id=message.from_user.id)
 
-@router.message(F.text.startswith("📋 Новые задачи"))
+@router.message(F.text.startswith("📋 Все задачи"))
 async def show_team_tasks(message: Message, state: FSMContext):
     await show_list(message, state, "team", user_id=message.from_user.id)
 
@@ -362,19 +390,28 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         employee = await get_employee(callback.from_user.id)
         if employee:
             await callback.message.delete()
-            await callback.message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
+            await callback.message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role, employee.team))
         else:
             await callback.answer("Ошибка", show_alert=True)
         await callback.answer()
 
+@router.callback_query(F.data == "tasks_back_to_menu")
+async def back_to_tasks_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.delete()
+    employee = await get_employee(callback.from_user.id)
+    if employee:
+        await callback.message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role, employee.team))
+    await callback.answer()
+
 @router.message(F.text == "⬅️ Назад")
-async def back_to_tasks_menu(message: Message, state: FSMContext):
+async def back_to_tasks_menu_message(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
         return
     await state.clear()
-    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
+    await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role, employee.team))
 
 @router.message(F.text == "🏠 Главное меню")
 async def back_to_main_menu(message: Message, state: FSMContext):

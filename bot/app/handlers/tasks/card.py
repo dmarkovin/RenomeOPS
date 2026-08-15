@@ -67,8 +67,14 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
     if not employee:
         await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
+
+    # ===== ИСПРАВЛЕННАЯ ПРОВЕРКА ДОСТУПА =====
+    # Администраторы, директоры и консьержи видят всё
     if employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
-        if task.assigned_to != employee.id and not (task.assigned_team == employee.team and task.assigned_to is None):
+        # Обычные сотрудники видят:
+        # - свои задачи (где они исполнитель)
+        # - задачи своей команды (даже если есть исполнитель)
+        if task.assigned_to != employee.id and task.assigned_team != employee.team:
             await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
             return
 
@@ -135,6 +141,7 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
     await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
     await callback.answer()
 
+# ========== Остальные обработчики ==========
 @router.callback_query(F.data.startswith("task_take:"))
 async def take_task_callback(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
