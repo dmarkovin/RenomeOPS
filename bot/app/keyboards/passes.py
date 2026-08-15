@@ -2,7 +2,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import Pass
 from typing import List
 
-
 def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> InlineKeyboardMarkup:
     buttons = []
     for p in passes[:10]:
@@ -43,7 +42,6 @@ def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> Inlin
     buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="pass_menu_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-
 def pass_action_keyboard(pass_id: int, status: str, user_role: str, checked_in: bool = False, checked_out: bool = False) -> InlineKeyboardMarkup:
     buttons = []
     if status == "active":
@@ -68,7 +66,6 @@ def pass_action_keyboard(pass_id: int, status: str, user_role: str, checked_in: 
     buttons.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="pass_back_to_list")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-
 def pass_main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -76,11 +73,10 @@ def pass_main_menu_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📋 Активные пропуски")],
             [KeyboardButton(text="📜 История пропусков")],
             [KeyboardButton(text="🔍 Поиск по пропускам")],
-            [KeyboardButton(text="⬅️ Назад")]
+            [KeyboardButton(text="⬅️ Назад")],
         ],
         resize_keyboard=True
     )
-
 
 def pass_assign_type_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(

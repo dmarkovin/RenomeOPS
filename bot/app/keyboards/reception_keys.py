@@ -16,7 +16,7 @@ def key_list_keyboard(keys: List[Key], page: int, total_pages: int, status: str)
         nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"key_page:{page+1}"))
     if nav_buttons:
         buttons.append(nav_buttons)
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="key_back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def key_main_menu_keyboard() -> ReplyKeyboardMarkup:

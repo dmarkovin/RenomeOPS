@@ -31,7 +31,6 @@ def apartment_keyboard(building_id: int, entrance: int, floor: int, apartments: 
     buttons = []
     for item in apartments:
         if floor == 1:
-            # Общая зона – item это ID
             area_id = item
             name = get_common_area_name(building_id, entrance, area_id)
             text = name if name else f"Зона {area_id}"

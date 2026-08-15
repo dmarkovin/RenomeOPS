@@ -2,7 +2,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import Service, ServiceOrder
 from typing import List
 
-
 def service_catalog_keyboard(services: List[Service]) -> InlineKeyboardMarkup:
     buttons = []
     for svc in services:
@@ -13,18 +12,16 @@ def service_catalog_keyboard(services: List[Service]) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="service_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-
 def service_admin_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="➕ Создать услугу")],
             [KeyboardButton(text="📋 Список услуг")],
             [KeyboardButton(text="📦 Заказы")],
-            [KeyboardButton(text="⬅️ Назад")]
+            [KeyboardButton(text="⬅️ Назад")],
         ],
         resize_keyboard=True
     )
-
 
 def service_order_status_keyboard(order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -36,7 +33,6 @@ def service_order_status_keyboard(order_id: int) -> InlineKeyboardMarkup:
         ]
     )
 
-
 def service_details_keyboard(service_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -46,7 +42,6 @@ def service_details_keyboard(service_id: int) -> InlineKeyboardMarkup:
     )
 
 def service_executor_keyboard(employees: List, teams: List) -> InlineKeyboardMarkup:
-    """Клавиатура выбора исполнителя для платной услуги: сотрудник или команда"""
     buttons = []
     for team in teams:
         buttons.append([InlineKeyboardButton(
@@ -85,7 +80,7 @@ def service_admin_list_keyboard(services: list, page: int, total_pages: int) -> 
     if nav:
         buttons.append(nav)
     buttons.append([InlineKeyboardButton(text="➕ Создать услугу", callback_data="service_admin_create")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="service_admin_back_to_menu")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="service_admin_back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def service_admin_edit_keyboard(service_id: int) -> InlineKeyboardMarkup:

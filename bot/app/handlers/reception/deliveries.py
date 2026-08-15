@@ -11,8 +11,9 @@ from app.services.reception.delivery_service import (
 )
 from app.database.models import UserRole
 from app.keyboards.reception import reception_menu_keyboard
-from app.utils.helpers import get_user_id_from_callback
+import logging
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 class DeliveryCreate(StatesGroup):
@@ -25,6 +26,18 @@ class DeliveryCreate(StatesGroup):
 
 class DeliveryCommentState(StatesGroup):
     waiting_for_comment = State()
+
+# ===== Проверка доступа к доставке =====
+async def check_delivery_access(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    if not employee:
+        logger.warning(f"check_delivery_access: пользователь {user_id} не найден")
+        return False
+    role_str = employee.role.value if hasattr(employee.role, 'value') else str(employee.role)
+    allowed = role_str in ("ADMIN", "CONCIERGE")
+    if not allowed:
+        logger.warning(f"check_delivery_access: пользователь {user_id} имеет роль {role_str}, требуется ADMIN или CONCIERGE")
+    return allowed
 
 async def safe_delete_message(message):
     try:
@@ -41,17 +54,16 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
 
 @router.message(F.text == "📦 Доставка")
 async def reception_menu(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
+    if not await check_delivery_access(message.from_user.id):
+        await message.answer("У вас нет прав.")
         return
     await message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
 
+# ========== Создание посылки ==========
 @router.message(F.text == "📦 Новая посылка")
 async def start_delivery(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
+    if not await check_delivery_access(message.from_user.id):
+        await message.answer("Нет прав.")
         return
     await state.clear()
     await state.set_state(DeliveryCreate.recipient)
@@ -143,19 +155,19 @@ async def delivery_cancel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=reception_menu_keyboard())
 
-@router.message(F.text == "📋 Активные посылки")
+# ========== Список активных посылок ==========
+@router.message(F.text == "📋 Список посылок")
 async def list_active_deliveries(message: Message, state: FSMContext, page: int = 1):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
+    if not await check_delivery_access(message.from_user.id):
+        await message.answer("Нет прав.")
         return
     await show_delivery_list(message, state, status=["pending", "received"], title="📦 Активные посылки", page=page)
 
-@router.message(F.text == "📦 Архив доставок")
+# ========== Архив доставок ==========
+@router.message(F.text == "📦 Архив доставки")
 async def list_completed_deliveries(message: Message, state: FSMContext, page: int = 1):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
+    if not await check_delivery_access(message.from_user.id):
+        await message.answer("Нет прав.")
         return
     await show_delivery_list(message, state, status="completed", title="📦 Архив доставок", page=page)
 
@@ -163,6 +175,9 @@ async def show_delivery_list(message: Message, state: FSMContext, status=None, t
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
+        return
+    if not await check_delivery_access(message.from_user.id):
+        await message.answer("Нет прав.")
         return
     limit = 10
     offset = (page - 1) * limit
@@ -198,11 +213,6 @@ async def show_delivery_list(message: Message, state: FSMContext, status=None, t
 
 @router.callback_query(F.data.startswith("delivery_page:"))
 async def paginate_deliveries(callback: CallbackQuery, state: FSMContext):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     page = int(callback.data.split(":")[1])
     data = await state.get_data()
     status = data.get('delivery_list_status')
@@ -211,42 +221,35 @@ async def paginate_deliveries(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "delivery_back_to_menu")
 async def delivery_back_to_menu(callback: CallbackQuery, state: FSMContext):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     await state.clear()
     await callback.message.delete()
-    employee = await get_employee(user_id)
-    if employee:
+    employee = await get_employee(callback.from_user.id)
+    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
         await callback.message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
     await callback.answer()
 
 @router.callback_query(F.data == "delivery_back_to_list")
 async def delivery_back_to_list(callback: CallbackQuery, state: FSMContext):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     data = await state.get_data()
     status = data.get('delivery_list_status')
     page = data.get('delivery_list_page', 1)
     await callback.message.delete()
     await show_delivery_list(callback.message, state, status=status, page=page)
 
+# ========== Карточка посылки ==========
 @router.callback_query(F.data.startswith("delivery:"))
 async def show_delivery_card(callback: CallbackQuery):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     delivery_id = int(callback.data.split(":")[1])
     d = await get_delivery(delivery_id)
     if not d:
         await callback.answer("Не найдена", show_alert=True)
+        return
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
+        return
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("У вас нет прав для просмотра этой посылки", show_alert=True)
         return
     text = (
         f"📦 Посылка #{d.id}\n"
@@ -270,11 +273,6 @@ async def show_delivery_card(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delivery_receive:"))
 async def delivery_receive(callback: CallbackQuery):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     delivery_id = int(callback.data.split(":")[1])
     d = await update_delivery_status(delivery_id, "received")
     if d:
@@ -285,11 +283,6 @@ async def delivery_receive(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delivery_complete:"))
 async def delivery_complete(callback: CallbackQuery):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     delivery_id = int(callback.data.split(":")[1])
     d = await update_delivery_status(delivery_id, "completed")
     if d:
@@ -298,13 +291,9 @@ async def delivery_complete(callback: CallbackQuery):
     else:
         await callback.answer("Ошибка", show_alert=True)
 
+# ========== Комментарии ==========
 @router.callback_query(F.data.startswith("delivery_comment_menu:"))
 async def delivery_comment_menu(callback: CallbackQuery):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     delivery_id = int(callback.data.split(":")[1])
     await callback.message.delete()
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -317,11 +306,6 @@ async def delivery_comment_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delivery_comment_list:"))
 async def delivery_comment_list(callback: CallbackQuery):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     delivery_id = int(callback.data.split(":")[1])
     d = await get_delivery(delivery_id)
     if not d:
@@ -349,12 +333,11 @@ async def delivery_comment_list(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delivery_comment_add:"))
 async def delivery_comment_add(callback: CallbackQuery, state: FSMContext):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     delivery_id = int(callback.data.split(":")[1])
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Ошибка", show_alert=True)
+        return
     await state.set_state(DeliveryCommentState.waiting_for_comment)
     await state.update_data(delivery_id=delivery_id)
     await callback.message.delete()
@@ -387,23 +370,14 @@ async def delivery_comment_process(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("delivery_comment_back:"))
 async def delivery_comment_back(callback: CallbackQuery):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     delivery_id = int(callback.data.split(":")[1])
     await callback.message.delete()
     await show_delivery_card(callback)
     await callback.answer()
 
+# ========== История ==========
 @router.callback_query(F.data.startswith("delivery_history:"))
 async def delivery_history(callback: CallbackQuery):
-    user_id = get_user_id_from_callback(callback)
-    employee = await get_employee(user_id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
     delivery_id = int(callback.data.split(":")[1])
     history = await get_delivery_history(delivery_id)
     if not history:
@@ -425,6 +399,7 @@ async def delivery_history(callback: CallbackQuery):
     )
     await callback.answer()
 
+# ========== Обработчик для кнопки "Назад" из меню ==========
 @router.message(F.text == "⬅️ Назад" and F.chat.type == "private")
 async def back_from_deliveries(message: Message, state: FSMContext):
     await state.clear()
