@@ -15,6 +15,7 @@ from app.keyboards.services import (
     service_admin_list_keyboard,
     service_admin_edit_keyboard
 )
+from app.utils.helpers import get_user_id_from_callback
 import logging
 
 router = Router()
@@ -26,26 +27,28 @@ class ServiceEdit(StatesGroup):
     category = State()
     confirm_delete = State()
 
-# ===== Вспомогательная функция проверки прав =====
-async def check_admin(user_id: int) -> bool:
-    try:
-        employee = await get_employee(user_id)
-        if not employee:
-            logging.warning(f"check_admin: пользователь {user_id} не найден")
-            return False
-        # Простое сравнение с Enum
-        is_admin = (employee.role == UserRole.ADMIN)
-        if not is_admin:
-            logging.warning(f"check_admin: пользователь {user_id} имеет роль {employee.role}, требуется ADMIN")
-        return is_admin
-    except Exception as e:
-        logging.error(f"check_admin: ошибка {e}")
+# ===== Проверка прав с логированием =====
+async def is_admin(user_id: int) -> bool:
+    logging.info(f"is_admin: checking user_id={user_id}")
+    employee = await get_employee(user_id)
+    logging.info(f"is_admin: employee={employee}, role={employee.role if employee else None}")
+    if not employee:
         return False
+    result = employee.role.value == "ADMIN"
+    logging.info(f"is_admin: result={result}")
+    return result
 
 # ===== Главное меню управления услугами =====
 @router.message(F.text == "💳 Управление услугами")
-async def service_admin_menu(message: Message, state: FSMContext, page: int = 1):
-    if not await check_admin(message.from_user.id):
+async def service_admin_menu(message: Message, state: FSMContext, page: int = 1, user_id: int = None):
+    # Если user_id не передан, берём из сообщения, но если это бот, берём chat.id
+    if user_id is None:
+        user_id = message.from_user.id
+        if user_id == 8892179840:  # ID бота
+            user_id = message.chat.id
+            logging.info(f"service_admin_menu: using chat.id as user_id: {user_id}")
+    logging.info(f"service_admin_menu called with user_id={user_id}")
+    if not await is_admin(user_id):
         await message.answer("У вас нет прав.")
         return
     await state.update_data(service_admin_page=page)
@@ -65,16 +68,18 @@ async def service_admin_menu(message: Message, state: FSMContext, page: int = 1)
 
 @router.callback_query(F.data.startswith("service_admin_page:"))
 async def service_admin_page(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     page = int(callback.data.split(":")[1])
-    await service_admin_menu(callback.message, state, page)
+    await service_admin_menu(callback.message, state, page, user_id)
     await callback.answer()
 
 @router.callback_query(F.data == "service_admin_create")
 async def service_admin_create(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     await callback.message.delete()
@@ -85,7 +90,7 @@ async def service_admin_create(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ServiceEdit.name)
 async def service_edit_name(message: Message, state: FSMContext):
-    if not await check_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     data = await state.get_data()
@@ -102,7 +107,7 @@ async def service_edit_name(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.description)
 async def service_edit_description(message: Message, state: FSMContext):
-    if not await check_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     data = await state.get_data()
@@ -119,7 +124,7 @@ async def service_edit_description(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.price)
 async def service_edit_price(message: Message, state: FSMContext):
-    if not await check_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     data = await state.get_data()
@@ -143,7 +148,7 @@ async def service_edit_price(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.category)
 async def service_edit_category(message: Message, state: FSMContext):
-    if not await check_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     data = await state.get_data()
@@ -170,7 +175,8 @@ async def service_edit_category(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_admin_edit:"))
 async def service_admin_edit_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -192,7 +198,8 @@ async def service_admin_edit_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_name:"))
 async def service_edit_name_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -204,7 +211,8 @@ async def service_edit_name_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_description:"))
 async def service_edit_description_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -216,7 +224,8 @@ async def service_edit_description_start(callback: CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data.startswith("service_edit_price:"))
 async def service_edit_price_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -228,7 +237,8 @@ async def service_edit_price_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_category:"))
 async def service_edit_category_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -240,7 +250,8 @@ async def service_edit_category_start(callback: CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data.startswith("service_edit_active:"))
 async def service_edit_active(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -254,16 +265,19 @@ async def service_edit_active(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_back:"))
 async def service_edit_back(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     await callback.message.delete()
-    await service_admin_menu(callback.message, state)
+    await service_admin_menu(callback.message, state, user_id=user_id)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("service_admin_delete:"))
 async def service_admin_delete(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    logging.info(f"service_admin_delete called with user_id={user_id}")
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -285,7 +299,9 @@ async def service_admin_delete(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(StateFilter(ServiceEdit.confirm_delete), F.data == "service_admin_delete_confirm")
 async def service_admin_delete_confirm(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    logging.info(f"service_admin_delete_confirm called with user_id={user_id}")
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     data = await state.get_data()
@@ -297,38 +313,44 @@ async def service_admin_delete_confirm(callback: CallbackQuery, state: FSMContex
         await callback.answer("❌ Ошибка", show_alert=True)
     await state.clear()
     await callback.message.delete()
-    await service_admin_menu(callback.message, state)
+    await service_admin_menu(callback.message, state, user_id=user_id)
 
 @router.callback_query(StateFilter(ServiceEdit.confirm_delete), F.data == "service_admin_delete_cancel")
 async def service_admin_delete_cancel(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin(callback.from_user.id):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     await state.clear()
     await callback.message.delete()
-    await service_admin_menu(callback.message, state)
+    await service_admin_menu(callback.message, state, user_id=user_id)
     await callback.answer()
 
 @router.callback_query(F.data == "service_admin_back")
-async def service_admin_back(callback: CallbackQuery):
-    if not await check_admin(callback.from_user.id):
+async def service_admin_back_legacy(callback: CallbackQuery, state: FSMContext):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
         await callback.answer("Нет прав", show_alert=True)
         return
     await callback.message.delete()
-    employee = await get_employee(callback.from_user.id)
-    if employee and employee.role == UserRole.ADMIN:
-        from app.keyboards.admin import admin_keyboard
-        await callback.message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())
+    await service_admin_menu(callback.message, state, user_id=user_id)
+    await callback.answer()
+
+@router.callback_query(F.data == "service_admin_back_to_menu")
+async def service_admin_back_to_menu(callback: CallbackQuery):
+    user_id = get_user_id_from_callback(callback)
+    if not await is_admin(user_id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
+    await callback.message.delete()
+    from app.keyboards.admin import admin_keyboard
+    await callback.message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())
     await callback.answer()
 
 @router.message(F.text == "⬅️ Назад")
 async def back_from_services(message: Message):
-    if not await check_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
-    employee = await get_employee(message.from_user.id)
-    if employee and employee.role == UserRole.ADMIN:
-        from app.keyboards.admin import admin_keyboard
-        await message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())
-    else:
-        await message.answer("Возврат...")
+    from app.keyboards.admin import admin_keyboard
+    await message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())

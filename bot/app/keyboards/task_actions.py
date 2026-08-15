@@ -49,13 +49,10 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
     # ====== ВЫПОЛНЕНО (отправить на проверку) – расширенное условие ======
     if status in ("in_progress", "paused"):
         can_check = False
-        # Исполнитель
         if is_assignee:
             can_check = True
-        # Админ/консьерж/директор могут отправить любую задачу
         elif is_admin_concierge:
             can_check = True
-        # Член команды, если задача назначена на команду
         elif is_team_member:
             can_check = True
         if can_check:
@@ -80,8 +77,11 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
             buttons.append([InlineKeyboardButton(text="🔄 Вернуть в работу", callback_data=f"task_status:{task_id}:start")])
 
     # ====== Общие кнопки ======
+    comments_count = len(task.comments) if task.comments else 0
+    comments_label = f"💬 Комментарии ({comments_count})" if comments_count > 0 else "💬 Комментарии"
+
     buttons.append([
-        InlineKeyboardButton(text="💬 Комментарии", callback_data=f"task_comment_list:{task_id}"),
+        InlineKeyboardButton(text=comments_label, callback_data=f"task_comment_list:{task_id}"),
         InlineKeyboardButton(text="📷 Фото", callback_data=f"task_photo:{task_id}"),
     ])
     buttons.append([

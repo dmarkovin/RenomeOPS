@@ -71,7 +71,10 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         if task.assigned_to != employee.id and not (task.assigned_team == employee.team and task.assigned_to is None):
             await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
             return
+
     status_emoji = get_task_status_emoji(task.status)
+
+    # Формируем адрес
     address_parts = []
     if task.building:
         address_parts.append(f"корп. {task.building}")
@@ -83,30 +86,42 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         address_parts.append(f"кв. {task.apartment}")
     address = ", ".join(address_parts) if address_parts else "—"
 
-    text = (
-        f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
-        f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-        f"🏢 <b>Адрес:</b> {address}\n"
-    )
-
+    # Дополнительная информация о типе объекта
+    location_info = ""
     if task.location_type:
-        location_info = f"📍 <b>Тип объекта:</b> {task.location_type}"
-        if task.location_type == "common_area" and task.common_area:
-            location_info += f" ({task.common_area})"
-        elif task.location_type == "parking":
+        loc_type = task.location_type
+        if loc_type == "common_area" and task.common_area:
+            location_info = f"Общая зона: {task.common_area}"
+        elif loc_type == "parking":
             if task.parking_level is not None and task.parking_spot is not None:
-                location_info += f" (уровень {task.parking_level}, место {task.parking_spot})"
-        elif task.location_type == "cellar" and task.cellar is not None:
-            location_info += f" (келлер {task.cellar})"
-        text += location_info + "\n"
+                location_info = f"Паркинг: уровень {task.parking_level}, место {task.parking_spot}"
+        elif loc_type == "cellar" and task.cellar is not None:
+            location_info = f"Келлер: {task.cellar}"
+        elif loc_type == "apartment":
+            location_info = "Квартира"
+        else:
+            location_info = f"Тип: {loc_type}"
 
-    text += (
-        f"🔢 <b>Приоритет:</b> {task.priority}\n"
-        f"📊 <b>Статус:</b> {task.status}\n\n"
-        f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
-        f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
-        f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-    )
+    # Команда
+    team_name = task.assigned_team.value if task.assigned_team else "не назначена"
+
+    # Собираем текст в новом порядке
+    text = f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
+
+    text += f"🔢 <b>Приоритет:</b> {task.priority}\n"
+    text += f"📊 <b>Статус:</b> {task.status}\n"
+    text += f"🏢 <b>Адрес:</b> {address}\n"
+    if location_info:
+        text += f"📍 <b>{location_info}</b>\n"
+    text += "\n"
+
+    text += f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
+
+    text += f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
+    text += f"👥 <b>Команда:</b> {team_name}\n"
+    text += f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
+    text += f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+
     if task.wait_until:
         text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
     if task.closed_at:
@@ -120,6 +135,7 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
     await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
     await callback.answer()
 
+# ========== Остальные обработчики (все остальные кнопки) ==========
 @router.callback_query(F.data.startswith("task_take:"))
 async def take_task_callback(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])

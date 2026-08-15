@@ -199,3 +199,14 @@ def get_default_team_for_role(role: UserRole) -> Optional[Team]:
         UserRole.DIRECTOR: Team.DIRECTOR_TEAM,
     }
     return mapping.get(role)
+
+async def is_admin(user_id: int) -> bool:
+    """Проверяет, является ли пользователь администратором"""
+    employee = await get_employee(user_id)
+    if not employee:
+        return False
+    # Сравниваем как с Enum, так и со строкой
+    try:
+        return employee.role == UserRole.ADMIN or str(employee.role) == "ADMIN"
+    except Exception:
+        return str(employee.role) == "ADMIN"

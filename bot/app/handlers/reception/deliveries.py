@@ -38,10 +38,14 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
+# Проверка прав для доставки
+async def check_delivery_access(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    return employee is not None and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE)
+
 @router.message(F.text == "📦 Доставка")
 async def reception_menu(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if not await check_delivery_access(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     await message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
@@ -49,6 +53,9 @@ async def reception_menu(message: Message):
 # ========== Создание посылки ==========
 @router.message(F.text == "📦 Новая посылка")
 async def start_delivery(message: Message, state: FSMContext):
+    if not await check_delivery_access(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        return
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Ошибка")
@@ -146,11 +153,17 @@ async def delivery_cancel(message: Message, state: FSMContext):
 # ========== Список активных посылок (pending + received) ==========
 @router.message(F.text == "📋 Активные посылки")
 async def list_active_deliveries(message: Message, state: FSMContext, page: int = 1):
+    if not await check_delivery_access(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        return
     await show_delivery_list(message, state, status=["pending", "received"], title="📦 Активные посылки", page=page)
 
 # ========== Архив доставок (completed) ==========
 @router.message(F.text == "📦 Архив доставок")
 async def list_completed_deliveries(message: Message, state: FSMContext, page: int = 1):
+    if not await check_delivery_access(message.from_user.id):
+        await message.answer("У вас нет прав.")
+        return
     await show_delivery_list(message, state, status="completed", title="📦 Архив доставок", page=page)
 
 async def show_delivery_list(message: Message, state: FSMContext, status=None, title="Посылки", page: int = 1):
@@ -192,6 +205,9 @@ async def show_delivery_list(message: Message, state: FSMContext, status=None, t
 
 @router.callback_query(F.data.startswith("delivery_page:"))
 async def paginate_deliveries(callback: CallbackQuery, state: FSMContext):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     page = int(callback.data.split(":")[1])
     data = await state.get_data()
     status = data.get('delivery_list_status')
@@ -200,6 +216,9 @@ async def paginate_deliveries(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "delivery_back_to_menu")
 async def delivery_back_to_menu(callback: CallbackQuery, state: FSMContext):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     await state.clear()
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
@@ -209,6 +228,9 @@ async def delivery_back_to_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "delivery_back_to_list")
 async def delivery_back_to_list(callback: CallbackQuery, state: FSMContext):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     data = await state.get_data()
     status = data.get('delivery_list_status')
     page = data.get('delivery_list_page', 1)
@@ -218,6 +240,9 @@ async def delivery_back_to_list(callback: CallbackQuery, state: FSMContext):
 # ========== Карточка посылки ==========
 @router.callback_query(F.data.startswith("delivery:"))
 async def show_delivery_card(callback: CallbackQuery):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     delivery_id = int(callback.data.split(":")[1])
     d = await get_delivery(delivery_id)
     if not d:
@@ -245,6 +270,9 @@ async def show_delivery_card(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delivery_receive:"))
 async def delivery_receive(callback: CallbackQuery):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     delivery_id = int(callback.data.split(":")[1])
     d = await update_delivery_status(delivery_id, "received")
     if d:
@@ -255,6 +283,9 @@ async def delivery_receive(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delivery_complete:"))
 async def delivery_complete(callback: CallbackQuery):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     delivery_id = int(callback.data.split(":")[1])
     d = await update_delivery_status(delivery_id, "completed")
     if d:
@@ -266,6 +297,9 @@ async def delivery_complete(callback: CallbackQuery):
 # ========== Комментарии ==========
 @router.callback_query(F.data.startswith("delivery_comment_menu:"))
 async def delivery_comment_menu(callback: CallbackQuery):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     delivery_id = int(callback.data.split(":")[1])
     await callback.message.delete()
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -278,6 +312,9 @@ async def delivery_comment_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delivery_comment_list:"))
 async def delivery_comment_list(callback: CallbackQuery):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     delivery_id = int(callback.data.split(":")[1])
     d = await get_delivery(delivery_id)
     if not d:
@@ -305,6 +342,9 @@ async def delivery_comment_list(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delivery_comment_add:"))
 async def delivery_comment_add(callback: CallbackQuery, state: FSMContext):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     delivery_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
     if not employee:
@@ -342,6 +382,9 @@ async def delivery_comment_process(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("delivery_comment_back:"))
 async def delivery_comment_back(callback: CallbackQuery):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     delivery_id = int(callback.data.split(":")[1])
     await callback.message.delete()
     await show_delivery_card(callback)
@@ -350,6 +393,9 @@ async def delivery_comment_back(callback: CallbackQuery):
 # ========== История ==========
 @router.callback_query(F.data.startswith("delivery_history:"))
 async def delivery_history(callback: CallbackQuery):
+    if not await check_delivery_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     delivery_id = int(callback.data.split(":")[1])
     history = await get_delivery_history(delivery_id)
     if not history:

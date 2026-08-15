@@ -1,3 +1,4 @@
+import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
@@ -14,8 +15,10 @@ from app.services.reception.delivery_service import get_all_deliveries
 from app.services.reception.key_service import get_keys
 from app.services.reception.document_service import get_documents
 from app.services.patrol.service import get_patrols
+from app.utils.helpers import get_user_id_from_callback
 from app.services.notification_service import notify_admins
 from app.database.models import UserRole, Team
+from app.database import AsyncSessionLocal
 from app.keyboards.main_menu import main_menu_keyboard
 from app.keyboards.settings import settings_keyboard
 from app.keyboards.employees.roles import role_selection_keyboard
@@ -35,6 +38,7 @@ from app.services.employees.service import count_employees
 from app.services.services.service import get_all_services
 from app.keyboards.patrol import patrol_main_menu_keyboard
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 # ========== Функция для главного меню ==========
@@ -72,6 +76,97 @@ async def show_settings(message: Message):
         await message.answer("Вы не зарегистрированы.")
         return
     await message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
+
+# ========== Уведомления ==========
+class SettingsStates(StatesGroup):
+    notification_settings = State()
+
+async def show_notification_settings(target, user_id: int, state: FSMContext):
+    """Показывает настройки уведомлений для указанного пользователя"""
+    employee = await get_employee(user_id)
+    if not employee:
+        if isinstance(target, CallbackQuery):
+            await target.answer("Вы не зарегистрированы", show_alert=True)
+        else:
+            await target.answer("Вы не зарегистрированы. Используйте /start для регистрации.")
+        return
+
+    settings = await get_user_settings(employee.id)
+    if not settings:
+        # Создаём настройки по умолчанию
+        from app.database.models import UserSettings
+        settings = UserSettings(user_id=employee.id)
+        async with AsyncSessionLocal() as db:
+            db.add(settings)
+            await db.commit()
+            await db.refresh(settings)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{'✅' if getattr(settings, setting, True) else '❌'} {label}",
+            callback_data=f"notif_toggle:{setting}"
+        )]
+        for setting, label in [
+            ("notify_task_assigned", "Назначение задач"),
+            ("notify_task_status_changed", "Изменение статуса"),
+            ("notify_task_comment", "Комментарии"),
+            ("notify_new_task_team", "Новые задачи команды"),
+            ("notify_checking", "Проверка задач"),
+            ("notify_admin", "Административные"),
+        ]
+    ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="notif_back")]])
+
+    await state.set_state(SettingsStates.notification_settings)
+    # Сохраняем user_id в состоянии, чтобы использовать в callback'ах
+    await state.update_data(notif_user_id=user_id)
+
+    if isinstance(target, CallbackQuery):
+        await target.message.edit_text("Настройки уведомлений:", reply_markup=kb)
+        await target.answer()
+    else:
+        await target.answer("Настройки уведомлений:", reply_markup=kb)
+
+@router.message(F.text == "🔔 Уведомления")
+async def notification_settings(message: Message, state: FSMContext):
+    logger.info(f"NOTIFICATION SETTINGS CALLED: user_id={message.from_user.id}, chat_id={message.chat.id}")
+    await show_notification_settings(message, message.from_user.id, state)
+
+@router.callback_query(F.data.startswith("notif_toggle:"), StateFilter(SettingsStates.notification_settings))
+async def toggle_notification(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"TOGGLE NOTIFICATION CALLED: user_id={callback.from_user.id}")
+    setting = callback.data.split(":")[1]
+
+    # Получаем user_id из состояния (сохранённого при открытии настроек)
+    data = await state.get_data()
+    user_id = data.get("notif_user_id")
+    if not user_id:
+        user_id = get_user_id_from_callback(callback)
+
+    employee = await get_employee(user_id)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
+        return
+
+    settings = await get_user_settings(employee.id)
+    if not settings:
+        await callback.answer("Настройки не найдены", show_alert=True)
+        return
+
+    current = getattr(settings, setting, True)
+    await update_setting(employee.id, setting, not current)
+    await callback.answer("✅ Настройка обновлена")
+
+    # Показываем обновлённые настройки
+    await show_notification_settings(callback, user_id, state)
+
+@router.callback_query(F.data == "notif_back", StateFilter(SettingsStates.notification_settings))
+async def back_from_notifications(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    employee = await get_employee(callback.from_user.id)
+    if employee:
+        await callback.message.delete()
+        await callback.message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
+    await callback.answer()
 
 # ========== Смена роли ==========
 @router.message(F.text == "🔄 Сменить роль")
@@ -161,62 +256,6 @@ async def process_team_change_reason(message: Message, state: FSMContext):
         f"✅ Запрос на смену команды отправлен администратору. Задача #{task.id} создана."
     )
     await state.clear()
-
-# ========== Уведомления ==========
-@router.message(F.text == "🔔 Уведомления")
-async def notification_settings(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    settings = await get_user_settings(employee.id)
-    if not settings:
-        await message.answer("Настройки уведомлений не найдены.")
-        return
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"{'✅' if getattr(settings, setting, True) else '❌'} {label}",
-            callback_data=f"notif_toggle:{setting}"
-        )]
-        for setting, label in [
-            ("notify_task_assigned", "Назначение задач"),
-            ("notify_task_status_changed", "Изменение статуса"),
-            ("notify_task_comment", "Комментарии"),
-            ("notify_new_task_team", "Новые задачи команды"),
-            ("notify_checking", "Проверка задач"),
-            ("notify_admin", "Административные"),
-        ]
-    ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="notif_back")]])
-    await state.set_state(SettingsStates.notification_settings)
-    await message.answer("Настройки уведомлений:", reply_markup=kb)
-
-class SettingsStates(StatesGroup):
-    notification_settings = State()
-
-@router.callback_query(F.data.startswith("notif_toggle:"), StateFilter(SettingsStates.notification_settings))
-async def toggle_notification(callback: CallbackQuery, state: FSMContext):
-    setting = callback.data.split(":")[1]
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Ошибка", show_alert=True)
-        return
-    settings = await get_user_settings(employee.id)
-    if not settings:
-        await callback.answer("Настройки не найдены", show_alert=True)
-        return
-    current = getattr(settings, setting, True)
-    await update_setting(employee.id, setting, not current)
-    await callback.answer("✅ Настройка обновлена")
-    await notification_settings(callback.message, state)
-
-@router.callback_query(F.data == "notif_back", StateFilter(SettingsStates.notification_settings))
-async def back_from_notifications(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    employee = await get_employee(callback.from_user.id)
-    if employee:
-        await callback.message.delete()
-        await callback.message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
-    await callback.answer()
 
 # ========== Обратная связь ==========
 @router.message(F.text == "📢 Сообщить о проблеме")
