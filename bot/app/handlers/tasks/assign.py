@@ -1,6 +1,6 @@
 from aiogram.types import ReplyKeyboardRemove
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
 from app.services.tasks.service import (
@@ -18,10 +18,9 @@ from app.keyboards.assign import (
     team_selection_keyboard,
     assign_type_keyboard,
 )
-from app.keyboards.main_menu import main_menu_keyboard
 from app.states.tasks.transfer import TaskTransfer
 from app.services.notification_service import notify_user, notify_team
-from app.keyboards.task_actions import task_actions_keyboard, get_task_status_emoji
+from app.keyboards.task_actions import task_actions_keyboard
 from app.handlers.tasks.card import safe_edit_or_reply
 
 router = Router()
@@ -97,7 +96,7 @@ async def assign_user_start(callback: CallbackQuery, state: FSMContext):
     if not employees:
         await callback.answer("Нет доступных сотрудников.", show_alert=True)
         return
-    kb = employee_selection_keyboard(employees, task_id)
+    kb = employee_selection_keyboard(employees, task_id, "task_assign_user_confirm")
     await callback.message.edit_text(
         f"👤 Выберите сотрудника для заявки #{task_id}:",
         reply_markup=kb
@@ -119,7 +118,6 @@ async def assign_user_confirm(callback: CallbackQuery, state: FSMContext):
         return
     assignee = await get_employee_by_id(user_id)
     if assignee and assignee.telegram_id:
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
         ])
@@ -153,7 +151,7 @@ async def transfer_task_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Нет доступных сотрудников для передачи.", show_alert=True)
         return
     await state.update_data(task_id=task_id)
-    kb = employee_selection_keyboard(employees, f"transfer_{task_id}")
+    kb = employee_selection_keyboard(employees, task_id, "task_transfer_confirm")
     await callback.message.edit_text(
         f"↗️ Выберите сотрудника для передачи заявки #{task_id}:",
         reply_markup=kb
@@ -175,7 +173,6 @@ async def transfer_task_confirm(callback: CallbackQuery, state: FSMContext):
         return
     new_assignee = await get_employee_by_id(to_user_id)
     if new_assignee and new_assignee.telegram_id:
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
         ])

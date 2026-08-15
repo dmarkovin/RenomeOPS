@@ -61,13 +61,11 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
-# ===== Проверка прав для пропусков =====
 def has_pass_access(role) -> bool:
     if hasattr(role, 'value'):
         role = role.value
     return role in ("ADMIN", "DIRECTOR", "CONCIERGE", "SECURITY")
 
-# ========== Главное меню пропусков ==========
 @router.message(F.text == "🚗 Пропуска")
 async def passes_menu(message: Message):
     employee = await get_employee(message.from_user.id)
@@ -76,7 +74,6 @@ async def passes_menu(message: Message):
         return
     await message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
 
-# ========== Создание пропуска ==========
 @router.message(F.text == "➕ Заказать пропуск")
 async def start_create_pass(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -255,14 +252,9 @@ async def process_assign_type(message: Message, state: FSMContext):
             await message.answer("Нет доступных сотрудников охраны. Выберите другой вариант.")
             return
         await state.set_state(PassCreate.assign_employee)
-        await message.answer("Выберите сотрудника охраны:", reply_markup=employee_selection_keyboard(employees, "pass_assign", 0))
+        await message.answer("Выберите сотрудника охраны:", reply_markup=employee_selection_keyboard(employees, "pass_assign", "pass_assign_emp"))
         return
 
-@router.message(StateFilter(PassCreate.assign_type))
-async def invalid_assign_type(message: Message):
-    await message.answer("Пожалуйста, используйте кнопки для выбора.")
-
-# ---- Обработчик выбора конкретного сотрудника ----
 @router.callback_query(StateFilter(PassCreate.assign_employee), F.data.startswith("pass_assign_emp:"))
 async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")

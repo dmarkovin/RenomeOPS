@@ -62,7 +62,6 @@ async def create_task(
     assigned_to: int = None,
     assigned_team: Team = None
 ) -> Task:
-    # Валидация приоритета
     if priority < 1 or priority > 5:
         raise ValueError("Приоритет должен быть от 1 до 5")
     async with AsyncSessionLocal() as db:
@@ -385,7 +384,7 @@ async def change_status(
 
 
 # ==========================
-# Добавить комментарий (убедимся, что сохраняется)
+# Добавить комментарий
 # ==========================
 async def add_comment(
     task_id: int,
@@ -750,22 +749,3 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
             query = query.where(cast(Task.status, String) != "closed")
         result = await db.execute(query)
         return result.scalar()
-
-async def get_all_team_tasks(user_id: int, limit: int = 20, offset: int = 0, include_closed: bool = False) -> List[Task]:
-    """Возвращает все задачи команды пользователя, включая задачи, назначенные другим членам команды."""
-    async with AsyncSessionLocal() as db:
-        employee = await db.get(User, user_id)
-        if not employee or not employee.team:
-            return []
-        query = select(Task).where(
-            cast(Task.assigned_team, String) == employee.team.value
-        )
-        if not include_closed:
-            query = query.where(cast(Task.status, String) != "closed")
-        # Не показываем задачи на проверке в общем списке
-        if not include_closed:
-            query = query.where(cast(Task.status, String) != "checking")
-        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
-        result = await db.execute(query)
-        return result.scalars().all()

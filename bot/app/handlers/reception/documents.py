@@ -15,6 +15,7 @@ from app.keyboards.reception_documents import (
     doc_list_keyboard, doc_action_keyboard, doc_main_menu_keyboard
 )
 from app.keyboards.main_menu import main_menu_keyboard
+from app.utils.helpers import get_user_id_from_callback
 
 router = Router()
 
@@ -44,11 +45,17 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
+# ===== Проверка прав для документов =====
+def has_document_access(role) -> bool:
+    if hasattr(role, 'value'):
+        role = role.value
+    return role in ("ADMIN", "CONCIERGE")
+
 # ========== Главное меню документов ==========
 @router.message(F.text == "📄 Документы")
 async def documents_menu(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if not employee or not has_document_access(employee.role):
         await message.answer("У вас нет прав.")
         return
     await state.clear()
@@ -58,7 +65,7 @@ async def documents_menu(message: Message, state: FSMContext):
 @router.message(F.text == "➕ Новый документ")
 async def start_create_document(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if not employee or not has_document_access(employee.role):
         await message.answer("Нет прав.")
         return
     await state.clear()
@@ -222,7 +229,7 @@ async def list_issued(message: Message, state: FSMContext, page: int = 1):
 
 async def show_doc_list(message: Message, state: FSMContext, doc_type: str = None, status: str = None, title: str = "Документы", page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if not employee or not has_document_access(employee.role):
         await message.answer("Нет прав.")
         return
     limit = 10
@@ -284,6 +291,11 @@ async def paginate_docs(callback: CallbackQuery, state: FSMContext, bot):
 # ========== Карточка документа ==========
 @router.callback_query(F.data.startswith("doc:"))
 async def show_doc_card(callback: CallbackQuery):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     doc_id = int(callback.data.split(":")[1])
     d = await get_document(doc_id)
     if not d:
@@ -311,18 +323,26 @@ async def show_doc_card(callback: CallbackQuery):
 
 @router.callback_query(F.data == "doc_back_to_list")
 async def doc_back_to_list(callback: CallbackQuery, state: FSMContext):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     data = await state.get_data()
     doc_type = data.get('doc_type')
     doc_status = data.get('doc_status')
     page = data.get('doc_page', 1)
     await callback.message.delete()
-    employee = await get_employee(callback.from_user.id)
-    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
-        await show_doc_list(callback.message, state, doc_type=doc_type, status=doc_status, page=page)
+    await show_doc_list(callback.message, state, doc_type=doc_type, status=doc_status, page=page)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("doc_return:"))
 async def doc_return(callback: CallbackQuery):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     doc_id = int(callback.data.split(":")[1])
     d = await update_document_status(doc_id, "returned")
     if d:
@@ -333,16 +353,24 @@ async def doc_return(callback: CallbackQuery):
 
 @router.callback_query(F.data == "doc_back_to_menu")
 async def back_to_doc_menu(callback: CallbackQuery, state: FSMContext):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     await state.clear()
     await callback.message.delete()
-    employee = await get_employee(callback.from_user.id)
-    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
-        await callback.message.answer("📄 Управление документами:", reply_markup=doc_main_menu_keyboard())
+    await callback.message.answer("📄 Управление документами:", reply_markup=doc_main_menu_keyboard())
     await callback.answer()
 
 # ========== Комментарии ==========
 @router.callback_query(F.data.startswith("doc_comment_menu:"))
 async def doc_comment_menu(callback: CallbackQuery):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     doc_id = int(callback.data.split(":")[1])
     await callback.message.delete()
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -355,6 +383,11 @@ async def doc_comment_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("doc_comment_list:"))
 async def doc_comment_list(callback: CallbackQuery):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     doc_id = int(callback.data.split(":")[1])
     d = await get_document(doc_id)
     if not d:
@@ -382,11 +415,12 @@ async def doc_comment_list(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("doc_comment_add:"))
 async def doc_comment_add(callback: CallbackQuery, state: FSMContext):
-    doc_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Ошибка", show_alert=True)
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
         return
+    doc_id = int(callback.data.split(":")[1])
     await state.set_state(DocumentCommentState.waiting_for_comment)
     await state.update_data(doc_id=doc_id)
     await callback.message.delete()
@@ -419,6 +453,11 @@ async def doc_comment_process(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("doc_comment_back:"))
 async def doc_comment_back(callback: CallbackQuery):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     doc_id = int(callback.data.split(":")[1])
     await callback.message.delete()
     await show_doc_card(callback)
@@ -427,6 +466,11 @@ async def doc_comment_back(callback: CallbackQuery):
 # ========== История ==========
 @router.callback_query(F.data.startswith("doc_history:"))
 async def doc_history(callback: CallbackQuery):
+    user_id = get_user_id_from_callback(callback)
+    employee = await get_employee(user_id)
+    if not employee or not has_document_access(employee.role):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     doc_id = int(callback.data.split(":")[1])
     history = await get_document_history(doc_id)
     if not history:

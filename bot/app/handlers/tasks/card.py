@@ -35,6 +35,7 @@ class TaskCheckState(StatesGroup):
 
 class TaskPauseState(StatesGroup):
     waiting_for_comment = State()
+    waiting_for_time = State()
 
 async def safe_delete_message(message):
     try:
@@ -68,19 +69,14 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
 
-    # ===== ИСПРАВЛЕННАЯ ПРОВЕРКА ДОСТУПА =====
-    # Администраторы, директоры и консьержи видят всё
     if employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
-        # Обычные сотрудники видят:
-        # - свои задачи (где они исполнитель)
-        # - задачи своей команды (даже если есть исполнитель)
         if task.assigned_to != employee.id and task.assigned_team != employee.team:
             await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
             return
 
     status_emoji = get_task_status_emoji(task.status)
 
-    # Формируем адрес
+    # ===== ИСПРАВЛЕННЫЙ АДРЕС =====
     address_parts = []
     if task.building:
         address_parts.append(f"корп. {task.building}")
@@ -92,7 +88,6 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         address_parts.append(f"кв. {task.apartment}")
     address = ", ".join(address_parts) if address_parts else "—"
 
-    # Дополнительная информация о типе объекта
     location_info = ""
     if task.location_type:
         loc_type = task.location_type
@@ -108,31 +103,24 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         else:
             location_info = f"Тип: {loc_type}"
 
-    # Команда
     team_name = task.assigned_team.value if task.assigned_team else "не назначена"
 
-    # Собираем текст в новом порядке
     text = f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
-
     text += f"🔢 <b>Приоритет:</b> {task.priority}\n"
     text += f"📊 <b>Статус:</b> {task.status}\n"
     text += f"🏢 <b>Адрес:</b> {address}\n"
     if location_info:
         text += f"📍 <b>{location_info}</b>\n"
     text += "\n"
-
     text += f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-
     text += f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
     text += f"👥 <b>Команда:</b> {team_name}\n"
     text += f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
     text += f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-
     if task.wait_until:
         text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
     if task.closed_at:
         text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
-
     if task.photos:
         text += f"📷 Фото: {len(task.photos)} шт.\n"
     if task.video_ids:
@@ -141,22 +129,7 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
     await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
     await callback.answer()
 
-# ========== Остальные обработчики ==========
-@router.callback_query(F.data.startswith("task_take:"))
-async def take_task_callback(callback: CallbackQuery, state: FSMContext):
-    task_id = int(callback.data.split(":")[1])
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
-    task = await take_task(task_id, employee.id)
-    if not task:
-        await callback.answer("Не удалось взять задачу. Возможно, она уже назначена другому.", show_alert=True)
-        return
-    await callback.answer("✅ Задача взята в работу")
-    await show_task_card(callback, state)
-    await notify_admins(f"📢 Сотрудник {employee.full_name} взял задачу #{task_id} в работу.", task_id=task_id)
-
+# ========== ПРИОСТАНОВКА С ВЫБОРОМ ВРЕМЕНИ ==========
 @router.callback_query(F.data.startswith("task_pause:"))
 async def pause_task(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -176,15 +149,26 @@ async def pause_task(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Невозможно приостановить заявку в текущем статусе", show_alert=True)
         return
     await state.update_data(task_id=task_id)
-    await state.set_state(TaskPauseState.waiting_for_comment)
+    await state.set_state(TaskPauseState.waiting_for_time)
     await callback.message.delete()
-    await callback.message.answer("✍️ Введите причину приостановки:")
+    await callback.message.answer("Выберите срок приостановки:", reply_markup=waiting_time_keyboard(task_id))
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskPauseState.waiting_for_time), F.data.startswith("wait_time:"))
+async def pause_time_selected(callback: CallbackQuery, state: FSMContext):
+    _, task_id_str, hours_str = callback.data.split(":")
+    task_id = int(task_id_str)
+    hours = int(hours_str)
+    await state.update_data(task_id=task_id, hours=hours)
+    await state.set_state(TaskPauseState.waiting_for_comment)
+    await safe_edit_or_reply(callback, "Введите причину приостановки:")
     await callback.answer()
 
 @router.message(StateFilter(TaskPauseState.waiting_for_comment), F.text)
 async def process_pause_comment(message: Message, state: FSMContext):
     data = await state.get_data()
     task_id = data.get("task_id")
+    hours = data.get("hours")
     comment = message.text.strip()
     if not comment:
         await message.answer("Комментарий обязателен. Введите текст:")
@@ -194,17 +178,34 @@ async def process_pause_comment(message: Message, state: FSMContext):
         await message.answer("Ошибка")
         await state.clear()
         return
-    await add_comment(task_id, employee.id, f"⏸ Приостановка: {comment}")
-    task = await change_status(task_id, "paused", employee.id, comment)
+    wait_until = datetime.now() + timedelta(hours=hours)
+    await add_comment(task_id, employee.id, f"⏸ Приостановка до {wait_until.strftime('%d.%m.%Y %H:%M')}: {comment}")
+    task = await change_status(task_id, "paused", employee.id, comment, wait_until)
     if task:
-        await message.answer("✅ Заявка приостановлена.")
-        await notify_admins(f"⏸ Задача #{task_id} приостановлена исполнителем {employee.full_name}\nПричина: {comment}", task_id=task_id)
+        await message.answer(f"✅ Заявка приостановлена до {wait_until.strftime('%d.%m.%Y %H:%M')}")
+        await notify_admins(f"⏸ Задача #{task_id} приостановлена до {wait_until.strftime('%d.%m.%Y %H:%M')} исполнителем {employee.full_name}\nПричина: {comment}", task_id=task_id)
         task = await get_task(task_id)
         if task:
             await message.answer(f"📋 Карточка задачи #{task_id}", reply_markup=task_actions_keyboard(task, employee))
     else:
         await message.answer("❌ Ошибка приостановки")
     await state.clear()
+
+# ========== ОСТАЛЬНЫЕ ОБРАБОТЧИКИ ==========
+@router.callback_query(F.data.startswith("task_take:"))
+async def take_task_callback(callback: CallbackQuery, state: FSMContext):
+    task_id = int(callback.data.split(":")[1])
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
+        return
+    task = await take_task(task_id, employee.id)
+    if not task:
+        await callback.answer("Не удалось взять задачу. Возможно, она уже назначена другому.", show_alert=True)
+        return
+    await callback.answer("✅ Задача взята в работу")
+    await show_task_card(callback, state)
+    await notify_admins(f"📢 Сотрудник {employee.full_name} взял задачу #{task_id} в работу.", task_id=task_id)
 
 @router.callback_query(F.data.startswith("task_resume:"))
 async def resume_task(callback: CallbackQuery, state: FSMContext):
@@ -357,6 +358,7 @@ async def change_task_status(callback: CallbackQuery, state: FSMContext):
         await notify_admins(f"🔄 Задача #{task_id} возвращена на доработку исполнителем {employee.full_name}", task_id=task_id)
     await show_task_card(callback, state)
 
+# ========== Комментарии ==========
 @router.callback_query(F.data.startswith("task_comment_list:"))
 async def show_comments(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -424,6 +426,7 @@ async def comment_back_to_task(callback: CallbackQuery, state: FSMContext):
     await show_task_card(callback, state)
     await callback.answer()
 
+# ========== История ==========
 @router.callback_query(F.data.startswith("task_history:"))
 async def show_task_history(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -480,6 +483,7 @@ async def history_back_to_task(callback: CallbackQuery, state: FSMContext):
     await show_task_card(callback, state)
     await callback.answer()
 
+# ========== Фото и видео ==========
 @router.callback_query(F.data.startswith("task_video:"))
 async def show_task_videos(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -657,7 +661,7 @@ async def process_wait_comment(message: Message, state: FSMContext):
         await message.answer("Ошибка")
         await state.clear()
         return
-    wait_until = datetime.utcnow() + timedelta(hours=hours)
+    wait_until = datetime.now() + timedelta(hours=hours)
     task = await change_status(task_id, "waiting", employee.id, comment, wait_until)
     if task:
         await message.answer(f"✅ Задача отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}")

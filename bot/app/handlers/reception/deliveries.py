@@ -150,7 +150,7 @@ async def delivery_cancel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=reception_menu_keyboard())
 
-# ========== Список активных посылок (pending + received) ==========
+# ========== Список активных посылок ==========
 @router.message(F.text == "📋 Активные посылки")
 async def list_active_deliveries(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
@@ -159,7 +159,6 @@ async def list_active_deliveries(message: Message, state: FSMContext, page: int 
         return
     await show_delivery_list(message, state, status=["pending", "received"], title="📦 Активные посылки", page=page)
 
-# ========== Архив доставок (completed) ==========
 @router.message(F.text == "📦 Архив доставок")
 async def list_completed_deliveries(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
