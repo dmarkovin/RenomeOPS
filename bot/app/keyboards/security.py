@@ -8,7 +8,8 @@ def security_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="🚗 Пропуска"),
             ],
             [
-                KeyboardButton(text="⚙ Настройки"),
+                KeyboardButton(text="🚶 Обходы"),
+                KeyboardButton(text="⚙️ Настройки"),
             ],
         ],
         resize_keyboard=True

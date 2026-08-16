@@ -13,7 +13,6 @@ from app.middlewares.auth import AuthMiddleware
 from app.middlewares.metrics import MetricsMiddleware
 from app.metrics import update_uptime, update_business_metrics
 from app.services.notification_service import set_bot
-from app.services.bootstrap import create_first_admin
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -35,24 +34,23 @@ async def global_error_handler(update: TelegramObject, exception: Exception):
 async def main():
     logger.info("Initializing database...")
     await init_db()
-    await create_first_admin()
     logger.info("Database initialized.")
     logger.info("All routers registered successfully.")
     logger.info("Renome OPS bot started polling...")
-
+    
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     set_bot(bot)
-
+    
     start_http_server(8000)
     logger.info("Metrics server started on port 8000")
-
+    
     async def background_metrics():
         while True:
             update_uptime()
             await update_business_metrics()
             await asyncio.sleep(60)
     asyncio.create_task(background_metrics())
-
+    
     try:
         await dp.start_polling(bot)
     finally:

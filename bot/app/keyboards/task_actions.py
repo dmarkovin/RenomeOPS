@@ -37,12 +37,12 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
     is_team_member = (task.assigned_team == employee.team and task.assigned_to is None)
     is_admin_concierge = (role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR))
 
-    # Приостановить (только для исполнителя или админа/консьержа/директора)
+    # Приостановить
     if status in ("accepted", "in_progress"):
         if is_assignee or is_admin_concierge:
             buttons.append([InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"task_pause:{task_id}")])
 
-    # Возобновить (только для исполнителя)
+    # Возобновить
     if status == "paused" and is_assignee:
         buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
 
@@ -58,7 +58,7 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
         if can_check:
             buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task_check_start:{task_id}")])
 
-    # Передать (только для исполнителя)
+    # Передать
     if status != "closed" and is_assignee:
         buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
 
@@ -77,11 +77,8 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
             buttons.append([InlineKeyboardButton(text="🔄 Вернуть в работу", callback_data=f"task_status:{task_id}:start")])
 
     # ====== Общие кнопки ======
-    comments_count = len(task.comments) if task.comments else 0
-    comments_label = f"💬 Комментарии ({comments_count})" if comments_count > 0 else "💬 Комментарии"
-
     buttons.append([
-        InlineKeyboardButton(text=comments_label, callback_data=f"task_comment_list:{task_id}"),
+        InlineKeyboardButton(text="💬 Комментарии", callback_data=f"task_comment_list:{task_id}"),
         InlineKeyboardButton(text="📷 Фото", callback_data=f"task_photo:{task_id}"),
     ])
     buttons.append([

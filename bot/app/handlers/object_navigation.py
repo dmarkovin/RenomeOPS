@@ -24,6 +24,7 @@ async def handle_object_navigation(callback: CallbackQuery, state: FSMContext):
     action = data[0]
     current_state = await state.get_state()
 
+    # Проверяем, что мы находимся в нужном состоянии
     if current_state and not (
         current_state.startswith("TaskCreate:") or
         current_state.startswith("ServiceOrderState:")

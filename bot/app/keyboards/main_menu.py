@@ -1,4 +1,4 @@
-from aiogram.types import ReplyKeyboardMarkup
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from app.database.models import UserRole
 from .admin import admin_keyboard
 from .director import director_keyboard
@@ -6,7 +6,6 @@ from .concierge import concierge_keyboard
 from .technician import technician_keyboard
 from .cleaning import cleaning_keyboard
 from .security import security_keyboard
-
 
 def main_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
     if role == UserRole.ADMIN:
@@ -22,7 +21,6 @@ def main_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
     elif role == UserRole.SECURITY:
         return security_keyboard()
     else:
-        from aiogram.types import KeyboardButton
         return ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="📋 Меню")]],
             resize_keyboard=True

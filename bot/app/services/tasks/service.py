@@ -89,7 +89,7 @@ async def create_task(
             assigned_to=assigned_to,
             assigned_team=assigned_team,
             status="created",
-            video_ids=video_ids or []
+            video_ids=video_ids or []  # поддержка видео
         )
         db.add(task)
         await db.flush()
@@ -287,6 +287,7 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
                 if task.assigned_team and employee.team != task.assigned_team:
                     return None
             task.assigned_to = user_id
+            # Если задача создана или принята, сразу переводим в работу
             if task.status in ("created", "accepted"):
                 task.status = "in_progress"
             task.updated_at = datetime.now()
@@ -385,7 +386,7 @@ async def change_status(
 
 
 # ==========================
-# Добавить комментарий (убедимся, что сохраняется)
+# Добавить комментарий
 # ==========================
 async def add_comment(
     task_id: int,
@@ -750,22 +751,3 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
             query = query.where(cast(Task.status, String) != "closed")
         result = await db.execute(query)
         return result.scalar()
-
-async def get_all_team_tasks(user_id: int, limit: int = 20, offset: int = 0, include_closed: bool = False) -> List[Task]:
-    """Возвращает все задачи команды пользователя, включая задачи, назначенные другим членам команды."""
-    async with AsyncSessionLocal() as db:
-        employee = await db.get(User, user_id)
-        if not employee or not employee.team:
-            return []
-        query = select(Task).where(
-            cast(Task.assigned_team, String) == employee.team.value
-        )
-        if not include_closed:
-            query = query.where(cast(Task.status, String) != "closed")
-        # Не показываем задачи на проверке в общем списке
-        if not include_closed:
-            query = query.where(cast(Task.status, String) != "checking")
-        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
-        result = await db.execute(query)
-        return result.scalars().all()

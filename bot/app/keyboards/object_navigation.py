@@ -31,7 +31,6 @@ def apartment_keyboard(building_id: int, entrance: int, floor: int, apartments: 
     buttons = []
     for item in apartments:
         if floor == 1:
-            # Общая зона – item это ID
             area_id = item
             name = get_common_area_name(building_id, entrance, area_id)
             text = name if name else f"Зона {area_id}"
@@ -67,28 +66,4 @@ def cellar_keyboard(building_id: int, cellars: List[int]) -> InlineKeyboardMarku
         buttons.append([InlineKeyboardButton(text=f"🔐 Келлер {cellar}", callback_data=f"obj_cellar:{building_id}:{cellar}")])
     buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_building")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def location_type_keyboard() -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text="🏠 Квартира", callback_data="loc_type:apartment")],
-        [InlineKeyboardButton(text="🏢 Общая зона", callback_data="loc_type:common_area")],
-        [InlineKeyboardButton(text="🛗 Лифт", callback_data="loc_type:elevator")],
-        [InlineKeyboardButton(text="📦 Другое", callback_data="loc_type:other")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def parking_type_keyboard() -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text="🚗 Машиноместо", callback_data="parking_type:parking_spot")],
-        [InlineKeyboardButton(text="📦 Келлер", callback_data="parking_type:cellar")],
-        [InlineKeyboardButton(text="🚪 Ворота", callback_data="parking_type:gate")],
-        [InlineKeyboardButton(text="🚧 Шлагбаум", callback_data="parking_type:barrier")],
-        [InlineKeyboardButton(text="💡 Освещение", callback_data="parking_type:lighting")],
-        [InlineKeyboardButton(text="🚰 Водоснабжение", callback_data="parking_type:water")],
-        [InlineKeyboardButton(text="📹 Камера", callback_data="parking_type:camera")],
-        [InlineKeyboardButton(text="📦 Другое", callback_data="parking_type:other")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")]
-    ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

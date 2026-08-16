@@ -12,7 +12,11 @@ def admin_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📊 Статистика"),
             ],
             [
-                KeyboardButton(text="⚙ Настройки"),
+                KeyboardButton(text="🚗 Пропуска"),
+                KeyboardButton(text="📦 Доставка"),
+            ],
+            [
+                KeyboardButton(text="⚙️ Настройки"),
             ],
         ],
         resize_keyboard=True

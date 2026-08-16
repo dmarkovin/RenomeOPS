@@ -37,11 +37,21 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
+def has_key_access(role) -> bool:
+    if hasattr(role, 'value'):
+        role = role.value
+    return role in ("ADMIN", "CONCIERGE")
+
+async def check_key_access(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    if not employee:
+        return False
+    return has_key_access(employee.role)
+
 # ========== Главное меню ключей ==========
 @router.message(F.text == "🔑 Ключи")
 async def keys_main_menu(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if not await check_key_access(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     await state.clear()
@@ -59,17 +69,26 @@ async def keys_main_menu(message: Message, state: FSMContext):
 # ========== Список выданных ключей ==========
 @router.message(F.text == "📋 Список выданных")
 async def list_issued_keys(message: Message, state: FSMContext, page: int = 1):
+    if not await check_key_access(message.from_user.id):
+        await message.answer("Нет прав.")
+        return
     await show_key_list(message, state, status="issued", title="🔑 Выданные ключи", page=page)
 
 # ========== Список возвращённых ключей ==========
 @router.message(F.text == "📋 Возвращённые")
 async def list_returned_keys(message: Message, state: FSMContext, page: int = 1):
+    if not await check_key_access(message.from_user.id):
+        await message.answer("Нет прав.")
+        return
     await show_key_list(message, state, status="returned", title="✅ Возвращённые ключи", page=page)
 
 async def show_key_list(message: Message, state: FSMContext, status: str, title: str, page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
-        await message.answer("У вас нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
+        return
+    if not await check_key_access(message.from_user.id):
+        await message.answer("Нет прав.")
         return
     limit = 10
     offset = (page - 1) * limit
@@ -156,8 +175,7 @@ async def key_back_to_list(callback: CallbackQuery, state: FSMContext):
 # ========== Создание ключа ==========
 @router.message(F.text == "➕ Выдать ключ")
 async def start_create_key(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if not await check_key_access(message.from_user.id):
         await message.answer("Нет прав.")
         return
     await state.clear()
@@ -252,6 +270,13 @@ async def show_key_card(callback: CallbackQuery):
     k = await get_key(key_id)
     if not k:
         await callback.answer("Не найден", show_alert=True)
+        return
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
+        return
+    if not await check_key_access(callback.from_user.id):
+        await callback.answer("У вас нет прав для просмотра этого ключа", show_alert=True)
         return
     text = (
         f"🔑 Ключ #{k.id}\n"

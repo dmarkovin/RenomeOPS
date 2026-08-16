@@ -413,7 +413,6 @@ async def service_back(callback: CallbackQuery, state: FSMContext):
     if not employee:
         await callback.answer("Ошибка", show_alert=True)
         return
-    # Возвращаем в главное меню
     await callback.message.delete()
     await callback.message.answer(
         "Главное меню:",

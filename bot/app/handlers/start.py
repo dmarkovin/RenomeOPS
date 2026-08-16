@@ -43,7 +43,6 @@ async def start_handler(
         # Ищем пользователя по invite-коду (он может быть активным или неактивным)
         employee = await get_employee_by_invite(invite_code)
         if employee is None:
-            # Если код не найден, но может быть, что сотрудник уже активирован и код удалён?
             await message.answer("❌ Приглашение не найдено или уже использовано.")
             return
 
@@ -74,6 +73,7 @@ async def start_handler(
     )
     print(f"DEBUG: Received message: '{message.text}'")
 
+# ===== Команда /become_admin =====
 @router.message(Command("become_admin"))
 async def become_admin(message: Message, state: FSMContext):
     await state.clear()

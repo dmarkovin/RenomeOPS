@@ -1,7 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import List
 
-
 def employee_list_keyboard(
     employees: List,
     page: int,
@@ -27,9 +26,8 @@ def employee_list_keyboard(
     if nav_buttons:
         buttons.append(nav_buttons)
 
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="emp_back")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="emp_back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 
 def employee_card_keyboard(user_id: int, active: bool) -> InlineKeyboardMarkup:
     buttons = []
@@ -39,7 +37,7 @@ def employee_card_keyboard(user_id: int, active: bool) -> InlineKeyboardMarkup:
         buttons.append(InlineKeyboardButton(text="♻️ Активировать", callback_data=f"emp_activate:{user_id}"))
     buttons.append(InlineKeyboardButton(text="🔄 Сменить роль", callback_data=f"emp_change_role:{user_id}"))
     buttons.append(InlineKeyboardButton(text="🗑 Удалить", callback_data=f"emp_delete:{user_id}"))
-    buttons.append(InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="emp_back"))
+    buttons.append(InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="emp_back_to_list"))
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 def search_result_keyboard(employees: List, page: int, total_pages: int, query: str) -> InlineKeyboardMarkup:
@@ -63,5 +61,5 @@ def search_result_keyboard(employees: List, page: int, total_pages: int, query: 
         buttons.append(nav_buttons)
 
     buttons.append([InlineKeyboardButton(text="🔍 Новый поиск", callback_data="emp_search")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="emp_back")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="emp_back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

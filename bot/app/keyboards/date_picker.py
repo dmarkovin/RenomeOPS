@@ -1,17 +1,18 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 
-def date_selection_keyboard(action: str) -> InlineKeyboardMarkup:
+def date_selection_keyboard(prefix: str, days_offset: int = 0) -> InlineKeyboardMarkup:
     """
-    action: 'start' или 'end'
+    prefix: 'start' или 'end'
+    days_offset: сдвиг от текущей даты (0 — сегодня, 1 — завтра и т.д.)
     """
+    buttons = []
     today = datetime.now().date()
-    buttons = [
-        [InlineKeyboardButton(text="📅 Сегодня", callback_data=f"date_{action}:{today.strftime('%Y-%m-%d')}")],
-        [InlineKeyboardButton(text="📅 Завтра", callback_data=f"date_{action}:{(today + timedelta(days=1)).strftime('%Y-%m-%d')}")],
-        [InlineKeyboardButton(text="📅 Через 3 дня", callback_data=f"date_{action}:{(today + timedelta(days=3)).strftime('%Y-%m-%d')}")],
-        [InlineKeyboardButton(text="📅 Через 7 дней", callback_data=f"date_{action}:{(today + timedelta(days=7)).strftime('%Y-%m-%d')}")],
-        [InlineKeyboardButton(text="✏️ Ввести вручную", callback_data=f"date_{action}_manual")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_action")],
-    ]
+    for i in range(days_offset, days_offset + 7):
+        date = today + timedelta(days=i)
+        label = date.strftime("%d.%m")
+        callback = f"date_{prefix}:{date.strftime('%Y-%m-%d')}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=callback)])
+    buttons.append([InlineKeyboardButton(text="📅 Ввести вручную", callback_data=f"date_{prefix}_manual")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="date_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

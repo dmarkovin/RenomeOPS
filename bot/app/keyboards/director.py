@@ -5,14 +5,14 @@ def director_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [
                 KeyboardButton(text="📋 Заявки"),
-                KeyboardButton(text="💳 Платные услуги"),
-            ],
-            [
-                KeyboardButton(text="🚗 Пропуска"),
                 KeyboardButton(text="📊 Статистика"),
             ],
             [
-                KeyboardButton(text="⚙ Настройки"),
+                KeyboardButton(text="🚗 Пропуска"),
+                KeyboardButton(text="📦 Доставка"),
+            ],
+            [
+                KeyboardButton(text="⚙️ Настройки"),
             ],
         ],
         resize_keyboard=True

@@ -22,9 +22,9 @@ from app.keyboards.date_picker import date_selection_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
 from app.services.notification_service import notify_user, notify_concierges, notify_security, notify_team
 from app.database import AsyncSessionLocal
-from app.metrics import bot_errors_total
-from app.utils.helpers import get_user_id_from_callback
+import logging
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 class PassCreate(StatesGroup):
@@ -47,6 +47,17 @@ class PassSearch(StatesGroup):
 class PassCommentState(StatesGroup):
     waiting_for_comment = State()
 
+def has_pass_access(role) -> bool:
+    if hasattr(role, 'value'):
+        role = role.value
+    return role in ("ADMIN", "DIRECTOR", "CONCIERGE", "SECURITY")
+
+async def check_pass_access(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    if not employee:
+        return False
+    return has_pass_access(employee.role)
+
 async def safe_delete_message(message):
     try:
         await message.delete()
@@ -56,22 +67,14 @@ async def safe_delete_message(message):
 async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
     try:
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-    except Exception as e:
-        bot_errors_total.labels(error_type=type(e).__name__).inc()
+    except Exception:
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
-
-# ===== Проверка прав для пропусков =====
-def has_pass_access(role) -> bool:
-    if hasattr(role, 'value'):
-        role = role.value
-    return role in ("ADMIN", "DIRECTOR", "CONCIERGE", "SECURITY")
 
 # ========== Главное меню пропусков ==========
 @router.message(F.text == "🚗 Пропуска")
 async def passes_menu(message: Message):
-    employee = await get_employee(message.from_user.id)
-    if not employee or not has_pass_access(employee.role):
+    if not await check_pass_access(message.from_user.id):
         await message.answer("У вас нет прав.")
         return
     await message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
@@ -79,8 +82,7 @@ async def passes_menu(message: Message):
 # ========== Создание пропуска ==========
 @router.message(F.text == "➕ Заказать пропуск")
 async def start_create_pass(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee or not has_pass_access(employee.role):
+    if not await check_pass_access(message.from_user.id):
         await message.answer("Нет прав.")
         return
     await state.clear()
@@ -364,9 +366,8 @@ async def cancel_confirm(message: Message, state: FSMContext):
 
 # ========== Активные пропуска ==========
 @router.message(F.text == "📋 Активные пропуски")
-async def list_active_passes(message: Message, state: FSMContext, page: int = 1, user_id: int = None):
-    employee = await get_employee(user_id if user_id else message.from_user.id)
-    if not employee or not has_pass_access(employee.role):
+async def list_active_passes(message: Message, state: FSMContext, page: int = 1):
+    if not await check_pass_access(message.from_user.id):
         await message.answer("У вас нет прав для просмотра пропусков.")
         return
     await state.update_data(pass_list_type='active', pass_page=page)
@@ -407,8 +408,7 @@ async def list_active_passes(message: Message, state: FSMContext, page: int = 1,
 # ========== История пропусков ==========
 @router.message(F.text == "📜 История пропусков")
 async def list_history(message: Message, state: FSMContext, page: int = 1):
-    employee = await get_employee(message.from_user.id)
-    if not employee or not has_pass_access(employee.role):
+    if not await check_pass_access(message.from_user.id):
         await message.answer("У вас нет прав для просмотра истории пропусков.")
         return
     await state.update_data(pass_list_type='history', pass_page=page)
@@ -449,8 +449,7 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
 # ========== Поиск ==========
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee or not has_pass_access(employee.role):
+    if not await check_pass_access(message.from_user.id):
         await message.answer("У вас нет прав для поиска пропусков.")
         return
     await state.set_state(PassSearch.query)
@@ -458,8 +457,7 @@ async def start_search_pass(message: Message, state: FSMContext):
 
 @router.message(StateFilter(PassSearch.query))
 async def process_search_pass(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee or not has_pass_access(employee.role):
+    if not await check_pass_access(message.from_user.id):
         await message.answer("У вас нет прав для поиска пропусков.")
         await state.clear()
         return
@@ -501,6 +499,9 @@ async def process_search_pass(message: Message, state: FSMContext):
 # ========== Карточка пропуска ==========
 @router.callback_query(F.data.startswith("pass:"))
 async def show_pass_card(callback: CallbackQuery):
+    if not await check_pass_access(callback.from_user.id):
+        await callback.answer("У вас нет прав", show_alert=True)
+        return
     pass_id = int(callback.data.split(":")[1])
     p = await get_pass(pass_id)
     if not p:
@@ -598,7 +599,7 @@ async def pass_checkout(callback: CallbackQuery):
 async def pass_complete(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
-    if not employee or not has_pass_access(employee.role):
+    if not employee or employee.role not in (UserRole.CONCIERGE, UserRole.ADMIN, UserRole.DIRECTOR, UserRole.SECURITY):
         await callback.answer("Только для консьержа/админа/директора/охраны", show_alert=True)
         return
     p = await update_pass_status(pass_id, "completed", callback.from_user.id)
@@ -766,6 +767,7 @@ async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
     )
     await callback.answer()
 
+# ========== Навигация ==========
 @router.callback_query(F.data == "pass_back_to_list")
 async def back_to_pass_list(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -773,7 +775,7 @@ async def back_to_pass_list(callback: CallbackQuery, state: FSMContext):
     page = data.get('pass_page', 1)
     await callback.message.delete()
     if list_type == 'active':
-        await list_active_passes(callback.message, state, page, user_id=callback.from_user.id)
+        await list_active_passes(callback.message, state, page)
     else:
         await list_history(callback.message, state, page)
     await callback.answer()

@@ -25,12 +25,11 @@ async def create_document(
             photo_ids=photo_ids or [],
             created_by=created_by,
             status="active",
-            comments=[],  # инициализируем пустым списком
-            history=[]    # инициализируем пустым списком
+            comments=[],
+            history=[]
         )
         db.add(doc)
         await db.flush()
-        # Добавляем запись в историю
         _add_history(doc, "CREATED", created_by, "Документ создан")
         await db.commit()
         await db.refresh(doc)
@@ -64,7 +63,6 @@ async def update_document_status(doc_id: int, status: str) -> Optional[Document]
         old_status = doc.status
         doc.status = status
         doc.updated_at = datetime.now()
-        # Добавляем историю
         _add_history(doc, "STATUS_CHANGE", None, f"Статус изменён с {old_status} на {status}")
         await db.commit()
         await db.refresh(doc)
@@ -79,7 +77,7 @@ async def delete_document(doc_id: int) -> bool:
         await db.commit()
         return True
 
-# ===== Функции для комментариев и истории =====
+# ===== Функции для комментариев и истории (пункт 13) =====
 
 def _add_history(doc, action: str, user_id: int = None, details: str = ""):
     """Добавляет запись в историю документа"""
@@ -88,7 +86,6 @@ def _add_history(doc, action: str, user_id: int = None, details: str = ""):
     entry = {
         "action": action,
         "user_id": user_id,
-        "user_name": None,  # можно будет подставить при отображении
         "details": details,
         "created_at": datetime.now().isoformat()
     }
@@ -119,4 +116,20 @@ async def get_document_history(doc_id: int) -> List[dict]:
         doc = await db.get(Document, doc_id)
         if not doc:
             return []
-        return doc.history or []
+        # Преобразуем историю в читаемый вид
+        history = doc.history or []
+        result = []
+        for entry in history:
+            author = "Система"
+            if entry.get("user_id"):
+                from app.services.employees.service import get_employee_by_id
+                user = await get_employee_by_id(entry["user_id"])
+                if user:
+                    author = user.full_name
+            result.append({
+                "created_at": entry.get("created_at", ""),
+                "author": author,
+                "action": entry.get("action", ""),
+                "description": entry.get("details", "")
+            })
+        return sorted(result, key=lambda x: x.get("created_at", ""), reverse=True)

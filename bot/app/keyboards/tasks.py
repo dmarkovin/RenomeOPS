@@ -2,25 +2,15 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from app.database.models import Task
 from typing import List
 
-def tasks_menu_keyboard(role: str, team=None) -> ReplyKeyboardMarkup:
+def tasks_menu_keyboard(role: str) -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="➕ Создать заявку")],
+        [KeyboardButton(text="📋 Список заявок")],
+        [KeyboardButton(text="📋 Мои задачи")],
+        [KeyboardButton(text="📋 Новые задачи")],
     ]
-    # Для администраторов, консьержей, директоров — полный доступ
     if role in ("ADMIN", "CONCIERGE", "DIRECTOR"):
-        buttons.append([KeyboardButton(text="📋 Список заявок")])
-        buttons.append([KeyboardButton(text="📋 Мои задачи")])
-        if team is not None:
-            buttons.append([KeyboardButton(text="📋 Все задачи")])
-        else:
-            buttons.append([KeyboardButton(text="📋 Все задачи")])
         buttons.append([KeyboardButton(text="📋 Ожидают проверки")])
-        buttons.append([KeyboardButton(text="📦 Архив")])
-    else:
-        # Для обычных сотрудников (техников, охраны, клининга)
-        buttons.append([KeyboardButton(text="📋 Мои задачи")])
-        if team is not None:
-            buttons.append([KeyboardButton(text="📋 Все задачи")])
         buttons.append([KeyboardButton(text="📦 Архив")])
     if role in ("ADMIN", "DIRECTOR"):
         buttons.append([KeyboardButton(text="📊 Статистика")])
@@ -45,28 +35,19 @@ def task_list_keyboard(
 
     nav_buttons = []
     if page > 1:
-        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"task_page:{page-1}"))
-    nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="ignore"))
+        nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"task_page:{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="ignore"))
     if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"task_page:{page+1}"))
+        nav_buttons.append(InlineKeyboardButton("Вперед ▶️", callback_data=f"task_page:{page+1}"))
     if nav_buttons:
         buttons.append(nav_buttons)
 
     sort_buttons = []
-    sort_buttons.append(InlineKeyboardButton(text="📅 По дате", callback_data="task_sort:date"))
-    sort_buttons.append(InlineKeyboardButton(text="🔥 По приоритету", callback_data="task_sort:priority"))
+    sort_buttons.append(InlineKeyboardButton("📅 По дате", callback_data="task_sort:date"))
+    sort_buttons.append(InlineKeyboardButton("🔥 По приоритету", callback_data="task_sort:priority"))
     buttons.append(sort_buttons)
 
-    filter_buttons = []
-    filter_buttons.append(InlineKeyboardButton(text="🔽 Все", callback_data="task_filter:all"))
-    for p in [1, 2, 3, 4, 5]:
-        label = f"{p}★"
-        if filter_priority == p:
-            label = f"✅ {p}★"
-        filter_buttons.append(InlineKeyboardButton(text=label, callback_data=f"task_filter:{p}"))
-    buttons.append(filter_buttons)
-
-    buttons.append([InlineKeyboardButton(text="⬅️ В главное меню", callback_data="tasks_back")])
+    buttons.append([InlineKeyboardButton("⬅️ В главное меню", callback_data="tasks_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_task_status_emoji(status: str) -> str:

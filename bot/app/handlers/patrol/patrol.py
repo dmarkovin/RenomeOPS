@@ -11,7 +11,9 @@ from app.services.notification_service import notify_concierges
 from app.database.models import UserRole, Team
 from app.keyboards.patrol import patrol_list_keyboard, patrol_action_keyboard, patrol_main_menu_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
+import logging
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 class PatrolCreate(StatesGroup):
@@ -20,17 +22,29 @@ class PatrolCreate(StatesGroup):
     photo = State()
     confirm = State()
 
+# ===== Проверка доступа к обходам =====
+async def check_patrol_access(user_id: int) -> bool:
+    employee = await get_employee(user_id)
+    if not employee:
+        return False
+    role_str = employee.role.value if hasattr(employee.role, 'value') else str(employee.role)
+    return role_str in ("SECURITY", "ADMIN", "CONCIERGE")
+
 async def safe_delete_message(message):
     try:
         await message.delete()
     except Exception:
         pass
 
+# ========== Главное меню обходов ==========
 @router.message(F.text == "🚶 Обходы")
 async def patrol_menu(message: Message, state: FSMContext, page: int = 1):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.SECURITY, UserRole.ADMIN, UserRole.CONCIERGE):
+    if not await check_patrol_access(message.from_user.id):
         await message.answer("У вас нет прав.")
+        return
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
 
     limit = 10
@@ -51,6 +65,7 @@ async def patrol_menu(message: Message, state: FSMContext, page: int = 1):
     kb = patrol_list_keyboard(patrols, page, total_pages)
     await message.answer(text, reply_markup=kb)
 
+# ========== Создание обхода ==========
 @router.message(F.text == "➕ Новый обход")
 async def start_create_patrol(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -143,8 +158,8 @@ async def confirm_create(message: Message, state: FSMContext):
         )
 
         await notify_concierges(
-            f"🚶 Новый обход #{patrol.id} от {employee.full_name} создан. Задача #{task.id} назначена на вашу команду.",
-            task_id=task.id
+            f"🚶 Новый обход #{patrol.id} от {employee.full_name} создан. "
+            f"Задача #{task.id} назначена на вашу команду."
         )
 
         await state.clear()
@@ -162,12 +177,20 @@ async def cancel_create(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено", reply_markup=patrol_main_menu_keyboard())
 
+# ========== Карточка обхода ==========
 @router.callback_query(F.data.startswith("patrol:"))
 async def show_patrol_card(callback: CallbackQuery):
+    if not await check_patrol_access(callback.from_user.id):
+        await callback.answer("У вас нет прав", show_alert=True)
+        return
     patrol_id = int(callback.data.split(":")[1])
     p = await get_patrol(patrol_id)
     if not p:
         await callback.answer("Не найден", show_alert=True)
+        return
+    employee = await get_employee(callback.from_user.id)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     text = (
         f"🚶 Обход #{p.id}\n"
@@ -195,6 +218,9 @@ async def patrol_back_to_list(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("patrol_video:"))
 async def show_patrol_videos(callback: CallbackQuery):
+    if not await check_patrol_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     patrol_id = int(callback.data.split(":")[1])
     p = await get_patrol(patrol_id)
     if not p or not p.video_ids:
@@ -213,6 +239,9 @@ async def show_patrol_videos(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("patrol_complete:"))
 async def patrol_complete(callback: CallbackQuery):
+    if not await check_patrol_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     patrol_id = int(callback.data.split(":")[1])
     p = await complete_patrol(patrol_id)
     if p:
@@ -223,12 +252,18 @@ async def patrol_complete(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("patrol_page:"))
 async def paginate_patrols(callback: CallbackQuery, state: FSMContext):
+    if not await check_patrol_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     page = int(callback.data.split(":")[1])
     await patrol_menu(callback.message, state, page)
     await callback.answer()
 
 @router.callback_query(F.data == "patrol_back_to_menu")
 async def back_to_patrol_menu(callback: CallbackQuery, state: FSMContext):
+    if not await check_patrol_access(callback.from_user.id):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
     if employee:

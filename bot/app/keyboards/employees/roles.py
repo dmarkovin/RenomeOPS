@@ -8,5 +8,5 @@ def role_selection_keyboard(user_id: int) -> InlineKeyboardMarkup:
             text=role.value,
             callback_data=f"emp_set_role:{user_id}:{role.value}"
         )])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="emp_back")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"emp_card:{user_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
