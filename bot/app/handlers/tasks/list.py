@@ -24,6 +24,7 @@ from app.keyboards.tasks import (
 )
 from app.states.tasks.context import TaskContext
 from app.states.tasks.search import TaskSearch
+from app.permissions import has_permission, Permission
 
 router = Router()
 
@@ -94,9 +95,8 @@ async def show_list(
         tasks = []
         show_assignee = True
 
-        # Админ, консьерж, директор видят все открытые
         if list_type == "open":
-            if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+            if not has_permission(employee, Permission.TASK_VIEW_ALL):
                 if isinstance(target, CallbackQuery):
                     await target.answer("У вас нет прав на просмотр всех заявок.", show_alert=True)
                 else:
@@ -109,33 +109,49 @@ async def show_list(
             title = "📋 Мои задачи"
             show_assignee = False
         elif list_type == "team":
-            # Задачи команды, не назначенные конкретному исполнителю
             tasks = await get_team_tasks(employee.id, limit=1000, offset=0)
             title = "📋 Новые задачи"
             show_assignee = False
         elif list_type == "checking":
-            if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+            if not has_permission(employee, Permission.TASK_VIEW_CHECKING):
                 if isinstance(target, CallbackQuery):
-                    await target.answer("Только для консьержей, админов и директоров.", show_alert=True)
+                    await target.answer("У вас нет прав на просмотр задач на проверке.", show_alert=True)
                 else:
-                    await target.answer("Только для консьержей, админов и директоров.")
+                    await target.answer("У вас нет прав на просмотр задач на проверке.")
                 return
             tasks = await get_checking_tasks(limit=1000, offset=0)
             title = "📋 Задачи на проверке"
         elif list_type == "archive_all":
-            # Админ видит все закрытые, консьерж/директор — без feedback и админских
+            if not has_permission(employee, Permission.TASK_VIEW_ARCHIVE_ALL):
+                if isinstance(target, CallbackQuery):
+                    await target.answer("У вас нет прав на просмотр архива.", show_alert=True)
+                else:
+                    await target.answer("У вас нет прав на просмотр архива.")
+                return
             tasks = await get_tasks_by_status("closed", limit=1000, offset=0, user_id=employee.id)
             title = "📦 Архив (все закрытые заявки)"
         elif list_type == "archive_paid":
+            if not has_permission(employee, Permission.TASK_VIEW_ARCHIVE):
+                if isinstance(target, CallbackQuery):
+                    await target.answer("У вас нет прав на просмотр архива платных заявок.", show_alert=True)
+                else:
+                    await target.answer("У вас нет прав на просмотр архива платных заявок.")
+                return
             tasks = await get_paid_closed_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "💰 Архив платных заявок"
             show_assignee = False
         elif list_type == "archive_regular":
+            if not has_permission(employee, Permission.TASK_VIEW_ARCHIVE_TEAM):
+                if isinstance(target, CallbackQuery):
+                    await target.answer("У вас нет прав на просмотр личного архива.", show_alert=True)
+                else:
+                    await target.answer("У вас нет прав на просмотр личного архива.")
+                return
             tasks = await get_regular_closed_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Личные задачи"
             show_assignee = False
         elif list_type == "archive_feedback":
-            if employee.role != UserRole.ADMIN:
+            if not has_permission(employee, Permission.TASK_VIEW_ARCHIVE_ALL) or employee.role != UserRole.ADMIN:
                 if isinstance(target, CallbackQuery):
                     await target.answer("Только для администратора.", show_alert=True)
                 else:
@@ -207,12 +223,14 @@ async def show_archive_menu(target, state: FSMContext):
             await target.answer("Вы не зарегистрированы.")
         return
 
-    buttons = [
-        [InlineKeyboardButton(text="📋 Все закрытые", callback_data="archive_category:all")],
-        [InlineKeyboardButton(text="💰 Платные услуги", callback_data="archive_category:paid")],
-        [InlineKeyboardButton(text="📋 Личные задачи", callback_data="archive_category:regular")],
-    ]
-    if employee.role == UserRole.ADMIN:
+    buttons = []
+    if has_permission(employee, Permission.TASK_VIEW_ARCHIVE_ALL):
+        buttons.append([InlineKeyboardButton(text="📋 Все закрытые", callback_data="archive_category:all")])
+    if has_permission(employee, Permission.TASK_VIEW_ARCHIVE):
+        buttons.append([InlineKeyboardButton(text="💰 Платные услуги", callback_data="archive_category:paid")])
+    if has_permission(employee, Permission.TASK_VIEW_ARCHIVE_TEAM):
+        buttons.append([InlineKeyboardButton(text="📋 Личные задачи", callback_data="archive_category:regular")])
+    if has_permission(employee, Permission.TASK_VIEW_ARCHIVE_ALL) and employee.role == UserRole.ADMIN:
         buttons.append([InlineKeyboardButton(text="📢 Обращения (проблемы)", callback_data="archive_category:feedback")])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="tasks_back_to_menu")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -267,30 +285,15 @@ async def show_archive(message: Message, state: FSMContext):
 
 @router.message(F.text == "📊 Статистика")
 async def show_statistics_message(message: Message):
+    # Этот обработчик дублирует статистику из menu.py, но мы его оставляем для совместимости
+    # Но лучше перенаправить в menu.py или просто убрать, но пока оставим
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR):
-        await message.answer("Только для администратора и директора.")
+    if not employee or not has_permission(employee, Permission.STATISTICS_VIEW):
+        await message.answer("У вас нет прав на просмотр статистики.")
         return
-    from app.services.tasks.service import count_open_tasks, count_tasks_by_status, count_checking_tasks
-    from app.services.services.service import get_all_orders
-    from app.services.employees.service import count_employees
-    total_open = await count_open_tasks()
-    total_checking = await count_checking_tasks()
-    total_closed = await count_tasks_by_status("closed")
-    total_waiting = await count_tasks_by_status("waiting")
-    total_employees = await count_employees(active=True)
-    orders = await get_all_orders(limit=1000)
-    total_orders = len([o for o in orders if o.status == "pending"])
-    text = (
-        f"📊 **Статистика системы**\n\n"
-        f"👥 Активных сотрудников: {total_employees}\n"
-        f"📋 Открытых заявок: {total_open}\n"
-        f"⏳ Ожидают: {total_waiting}\n"
-        f"🔄 На проверке: {total_checking}\n"
-        f"✅ Закрыто: {total_closed}\n"
-        f"💳 Активных заказов услуг: {total_orders}\n"
-    )
-    await message.answer(text, parse_mode="HTML")
+    # Переадресуем в основной обработчик
+    from app.handlers.menu import show_statistics
+    await show_statistics(message)
 
 @router.callback_query(F.data.startswith("task_page:"))
 async def paginate_tasks(callback: CallbackQuery, state: FSMContext):
@@ -402,8 +405,8 @@ async def back_to_main_menu(message: Message, state: FSMContext):
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        await message.answer("Только для администратора, консьержа и директора.")
+    if not employee or not has_permission(employee, Permission.TASK_VIEW_ALL):
+        await message.answer("У вас нет прав на поиск заявок.")
         return
     await state.set_state(TaskSearch.query)
     await message.answer("Введите текст для поиска (ID, название, исполнитель):")

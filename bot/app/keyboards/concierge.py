@@ -5,15 +5,15 @@ def concierge_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [
                 KeyboardButton(text="📋 Заявки"),
-                KeyboardButton(text="🚗 Пропуска"),
+                KeyboardButton(text="Пропуска"),
             ],
             [
-                KeyboardButton(text="📦 Доставка"),
-                KeyboardButton(text="📄 Документы"),
+                KeyboardButton(text="Доставка"),
+                KeyboardButton(text="Документы"),
             ],
             [
-                KeyboardButton(text="🔑 Ключи"),
-                KeyboardButton(text="💳 Платные услуги"),
+                KeyboardButton(text="Ключи"),
+                KeyboardButton(text="Платные услуги"),
             ],
             [
                 KeyboardButton(text="⚙️ Настройки"),

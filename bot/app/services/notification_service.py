@@ -59,7 +59,7 @@ async def _send_message(telegram_id: int, text: str, reply_markup=None, retries:
 def task_view_button(task_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
+            [InlineKeyboardButton(text="📋 Перейти к задаче", callback_data=f"task:{task_id}")]
         ]
     )
 
@@ -79,7 +79,6 @@ async def notify_user(telegram_id: int, text: str, notification_type: str = "not
         await _send_message(telegram_id, text, kb)
 
 async def notify_user_with_button(telegram_id: int, text: str, task_id: int, notification_type: str = "notify_task_assigned"):
-    """Отправляет уведомление пользователю с кнопкой 'Посмотреть заявку'"""
     if not bot or not telegram_id:
         return
     if await _can_send(telegram_id, notification_type):
@@ -102,7 +101,7 @@ async def notify_team_with_button(team: Team, text: str, task_id: int, notificat
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take_from_list:{task_id}")],
-            [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
+            [InlineKeyboardButton(text="📋 Перейти к задаче", callback_data=f"task:{task_id}")]
         ]
     )
     for emp in employees:

@@ -12,8 +12,7 @@ def tasks_menu_keyboard(role: str) -> ReplyKeyboardMarkup:
     if role in ("ADMIN", "CONCIERGE", "DIRECTOR"):
         buttons.append([KeyboardButton(text="📋 Ожидают проверки")])
         buttons.append([KeyboardButton(text="📦 Архив")])
-    if role in ("ADMIN", "DIRECTOR"):
-        buttons.append([KeyboardButton(text="📊 Статистика")])
+    # Статистика теперь только в главном меню, поэтому убираем её из заявок
     buttons.append([KeyboardButton(text="🔍 Поиск по заявкам")])
     buttons.append([KeyboardButton(text="⬅️ Назад")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
@@ -30,45 +29,43 @@ def task_list_keyboard(
         priority = int(task.priority) if task.priority is not None else 3
         status_emoji = get_task_status_emoji(task.status)
         priority_emoji = get_priority_emoji(priority)
-        priority_name = get_priority_name(priority)
         text = f"{status_emoji} {priority_emoji} #{task.id} {task.title[:25]}"
         buttons.append([InlineKeyboardButton(text=text, callback_data=f"task:{task.id}")])
 
     nav_buttons = []
     if page > 1:
-        nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"task_page:{page-1}"))
-    nav_buttons.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="ignore"))
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"task_page:{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="ignore"))
     if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton("Вперед ▶️", callback_data=f"task_page:{page+1}"))
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"task_page:{page+1}"))
     if nav_buttons:
         buttons.append(nav_buttons)
 
     sort_buttons = []
-    sort_buttons.append(InlineKeyboardButton("📅 По дате", callback_data="task_sort:date"))
-    sort_buttons.append(InlineKeyboardButton("🔥 По приоритету", callback_data="task_sort:priority"))
+    sort_buttons.append(InlineKeyboardButton(text="📅 По дате", callback_data="task_sort:date"))
+    sort_buttons.append(InlineKeyboardButton(text="🔥 По приоритету", callback_data="task_sort:priority"))
     buttons.append(sort_buttons)
 
-    # Фильтр по приоритету (без звёздочек)
     filter_buttons = []
-    filter_buttons.append(InlineKeyboardButton("🔽 Все", callback_data="task_filter:all"))
+    filter_buttons.append(InlineKeyboardButton(text="🔽 Все", callback_data="task_filter:all"))
     for p in [1, 2, 3, 4, 5]:
         label = get_priority_name(p)
         if filter_priority == p:
             label = f"✅ {label}"
-        filter_buttons.append(InlineKeyboardButton(label, callback_data=f"task_filter:{p}"))
+        filter_buttons.append(InlineKeyboardButton(text=label, callback_data=f"task_filter:{p}"))
     buttons.append(filter_buttons)
 
-    buttons.append([InlineKeyboardButton("⬅️ В главное меню", callback_data="tasks_back")])
+    buttons.append([InlineKeyboardButton(text="⬅️ В главное меню", callback_data="tasks_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_task_status_emoji(status: str) -> str:
     emoji_map = {
-        "created": "🟡",
-        "accepted": "🔵",
-        "in_progress": "🟠",
-        "checking": "🟣",
+        "created": "🆕",
+        "accepted": "📋",
+        "in_progress": "🛠️",
+        "checking": "🔍",
         "closed": "✅",
-        "waiting": "⏰",
+        "waiting": "⏳",
         "paused": "⏸️",
     }
     return emoji_map.get(status, "⚪")
@@ -79,12 +76,16 @@ def get_priority_emoji(priority: int) -> str:
             priority = int(priority)
         except (ValueError, TypeError):
             priority = 3
-    if priority <= 1:
-        return "🟢"
-    elif priority <= 3:
-        return "🟡"
+    if priority == 5:
+        return "🚨"
+    elif priority == 4:
+        return "⚠️"
+    elif priority == 3:
+        return "🔶"
+    elif priority == 2:
+        return "🔼"
     else:
-        return "🔴"
+        return "ℹ️"
 
 def get_priority_name(priority: int) -> str:
     if not isinstance(priority, int):

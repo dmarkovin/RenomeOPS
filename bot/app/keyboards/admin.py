@@ -12,8 +12,8 @@ def admin_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📊 Статистика"),
             ],
             [
-                KeyboardButton(text="🚗 Пропуска"),
-                KeyboardButton(text="📦 Доставка"),
+                KeyboardButton(text="Пропуска"),
+                KeyboardButton(text="Доставка"),
             ],
             [
                 KeyboardButton(text="⚙️ Настройки"),

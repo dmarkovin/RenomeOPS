@@ -11,6 +11,7 @@ from app.services.reception.key_service import (
 )
 from app.database.models import UserRole
 from app.keyboards.reception_keys import key_list_keyboard
+from app.permissions import has_permission, Permission
 
 router = Router()
 
@@ -37,21 +38,11 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
-def has_key_access(role) -> bool:
-    if hasattr(role, 'value'):
-        role = role.value
-    return role in ("ADMIN", "CONCIERGE")
-
-async def check_key_access(user_id: int) -> bool:
-    employee = await get_employee(user_id)
-    if not employee:
-        return False
-    return has_key_access(employee.role)
-
 # ========== Главное меню ключей ==========
 @router.message(F.text == "🔑 Ключи")
 async def keys_main_menu(message: Message, state: FSMContext):
-    if not await check_key_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
         await message.answer("У вас нет прав.")
         return
     await state.clear()
@@ -69,7 +60,8 @@ async def keys_main_menu(message: Message, state: FSMContext):
 # ========== Список выданных ключей ==========
 @router.message(F.text == "📋 Список выданных")
 async def list_issued_keys(message: Message, state: FSMContext, page: int = 1):
-    if not await check_key_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
         await message.answer("Нет прав.")
         return
     await show_key_list(message, state, status="issued", title="🔑 Выданные ключи", page=page)
@@ -77,17 +69,15 @@ async def list_issued_keys(message: Message, state: FSMContext, page: int = 1):
 # ========== Список возвращённых ключей ==========
 @router.message(F.text == "📋 Возвращённые")
 async def list_returned_keys(message: Message, state: FSMContext, page: int = 1):
-    if not await check_key_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
         await message.answer("Нет прав.")
         return
     await show_key_list(message, state, status="returned", title="✅ Возвращённые ключи", page=page)
 
 async def show_key_list(message: Message, state: FSMContext, status: str, title: str, page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    if not await check_key_access(message.from_user.id):
+    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
         await message.answer("Нет прав.")
         return
     limit = 10
@@ -152,7 +142,7 @@ async def key_back_to_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
-    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if employee and has_permission(employee, Permission.KEYS_MANAGE):
         await callback.message.answer("🔑 Управление ключами:", reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Выдать ключ")],
@@ -175,7 +165,8 @@ async def key_back_to_list(callback: CallbackQuery, state: FSMContext):
 # ========== Создание ключа ==========
 @router.message(F.text == "➕ Выдать ключ")
 async def start_create_key(message: Message, state: FSMContext):
-    if not await check_key_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
         await message.answer("Нет прав.")
         return
     await state.clear()
@@ -266,17 +257,14 @@ async def cancel_create_key(message: Message, state: FSMContext):
 # ========== Карточка ключа ==========
 @router.callback_query(F.data.startswith("key:"))
 async def show_key_card(callback: CallbackQuery):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
+        await callback.answer("У вас нет прав", show_alert=True)
+        return
     key_id = int(callback.data.split(":")[1])
     k = await get_key(key_id)
     if not k:
         await callback.answer("Не найден", show_alert=True)
-        return
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
-        return
-    if not await check_key_access(callback.from_user.id):
-        await callback.answer("У вас нет прав для просмотра этого ключа", show_alert=True)
         return
     text = (
         f"🔑 Ключ #{k.id}\n"
@@ -301,6 +289,10 @@ async def show_key_card(callback: CallbackQuery):
 # ========== Возврат ключа ==========
 @router.callback_query(F.data.startswith("key_return:"))
 async def key_return(callback: CallbackQuery):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
+        await callback.answer("У вас нет прав", show_alert=True)
+        return
     key_id = int(callback.data.split(":")[1])
     k = await return_key(key_id)
     if k:

@@ -15,6 +15,7 @@ from app.keyboards.reception_documents import (
     doc_list_keyboard, doc_action_keyboard, doc_main_menu_keyboard
 )
 from app.keyboards.main_menu import main_menu_keyboard
+from app.permissions import has_permission, Permission
 
 router = Router()
 
@@ -44,21 +45,11 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await safe_delete_message(callback.message)
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
-def has_document_access(role) -> bool:
-    if hasattr(role, 'value'):
-        role = role.value
-    return role in ("ADMIN", "CONCIERGE")
-
-async def check_document_access(user_id: int) -> bool:
-    employee = await get_employee(user_id)
-    if not employee:
-        return False
-    return has_document_access(employee.role)
-
 # ========== Главное меню документов ==========
 @router.message(F.text == "📄 Документы")
 async def documents_menu(message: Message, state: FSMContext):
-    if not await check_document_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await message.answer("У вас нет прав.")
         return
     await state.clear()
@@ -67,7 +58,8 @@ async def documents_menu(message: Message, state: FSMContext):
 # ========== Создание документа ==========
 @router.message(F.text == "➕ Новый документ")
 async def start_create_document(message: Message, state: FSMContext):
-    if not await check_document_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await message.answer("Нет прав.")
         return
     await state.clear()
@@ -215,38 +207,39 @@ async def cancel_create(message: Message, state: FSMContext):
 # ========== Списки документов ==========
 @router.message(F.text == "📋 Входящие")
 async def list_incoming(message: Message, state: FSMContext, page: int = 1):
-    if not await check_document_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await message.answer("Нет прав.")
         return
     await show_doc_list(message, state, doc_type="incoming", title="📥 Входящие документы", page=page)
 
 @router.message(F.text == "📋 Исходящие")
 async def list_outgoing(message: Message, state: FSMContext, page: int = 1):
-    if not await check_document_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await message.answer("Нет прав.")
         return
     await show_doc_list(message, state, doc_type="outgoing", title="📤 Исходящие документы", page=page)
 
 @router.message(F.text == "📋 На хранении")
 async def list_storage(message: Message, state: FSMContext, page: int = 1):
-    if not await check_document_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await message.answer("Нет прав.")
         return
     await show_doc_list(message, state, doc_type="storage", status="active", title="📦 На хранении", page=page)
 
 @router.message(F.text == "📋 Выданные")
 async def list_issued(message: Message, state: FSMContext, page: int = 1):
-    if not await check_document_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await message.answer("Нет прав.")
         return
     await show_doc_list(message, state, doc_type="issued", status="active", title="📋 Выданные", page=page)
 
 async def show_doc_list(message: Message, state: FSMContext, doc_type: str = None, status: str = None, title: str = "Документы", page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    if not await check_document_access(message.from_user.id):
+    if not employee or not has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await message.answer("Нет прав.")
         return
     limit = 10
@@ -308,17 +301,14 @@ async def paginate_docs(callback: CallbackQuery, state: FSMContext, bot):
 # ========== Карточка документа ==========
 @router.callback_query(F.data.startswith("doc:"))
 async def show_doc_card(callback: CallbackQuery):
-    if not await check_document_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await callback.answer("У вас нет прав", show_alert=True)
         return
     doc_id = int(callback.data.split(":")[1])
     d = await get_document(doc_id)
     if not d:
         await callback.answer("Не найден", show_alert=True)
-        return
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     text = (
         f"📄 Документ #{d.id}\n"
@@ -348,7 +338,7 @@ async def doc_back_to_list(callback: CallbackQuery, state: FSMContext):
     page = data.get('doc_page', 1)
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
-    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if employee and has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await show_doc_list(callback.message, state, doc_type=doc_type, status=doc_status, page=page)
     await callback.answer()
 
@@ -367,7 +357,7 @@ async def back_to_doc_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
-    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
+    if employee and has_permission(employee, Permission.DOCUMENTS_MANAGE):
         await callback.message.answer("📄 Управление документами:", reply_markup=doc_main_menu_keyboard())
     await callback.answer()
 

@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
 from datetime import datetime, timedelta
+from aiogram.filters import Command
 
 from app.services.employees.service import get_employee, get_employee_by_id
 from app.services.passes.service import (
@@ -22,6 +23,7 @@ from app.keyboards.date_picker import date_selection_keyboard
 from app.keyboards.main_menu import main_menu_keyboard
 from app.services.notification_service import notify_user, notify_concierges, notify_security, notify_team
 from app.database import AsyncSessionLocal
+from app.permissions import has_permission, Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -47,17 +49,6 @@ class PassSearch(StatesGroup):
 class PassCommentState(StatesGroup):
     waiting_for_comment = State()
 
-def has_pass_access(role) -> bool:
-    if hasattr(role, 'value'):
-        role = role.value
-    return role in ("ADMIN", "DIRECTOR", "CONCIERGE", "SECURITY")
-
-async def check_pass_access(user_id: int) -> bool:
-    employee = await get_employee(user_id)
-    if not employee:
-        return False
-    return has_pass_access(employee.role)
-
 async def safe_delete_message(message):
     try:
         await message.delete()
@@ -72,25 +63,27 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 # ========== Главное меню пропусков ==========
-@router.message(F.text == "🚗 Пропуска")
+@router.message(F.text == "Пропуска")
 async def passes_menu(message: Message):
-    if not await check_pass_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.PASS_VIEW_ALL):
         await message.answer("У вас нет прав.")
         return
-    await message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
+    await message.answer("Меню пропусков:", reply_markup=pass_main_menu_keyboard())
 
 # ========== Создание пропуска ==========
-@router.message(F.text == "➕ Заказать пропуск")
+@router.message(F.text == "Заказать пропуск")
 async def start_create_pass(message: Message, state: FSMContext):
-    if not await check_pass_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.PASS_CREATE):
         await message.answer("Нет прав.")
         return
     await state.clear()
     await state.set_state(PassCreate.type)
     await message.answer("Выберите тип пропуска:", reply_markup=types.ReplyKeyboardMarkup(
         keyboard=[
-            [types.KeyboardButton(text="👤 Гость")],
-            [types.KeyboardButton(text="🚗 Автомобиль")],
+            [types.KeyboardButton(text="Гость")],
+            [types.KeyboardButton(text="Автомобиль")],
             [types.KeyboardButton(text="❌ Отмена")]
         ],
         resize_keyboard=True
@@ -103,14 +96,14 @@ async def process_type(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("Отменено", reply_markup=pass_main_menu_keyboard())
         return
-    if text not in ("👤 Гость", "🚗 Автомобиль"):
+    if text not in ("Гость", "Автомобиль"):
         await message.answer("Пожалуйста, выберите кнопкой.")
         return
-    if text == "👤 Гость":
+    if text == "Гость":
         await state.update_data(type="guest", car_number="")
         await state.set_state(PassCreate.guest_name)
         await message.answer("Введите имя гостя:", reply_markup=ReplyKeyboardRemove())
-    else:
+    else:  # Автомобиль
         await state.update_data(type="car", guest_name="")
         await state.set_state(PassCreate.car_number)
         await message.answer("Введите номер автомобиля:", reply_markup=ReplyKeyboardRemove())
@@ -238,20 +231,20 @@ async def process_end_date_manual(message: Message, state: FSMContext):
     await message.answer("Выберите, кому назначить пропуск:", reply_markup=pass_assign_type_keyboard())
 
 # ---- Обработчики выбора типа назначения ----
-@router.message(StateFilter(PassCreate.assign_type), F.text.in_(["👥 Всей охране", "👤 Конкретному сотруднику", "⏭ Пропустить"]))
+@router.message(StateFilter(PassCreate.assign_type), F.text.in_(["Всей охране", "Конкретному сотруднику", "Пропустить"]))
 async def process_assign_type(message: Message, state: FSMContext):
     text = message.text
-    if text == "⏭ Пропустить":
+    if text == "Пропустить":
         await state.update_data(assigned_to=None, assigned_team=None)
         await state.set_state(PassCreate.confirm)
         await show_confirmation(message, state)
         return
-    if text == "👥 Всей охране":
+    if text == "Всей охране":
         await state.update_data(assigned_to=None, assigned_team=Team.TEAM_SECURITY)
         await state.set_state(PassCreate.confirm)
         await show_confirmation(message, state)
         return
-    if text == "👤 Конкретному сотруднику":
+    if text == "Конкретному сотруднику":
         employees = await get_available_employees(role=UserRole.SECURITY)
         if not employees:
             await message.answer("Нет доступных сотрудников охраны. Выберите другой вариант.")
@@ -275,7 +268,7 @@ async def assign_employee_final(callback: CallbackQuery, state: FSMContext):
     emp_id = int(emp_id_str)
     await state.update_data(assigned_to=emp_id, assigned_team=None)
     await callback.message.delete()
-    await callback.message.answer("✅ Охрана назначена.")
+    await callback.message.answer("Охрана назначена.")
     await state.set_state(PassCreate.confirm)
     await show_confirmation(callback.message, state)
     await callback.answer()
@@ -304,11 +297,11 @@ async def show_confirmation(message: Message, state: FSMContext):
         f"Подтвердить создание?"
     )
     await message.answer(text, reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="✅ Да, создать")], [KeyboardButton(text="❌ Отмена")]],
+        keyboard=[[KeyboardButton(text="Да, создать")], [KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
     ))
 
-@router.message(StateFilter(PassCreate.confirm), F.text == "✅ Да, создать")
+@router.message(StateFilter(PassCreate.confirm), F.text == "Да, создать")
 async def confirm_create_pass(message: Message, state: FSMContext):
     data = await state.get_data()
     employee = await get_employee(message.from_user.id)
@@ -365,9 +358,10 @@ async def cancel_confirm(message: Message, state: FSMContext):
     await message.answer("Отменено", reply_markup=pass_main_menu_keyboard())
 
 # ========== Активные пропуска ==========
-@router.message(F.text == "📋 Активные пропуски")
+@router.message(F.text == "Активные пропуски")
 async def list_active_passes(message: Message, state: FSMContext, page: int = 1):
-    if not await check_pass_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.PASS_VIEW_ALL):
         await message.answer("У вас нет прав для просмотра пропусков.")
         return
     await state.update_data(pass_list_type='active', pass_page=page)
@@ -382,7 +376,7 @@ async def list_active_passes(message: Message, state: FSMContext, page: int = 1)
         await message.answer("Нет активных пропусков.")
         return
 
-    text = f"📋 Активные пропуски (стр. {page}/{total_pages}):\n\n"
+    text = f"Активные пропуски (стр. {page}/{total_pages}):\n\n"
     for p in passes_page:
         if p.status == "active":
             status_emoji = "🟢"
@@ -406,9 +400,10 @@ async def list_active_passes(message: Message, state: FSMContext, page: int = 1)
     await state.update_data(pass_message_id=sent.message_id, pass_chat_id=sent.chat.id)
 
 # ========== История пропусков ==========
-@router.message(F.text == "📜 История пропусков")
+@router.message(F.text == "История пропусков")
 async def list_history(message: Message, state: FSMContext, page: int = 1):
-    if not await check_pass_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.PASS_VIEW_ALL):
         await message.answer("У вас нет прав для просмотра истории пропусков.")
         return
     await state.update_data(pass_list_type='history', pass_page=page)
@@ -423,7 +418,7 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
         await message.answer("История пуста.")
         return
 
-    text = f"📜 История пропусков (стр. {page}/{total_pages}):\n\n"
+    text = f"История пропусков (стр. {page}/{total_pages}):\n\n"
     for p in passes_page:
         if p.status == "used":
             status_emoji = "🔵"
@@ -447,9 +442,10 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
     await state.update_data(pass_message_id=sent.message_id, pass_chat_id=sent.chat.id)
 
 # ========== Поиск ==========
-@router.message(F.text == "🔍 Поиск по пропускам")
+@router.message(F.text == "Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
-    if not await check_pass_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.PASS_VIEW_ALL):
         await message.answer("У вас нет прав для поиска пропусков.")
         return
     await state.set_state(PassSearch.query)
@@ -457,7 +453,8 @@ async def start_search_pass(message: Message, state: FSMContext):
 
 @router.message(StateFilter(PassSearch.query))
 async def process_search_pass(message: Message, state: FSMContext):
-    if not await check_pass_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.PASS_VIEW_ALL):
         await message.answer("У вас нет прав для поиска пропусков.")
         await state.clear()
         return
@@ -499,7 +496,8 @@ async def process_search_pass(message: Message, state: FSMContext):
 # ========== Карточка пропуска ==========
 @router.callback_query(F.data.startswith("pass:"))
 async def show_pass_card(callback: CallbackQuery):
-    if not await check_pass_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.PASS_VIEW_ALL):
         await callback.answer("У вас нет прав", show_alert=True)
         return
     pass_id = int(callback.data.split(":")[1])
@@ -507,7 +505,6 @@ async def show_pass_card(callback: CallbackQuery):
     if not p:
         await callback.answer("Не найден", show_alert=True)
         return
-    employee = await get_employee(callback.from_user.id)
     user_role = employee.role.value if employee else None
     text = (
         f"🪪 Пропуск #{p.id}\n"
@@ -577,44 +574,54 @@ async def show_pass_history(callback: CallbackQuery):
 # ========== Действия ==========
 @router.callback_query(F.data.startswith("pass_checkin:"))
 async def pass_checkin(callback: CallbackQuery):
+    if not has_permission(await get_employee(callback.from_user.id), Permission.PASS_CHECKIN):
+        await callback.answer("У вас нет прав", show_alert=True)
+        return
     pass_id = int(callback.data.split(":")[1])
     p = await check_in(pass_id, callback.from_user.id)
     if p:
-        await callback.answer("✅ Въезд отмечен")
+        await callback.answer("Въезд отмечен")
         await show_pass_card(callback)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
 @router.callback_query(F.data.startswith("pass_checkout:"))
 async def pass_checkout(callback: CallbackQuery):
+    if not has_permission(await get_employee(callback.from_user.id), Permission.PASS_CHECKOUT):
+        await callback.answer("У вас нет прав", show_alert=True)
+        return
     pass_id = int(callback.data.split(":")[1])
     p = await check_out(pass_id, callback.from_user.id)
     if p:
-        await callback.answer("✅ Выезд отмечен")
+        await callback.answer("Выезд отмечен")
         await show_pass_card(callback)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
 @router.callback_query(F.data.startswith("pass_complete:"))
 async def pass_complete(callback: CallbackQuery):
-    pass_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
-    if not employee or employee.role not in (UserRole.CONCIERGE, UserRole.ADMIN, UserRole.DIRECTOR, UserRole.SECURITY):
-        await callback.answer("Только для консьержа/админа/директора/охраны", show_alert=True)
+    if not has_permission(employee, Permission.PASS_COMPLETE):
+        await callback.answer("У вас нет прав", show_alert=True)
         return
+    pass_id = int(callback.data.split(":")[1])
     p = await update_pass_status(pass_id, "completed", callback.from_user.id)
     if p:
-        await callback.answer("✅ Пропуск выполнен")
+        await callback.answer("Пропуск выполнен")
         await show_pass_card(callback)
     else:
         await callback.answer("Ошибка", show_alert=True)
 
 @router.callback_query(F.data.startswith("pass_close:"))
 async def pass_close(callback: CallbackQuery):
+    employee = await get_employee(callback.from_user.id)
+    if not has_permission(employee, Permission.PASS_CLOSE):
+        await callback.answer("У вас нет прав", show_alert=True)
+        return
     pass_id = int(callback.data.split(":")[1])
     p = await update_pass_status(pass_id, "expired", callback.from_user.id)
     if p:
-        await callback.answer("✅ Пропуск закрыт")
+        await callback.answer("Пропуск закрыт")
         await show_pass_card(callback)
     else:
         await callback.answer("Ошибка", show_alert=True)
@@ -784,7 +791,7 @@ async def back_to_pass_list(callback: CallbackQuery, state: FSMContext):
 async def back_to_pass_menu(callback: CallbackQuery):
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
-    await callback.message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
+    await callback.message.answer("Меню пропусков:", reply_markup=pass_main_menu_keyboard())
     await callback.answer()
 
 @router.message(F.text == "⬅️ Назад")
@@ -802,4 +809,4 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Действие отменено")
     employee = await get_employee(callback.from_user.id)
     if employee:
-        await callback.message.answer("🚗 Меню пропусков:", reply_markup=pass_main_menu_keyboard())
+        await callback.message.answer("Меню пропусков:", reply_markup=pass_main_menu_keyboard())

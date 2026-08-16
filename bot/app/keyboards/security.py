@@ -5,10 +5,10 @@ def security_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [
                 KeyboardButton(text="📋 Заявки"),
-                KeyboardButton(text="🚗 Пропуска"),
+                KeyboardButton(text="Пропуска"),
             ],
             [
-                KeyboardButton(text="🚶 Обходы"),
+                KeyboardButton(text="Обходы"),
                 KeyboardButton(text="⚙️ Настройки"),
             ],
         ],

@@ -15,12 +15,14 @@ from app.keyboards.object_navigation import (
 )
 from app.keyboards.assign import (
     employee_selection_keyboard,
+    team_selection_keyboard,
     service_team_selection_keyboard,
     service_employee_selection_keyboard
 )
 from app.keyboards.main_menu import main_menu_keyboard
 from app.utils.object_navigation import get_entrances, get_floors, get_apartments, get_parking_spots, get_cellars
 from app.services.notification_service import notify_user, notify_admins, notify_team
+from app.permissions import has_permission, Permission
 
 router = Router()
 
@@ -40,8 +42,8 @@ class ServiceOrderState(StatesGroup):
 @router.message(F.text == "💳 Платные услуги")
 async def show_service_catalog(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
-        await message.answer("У вас нет прав.")
+    if not employee or not has_permission(employee, Permission.SERVICE_ORDER):
+        await message.answer("У вас нет прав для заказа услуг.")
         return
     await state.clear()
     services = await get_all_services(active_only=True)
@@ -56,6 +58,10 @@ async def show_service_catalog(message: Message, state: FSMContext):
 
 @router.callback_query(StateFilter(ServiceOrderState.select_service), F.data.startswith("service_order:"))
 async def select_service(callback: CallbackQuery, state: FSMContext):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_ORDER):
+        await callback.answer("У вас нет прав", show_alert=True)
+        return
     service_id = int(callback.data.split(":")[1])
     service = await get_service(service_id)
     if not service:
@@ -268,6 +274,10 @@ async def process_executor_type(message: Message, state: FSMContext):
 
 @router.callback_query(StateFilter(ServiceOrderState.select_team), F.data.startswith("service_team:"))
 async def process_service_team(callback: CallbackQuery, state: FSMContext):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_ORDER):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     team_str = callback.data.split(":")[1]
     team = Team(team_str)
     await state.update_data(assigned_team=team, assigned_to=None)
@@ -278,6 +288,10 @@ async def process_service_team(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(StateFilter(ServiceOrderState.select_employee), F.data.startswith("service_emp:"))
 async def process_service_employee(callback: CallbackQuery, state: FSMContext):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_ORDER):
+        await callback.answer("Нет прав", show_alert=True)
+        return
     emp_id = int(callback.data.split(":")[1])
     await state.update_data(assigned_to=emp_id, assigned_team=None)
     await callback.message.edit_text("✅ Выбран сотрудник")
@@ -355,6 +369,10 @@ async def confirm_create_order(message: Message, state: FSMContext):
         await message.answer("Ошибка.")
         await state.clear()
         return
+    if not has_permission(employee, Permission.SERVICE_ORDER):
+        await message.answer("У вас нет прав на создание заказа.")
+        await state.clear()
+        return
     try:
         order = await create_service_order(
             service_id=data.get("service_id"),
@@ -392,6 +410,9 @@ async def show_user_orders(message: Message):
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Вы не зарегистрированы.")
+        return
+    if not has_permission(employee, Permission.SERVICE_ORDER):
+        await message.answer("У вас нет прав на просмотр заказов.")
         return
     orders = await get_user_orders(employee.id)
     if not orders:

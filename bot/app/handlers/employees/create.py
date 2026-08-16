@@ -10,6 +10,7 @@ from app.keyboards.employees.admin import employees_admin_menu
 from app.database.models import UserRole
 from app.utils.invite import generate_invite_link
 from app.services.notification_service import notify_admins
+from app.permissions import has_permission, Permission
 
 router = Router()
 
@@ -20,8 +21,8 @@ async def cancel_anywhere(message: Message, state: FSMContext):
 
 @router.message(F.text == "➕ Новый сотрудник")
 async def start_create_employee(message: Message, state: FSMContext):
-    admin = await get_employee(message.from_user.id)
-    if not admin or admin.role != UserRole.ADMIN:
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.EMPLOYEE_MANAGE):
         await message.answer("У вас нет прав.")
         return
     await state.clear()
@@ -30,6 +31,10 @@ async def start_create_employee(message: Message, state: FSMContext):
 
 @router.message(EmployeeRegistration.full_name)
 async def process_full_name(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.EMPLOYEE_MANAGE):
+        await message.answer("У вас нет прав.")
+        return
     full_name = message.text.strip()
     if len(full_name) < 2:
         await message.answer("ФИО должно быть длиннее 2 символов. Попробуйте снова.")
@@ -40,6 +45,10 @@ async def process_full_name(message: Message, state: FSMContext):
 
 @router.message(EmployeeRegistration.phone)
 async def process_phone(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.EMPLOYEE_MANAGE):
+        await message.answer("У вас нет прав.")
+        return
     phone = message.text.strip()
     if not phone:
         await message.answer("Номер телефона не может быть пустым.")
@@ -50,6 +59,10 @@ async def process_phone(message: Message, state: FSMContext):
 
 @router.message(EmployeeRegistration.role)
 async def process_role(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.EMPLOYEE_MANAGE):
+        await message.answer("У вас нет прав.")
+        return
     role_map = {
         "👑 ADMIN": UserRole.ADMIN,
         "👨‍💼 DIRECTOR": UserRole.DIRECTOR,
@@ -68,6 +81,10 @@ async def process_role(message: Message, state: FSMContext):
     await show_confirmation(message, state)
 
 async def show_confirmation(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.EMPLOYEE_MANAGE):
+        await message.answer("У вас нет прав.")
+        return
     data = await state.get_data()
     full_name = data.get("full_name")
     phone = data.get("phone")
@@ -87,30 +104,34 @@ async def show_confirmation(message: Message, state: FSMContext):
 
 @router.message(EmployeeRegistration.confirm, F.text == "✅ Да, создать")
 async def confirm_create_employee(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.EMPLOYEE_MANAGE):
+        await message.answer("У вас нет прав.")
+        return
     data = await state.get_data()
     full_name = data.get("full_name")
     phone = data.get("phone")
     role = data.get("role")
     team = data.get("team")
     try:
-        employee = await create_employee(
+        emp = await create_employee(
             full_name=full_name,
             phone=phone,
             role=role,
             team=team,
         )
-        invite_link = generate_invite_link(employee.invite_code)
+        invite_link = generate_invite_link(emp.invite_code)
         await message.answer(
             f"✅ Сотрудник успешно создан!\n\n"
-            f"👤 ФИО: {employee.full_name}\n"
-            f"📞 Телефон: {employee.phone}\n"
-            f"🎯 Роль: {employee.role.value}\n"
-            f"👥 Команда: {employee.team.value if employee.team else '—'}\n\n"
+            f"👤 ФИО: {emp.full_name}\n"
+            f"📞 Телефон: {emp.phone}\n"
+            f"🎯 Роль: {emp.role.value}\n"
+            f"👥 Команда: {emp.team.value if emp.team else '—'}\n\n"
             f"🔗 Ссылка для регистрации:\n{invite_link}\n\n"
             f"Отправьте эту ссылку сотруднику.",
             reply_markup=employees_admin_menu()
         )
-        await notify_admins(f"Новый сотрудник создан: {employee.full_name} ({employee.role.value})")
+        await notify_admins(f"Новый сотрудник создан: {emp.full_name} ({emp.role.value})")
         await state.clear()
     except Exception as e:
         await message.answer(f"❌ Ошибка при создании сотрудника: {str(e)}")
@@ -119,6 +140,10 @@ async def confirm_create_employee(message: Message, state: FSMContext):
 
 @router.message(EmployeeRegistration.confirm, F.text == "❌ Отмена")
 async def cancel_confirm(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.EMPLOYEE_MANAGE):
+        await message.answer("У вас нет прав.")
+        return
     await state.clear()
     await message.answer("❌ Создание отменено", reply_markup=employees_admin_menu())
 

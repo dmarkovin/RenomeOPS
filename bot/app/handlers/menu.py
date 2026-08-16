@@ -7,10 +7,12 @@ from app.services.tasks.service import (
     count_open_tasks,
     count_checking_tasks,
     count_tasks_by_status,
+    get_open_tasks,
 )
 from app.services.services.service import get_all_orders
 from app.keyboards.main_menu import main_menu_keyboard
 from app.database.models import UserRole
+from app.keyboards.tasks import get_priority_name
 import logging
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,13 @@ async def show_statistics(message: Message):
     orders = await get_all_orders(limit=1000)
     total_orders = len([o for o in orders if o.status == "pending"])
 
+    tasks = await get_open_tasks(limit=1000, offset=0)
+    priority_stats = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for task in tasks:
+        priority = int(task.priority) if task.priority is not None else 3
+        if priority in priority_stats:
+            priority_stats[priority] += 1
+
     text = (
         f"📊 **Статистика системы**\n\n"
         f"👥 Активных сотрудников: {total_employees}\n"
@@ -61,7 +70,13 @@ async def show_statistics(message: Message):
         f"⏸ Приостановлено: {total_paused}\n"
         f"🔄 На проверке: {total_checking}\n"
         f"✅ Закрыто: {total_closed}\n"
-        f"💳 Активных заказов услуг: {total_orders}\n"
+        f"💳 Активных заказов услуг: {total_orders}\n\n"
+        f"**Приоритеты открытых заявок:**\n"
+        f"🚨 Аварийный: {priority_stats.get(5, 0)}\n"
+        f"⚠️ Критичный: {priority_stats.get(4, 0)}\n"
+        f"🔶 Высокий: {priority_stats.get(3, 0)}\n"
+        f"🔼 Средний: {priority_stats.get(2, 0)}\n"
+        f"ℹ️ Низкий: {priority_stats.get(1, 0)}"
     )
     await message.answer(text, parse_mode="HTML")
 

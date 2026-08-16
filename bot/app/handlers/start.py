@@ -24,7 +24,6 @@ async def start_handler(
     await state.clear()
     print("START RECEIVED:", message.from_user.id)
 
-    # Проверяем, есть ли пользователь с таким telegram_id (даже неактивный)
     employee = await get_employee(message.from_user.id)
 
     if employee:
@@ -36,22 +35,18 @@ async def start_handler(
         await show_main_menu(message)
         return
 
-    # Если нет пользователя с таким Telegram ID, пробуем обработать invite-код
     args = message.text.split()
     if len(args) > 1:
         invite_code = args[1]
-        # Ищем пользователя по invite-коду (он может быть активным или неактивным)
         employee = await get_employee_by_invite(invite_code)
         if employee is None:
             await message.answer("❌ Приглашение не найдено или уже использовано.")
             return
 
-        # Если сотрудник с таким кодом уже активен, значит код использован
         if employee.active:
             await message.answer("❌ Этот пригласительный код уже был использован.")
             return
 
-        # Если сотрудник неактивен, активируем его
         await activate_employee(
             employee.id,
             message.from_user.id,
@@ -61,7 +56,6 @@ async def start_handler(
         await show_main_menu(message)
         return
 
-    # Если не передан invite-код и пользователь не зарегистрирован
     await message.answer(
         """
 👋 Добро пожаловать в Renome OPS.

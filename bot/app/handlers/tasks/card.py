@@ -20,6 +20,7 @@ from app.keyboards.waiting import waiting_time_keyboard
 from app.services.notification_service import notify_user, notify_admins, notify_concierges
 from app.states.tasks.waiting import TaskWaiting
 from app.states.tasks.photo import TaskAddPhoto
+from app.permissions import can_view_task, can_take_task, can_check_task, has_permission, Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -70,13 +71,12 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
 
-    if employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
-        if task.assigned_to != employee.id and task.assigned_team != employee.team:
-            await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
-            return
+    # Проверка доступа через систему прав
+    if not can_view_task(employee, task):
+        await callback.answer("У вас нет доступа к этой заявке", show_alert=True)
+        return
 
     status_emoji = get_task_status_emoji(task.status)
-    # ===== Формируем полный адрес =====
     address_parts = []
     if task.building:
         address_parts.append(f"корп. {task.building}")
@@ -86,26 +86,6 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         address_parts.append(f"эт. {task.floor}")
     if task.apartment:
         address_parts.append(f"кв. {task.apartment}")
-    # Добавляем тип объекта
-    location_info = ""
-    if task.location_type:
-        loc_type_map = {
-            "apartment": "🏠 Квартира",
-            "common_area": "🏢 Общая зона",
-            "parking": "🚗 Паркинг",
-            "cellar": "📦 Келлер",
-            "elevator": "🛗 Лифт",
-            "other": "📦 Другое",
-        }
-        location_info = f"📍 {loc_type_map.get(task.location_type, task.location_type)}"
-        if task.location_type == "common_area" and task.common_area:
-            location_info += f" ({task.common_area})"
-        elif task.location_type == "parking":
-            if task.parking_level is not None and task.parking_spot is not None:
-                location_info += f" (уровень {task.parking_level}, место {task.parking_spot})"
-        elif task.location_type == "cellar" and task.cellar is not None:
-            location_info += f" (келлер {task.cellar})"
-
     address = ", ".join(address_parts) if address_parts else "—"
 
     text = (
@@ -113,8 +93,17 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
         f"🏢 <b>Адрес:</b> {address}\n"
     )
-    if location_info:
-        text += f"{location_info}\n"
+
+    if task.location_type:
+        location_info = f"📍 <b>Тип объекта:</b> {task.location_type}"
+        if task.location_type == "common_area" and task.common_area:
+            location_info += f" ({task.common_area})"
+        elif task.location_type == "parking":
+            if task.parking_level is not None and task.parking_spot is not None:
+                location_info += f" (уровень {task.parking_level}, место {task.parking_spot})"
+        elif task.location_type == "cellar" and task.cellar is not None:
+            location_info += f" (келлер {task.cellar})"
+        text += location_info + "\n"
 
     text += (
         f"🔢 <b>Приоритет:</b> {task.priority}\n"
@@ -143,6 +132,13 @@ async def take_task_callback(callback: CallbackQuery, state: FSMContext):
     if not employee:
         await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
+    task = await get_task(task_id)
+    if not task:
+        await callback.answer("Задача не найдена", show_alert=True)
+        return
+    if not can_take_task(employee, task):
+        await callback.answer("Вы не можете взять эту задачу", show_alert=True)
+        return
     task = await take_task(task_id, employee.id)
     if not task:
         await callback.answer("Не удалось взять задачу. Возможно, она уже назначена другому.", show_alert=True)
@@ -162,10 +158,9 @@ async def pause_task(callback: CallbackQuery, state: FSMContext):
     if not task:
         await callback.answer("Заявка не найдена", show_alert=True)
         return
-    if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        if task.assigned_to != employee.id:
-            await callback.answer("Вы не можете приостановить эту заявку", show_alert=True)
-            return
+    if not has_permission(employee, Permission.TASK_PAUSE):
+        await callback.answer("Вы не можете приостановить эту заявку", show_alert=True)
+        return
     if task.status not in ("accepted", "in_progress"):
         await callback.answer("Невозможно приостановить заявку в текущем статусе", show_alert=True)
         return
@@ -211,6 +206,9 @@ async def resume_task(callback: CallbackQuery, state: FSMContext):
     if not task or task.assigned_to != employee.id:
         await callback.answer("Вы не исполнитель этой задачи", show_alert=True)
         return
+    if not has_permission(employee, Permission.TASK_RESUME):
+        await callback.answer("Вы не можете возобновить эту задачу", show_alert=True)
+        return
     task = await change_status(task_id, "in_progress", employee.id)
     if task:
         await callback.answer("✅ Задача возобновлена")
@@ -230,14 +228,7 @@ async def start_check_task(callback: CallbackQuery, state: FSMContext):
     if not task:
         await callback.answer("Заявка не найдена", show_alert=True)
         return
-    can_check = False
-    if task.assigned_to == employee.id:
-        can_check = True
-    elif employee.role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        can_check = True
-    elif task.assigned_team == employee.team and task.assigned_to is None:
-        can_check = True
-    if not can_check:
+    if not can_check_task(employee, task):
         await callback.answer("Вы не можете отправить эту заявку на проверку", show_alert=True)
         return
     if task.status not in ("in_progress", "paused"):
@@ -322,36 +313,48 @@ async def change_task_status(callback: CallbackQuery, state: FSMContext):
     if not task:
         await callback.answer("Задача не найдена", show_alert=True)
         return
-    if employee.role in (UserRole.TECHNICIAN, UserRole.CLEANER, UserRole.SECURITY):
-        if task.assigned_to != employee.id:
-            await callback.answer("Вы не исполнитель этой задачи", show_alert=True)
+
+    # Проверка прав на смену статуса через permissions
+    if new_status == "closed":
+        if not has_permission(employee, Permission.TASK_CLOSE):
+            await callback.answer("У вас нет прав на закрытие задачи", show_alert=True)
             return
-        if new_status not in ("accepted", "in_progress", "checking", "closed", "paused"):
-            await callback.answer("Недопустимый статус", show_alert=True)
+    elif new_status == "checking":
+        if not can_check_task(employee, task):
+            await callback.answer("Вы не можете отправить эту задачу на проверку", show_alert=True)
             return
-    elif employee.role in (UserRole.CONCIERGE, UserRole.ADMIN, UserRole.DIRECTOR):
-        if new_status not in ("closed", "in_progress"):
-            await callback.answer("Недопустимый статус для вашей роли", show_alert=True)
+    elif new_status == "in_progress" and status_str == "rework":
+        if not has_permission(employee, Permission.TASK_REWORK):
+            await callback.answer("У вас нет прав на возврат задачи на доработку", show_alert=True)
+            return
+    elif new_status == "paused":
+        if not has_permission(employee, Permission.TASK_PAUSE):
+            await callback.answer("У вас нет прав на приостановку задачи", show_alert=True)
+            return
+    elif new_status == "accepted":
+        if not has_permission(employee, Permission.TASK_ASSIGN):
+            await callback.answer("У вас нет прав на назначение задачи", show_alert=True)
             return
     else:
-        await callback.answer("У вас нет прав", show_alert=True)
-        return
+        if not has_permission(employee, Permission.TASK_TAKE):
+            await callback.answer("У вас нет прав на изменение статуса", show_alert=True)
+            return
+
     task = await change_status(task_id, new_status, employee.id)
     if not task:
         await callback.answer("Ошибка изменения статуса", show_alert=True)
         return
     await callback.answer(f"✅ Статус изменён на {new_status}")
     if new_status == "checking":
-        await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}")
+        await notify_concierges(f"🔍 Задача #{task_id} готова к проверке. Исполнитель: {employee.full_name}", task_id=task_id)
     elif new_status == "closed":
-        await notify_concierges(f"✅ Задача #{task_id} закрыта. Проверил: {employee.full_name}")
+        await notify_concierges(f"✅ Задача #{task_id} закрыта. Проверил: {employee.full_name}", task_id=task_id)
     elif new_status == "paused":
         await notify_admins(f"⏸ Задача #{task_id} приостановлена исполнителем {employee.full_name}")
     elif new_status == "in_progress" and status_str == "rework":
         await notify_admins(f"🔄 Задача #{task_id} возвращена на доработку исполнителем {employee.full_name}")
     await show_task_card(callback, state)
 
-# ==== Комментарии, история, фото, видео, ожидание (остальное без изменений) ====
 @router.callback_query(F.data.startswith("task_comment_list:"))
 async def show_comments(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -569,7 +572,7 @@ async def start_add_photo(callback: CallbackQuery, state: FSMContext):
     if not task:
         await callback.answer("Задача не найдена", show_alert=True)
         return
-    if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE) and task.assigned_to != employee.id:
+    if not has_permission(employee, Permission.TASK_VIEW_OWN) and not has_permission(employee, Permission.TASK_VIEW_TEAM):
         await callback.answer("У вас нет прав добавлять фото", show_alert=True)
         return
     await state.set_state(TaskPhotoState.waiting_for_photos)
@@ -656,7 +659,7 @@ async def process_wait_comment(message: Message, state: FSMContext):
     task = await change_status(task_id, "waiting", employee.id, comment, wait_until)
     if task:
         await message.answer(f"✅ Задача отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}")
-        await notify_concierges(f"⏳ Задача #{task_id} отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}. Комментарий: {comment}")
+        await notify_concierges(f"⏳ Задача #{task_id} отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}. Комментарий: {comment}", task_id=task_id)
     else:
         await message.answer("❌ Ошибка")
     await state.clear()
