@@ -28,22 +28,16 @@ class ServiceEdit(StatesGroup):
     category = State()
     confirm_delete = State()
 
-# ===== Проверка прав =====
-async def check_admin_access(user_id: int) -> bool:
-    try:
-        employee = await get_employee(user_id)
-        if not employee:
-            logger.warning(f"check_admin_access: пользователь {user_id} не найден")
-            return False
-        return has_permission(employee, Permission.SERVICE_MANAGE)
-    except Exception as e:
-        logger.error(f"check_admin_access: ошибка {e}")
-        return False
-
-# ===== Главное меню =====
+# ===== Главное меню управления услугами =====
 @router.message(F.text == "💳 Управление услугами")
 async def service_admin_menu(message: Message, state: FSMContext, page: int = 1):
-    if not await check_admin_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        logger.warning(f"service_admin_menu: пользователь {message.from_user.id} не найден")
+        await message.answer("У вас нет прав.")
+        return
+    if not has_permission(employee, Permission.SERVICE_MANAGE):
+        logger.warning(f"service_admin_menu: у пользователя {employee.id} нет права SERVICE_MANAGE")
         await message.answer("У вас нет прав.")
         return
     await state.update_data(service_admin_page=page)
@@ -63,7 +57,8 @@ async def service_admin_menu(message: Message, state: FSMContext, page: int = 1)
 
 @router.callback_query(F.data.startswith("service_admin_page:"))
 async def service_admin_page(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     page = int(callback.data.split(":")[1])
@@ -72,7 +67,8 @@ async def service_admin_page(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "service_admin_create")
 async def service_admin_create(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     await callback.message.delete()
@@ -83,7 +79,8 @@ async def service_admin_create(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ServiceEdit.name)
 async def service_edit_name(message: Message, state: FSMContext):
-    if not await check_admin_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await message.answer("У вас нет прав.")
         return
     data = await state.get_data()
@@ -100,7 +97,8 @@ async def service_edit_name(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.description)
 async def service_edit_description(message: Message, state: FSMContext):
-    if not await check_admin_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await message.answer("У вас нет прав.")
         return
     data = await state.get_data()
@@ -117,7 +115,8 @@ async def service_edit_description(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.price)
 async def service_edit_price(message: Message, state: FSMContext):
-    if not await check_admin_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await message.answer("У вас нет прав.")
         return
     data = await state.get_data()
@@ -141,7 +140,8 @@ async def service_edit_price(message: Message, state: FSMContext):
 
 @router.message(ServiceEdit.category)
 async def service_edit_category(message: Message, state: FSMContext):
-    if not await check_admin_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await message.answer("У вас нет прав.")
         return
     data = await state.get_data()
@@ -168,7 +168,8 @@ async def service_edit_category(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_admin_edit:"))
 async def service_admin_edit_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -190,7 +191,8 @@ async def service_admin_edit_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_name:"))
 async def service_edit_name_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -202,7 +204,8 @@ async def service_edit_name_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_description:"))
 async def service_edit_description_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -214,7 +217,8 @@ async def service_edit_description_start(callback: CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data.startswith("service_edit_price:"))
 async def service_edit_price_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -226,7 +230,8 @@ async def service_edit_price_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_category:"))
 async def service_edit_category_start(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -238,7 +243,8 @@ async def service_edit_category_start(callback: CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data.startswith("service_edit_active:"))
 async def service_edit_active(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
@@ -252,17 +258,26 @@ async def service_edit_active(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("service_edit_back:"))
 async def service_edit_back(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     await callback.message.delete()
     await service_admin_menu(callback.message, state)
     await callback.answer()
 
+# ===== УДАЛЕНИЕ УСЛУГИ =====
 @router.callback_query(F.data.startswith("service_admin_delete:"))
 async def service_admin_delete(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
-        await callback.answer("Нет прав", show_alert=True)
+    employee = await get_employee(callback.from_user.id)
+    logger.info(f"DEBUG service_admin_delete: callback.from_user.id = {callback.from_user.id}")
+    if not employee:
+        logger.warning(f"service_admin_delete: пользователь {callback.from_user.id} не найден")
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
+        return
+    if not has_permission(employee, Permission.SERVICE_MANAGE):
+        logger.warning(f"service_admin_delete: у пользователя {employee.id} нет права SERVICE_MANAGE")
+        await callback.answer("У вас нет прав", show_alert=True)
         return
     service_id = int(callback.data.split(":")[1])
     service = await get_service(service_id)
@@ -283,8 +298,15 @@ async def service_admin_delete(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(StateFilter(ServiceEdit.confirm_delete), F.data == "service_admin_delete_confirm")
 async def service_admin_delete_confirm(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
-        await callback.answer("Нет прав", show_alert=True)
+    employee = await get_employee(callback.from_user.id)
+    logger.info(f"DEBUG service_admin_delete_confirm: callback.from_user.id = {callback.from_user.id}")
+    if not employee:
+        logger.warning(f"service_admin_delete_confirm: пользователь {callback.from_user.id} не найден")
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
+        return
+    if not has_permission(employee, Permission.SERVICE_MANAGE):
+        logger.warning(f"service_admin_delete_confirm: у пользователя {employee.id} нет права SERVICE_MANAGE")
+        await callback.answer("У вас нет прав", show_alert=True)
         return
     data = await state.get_data()
     service_id = data.get("service_id")
@@ -299,8 +321,9 @@ async def service_admin_delete_confirm(callback: CallbackQuery, state: FSMContex
 
 @router.callback_query(StateFilter(ServiceEdit.confirm_delete), F.data == "service_admin_delete_cancel")
 async def service_admin_delete_cancel(callback: CallbackQuery, state: FSMContext):
-    if not await check_admin_access(callback.from_user.id):
-        await callback.answer("Нет прав", show_alert=True)
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
+        await callback.answer("У вас нет прав", show_alert=True)
         return
     await state.clear()
     await callback.message.delete()
@@ -309,11 +332,11 @@ async def service_admin_delete_cancel(callback: CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data == "service_admin_back_to_menu")
 async def service_admin_back_to_menu(callback: CallbackQuery):
-    if not await check_admin_access(callback.from_user.id):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await callback.answer("Нет прав", show_alert=True)
         return
     await callback.message.delete()
-    employee = await get_employee(callback.from_user.id)
     if employee and employee.role == UserRole.ADMIN:
         from app.keyboards.admin import admin_keyboard
         await callback.message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())
@@ -321,10 +344,10 @@ async def service_admin_back_to_menu(callback: CallbackQuery):
 
 @router.message(F.text == "⬅️ Назад")
 async def back_from_services(message: Message):
-    if not await check_admin_access(message.from_user.id):
+    employee = await get_employee(message.from_user.id)
+    if not employee or not has_permission(employee, Permission.SERVICE_MANAGE):
         await message.answer("У вас нет прав.")
         return
-    employee = await get_employee(message.from_user.id)
     if employee and employee.role == UserRole.ADMIN:
         from app.keyboards.admin import admin_keyboard
         await message.answer("👑 Главное меню администратора", reply_markup=admin_keyboard())

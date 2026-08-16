@@ -32,9 +32,19 @@ async def start_handler(
                 "⛔ Ваш аккаунт заблокирован. Обратитесь к администратору для восстановления доступа."
             )
             return
-        await show_main_menu(message)
+        # Приветствие с ролью и командой
+        role_name = employee.role.value
+        team_name = employee.team.value if employee.team else "не назначена"
+        await message.answer(
+            f"👋 Добро пожаловать!\n"
+            f"Ваша команда: {team_name}\n"
+            f"Ваша роль: {role_name}\n\n"
+            f"🏠 Главное меню:",
+            reply_markup=await show_main_menu(message)
+        )
         return
 
+    # Если нет пользователя с таким Telegram ID, пробуем обработать invite-код
     args = message.text.split()
     if len(args) > 1:
         invite_code = args[1]
@@ -42,11 +52,9 @@ async def start_handler(
         if employee is None:
             await message.answer("❌ Приглашение не найдено или уже использовано.")
             return
-
         if employee.active:
             await message.answer("❌ Этот пригласительный код уже был использован.")
             return
-
         await activate_employee(
             employee.id,
             message.from_user.id,
@@ -67,7 +75,6 @@ async def start_handler(
     )
     print(f"DEBUG: Received message: '{message.text}'")
 
-# ===== Команда /become_admin =====
 @router.message(Command("become_admin"))
 async def become_admin(message: Message, state: FSMContext):
     await state.clear()

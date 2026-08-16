@@ -11,7 +11,6 @@ from app.services.reception.key_service import (
 )
 from app.database.models import UserRole
 from app.keyboards.reception_keys import key_list_keyboard
-from app.permissions import has_permission, Permission
 
 router = Router()
 
@@ -42,8 +41,8 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
 @router.message(F.text == "🔑 Ключи")
 async def keys_main_menu(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
-        await message.answer("У вас нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     await state.clear()
     kb = ReplyKeyboardMarkup(
@@ -61,8 +60,8 @@ async def keys_main_menu(message: Message, state: FSMContext):
 @router.message(F.text == "📋 Список выданных")
 async def list_issued_keys(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
-        await message.answer("Нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     await show_key_list(message, state, status="issued", title="🔑 Выданные ключи", page=page)
 
@@ -70,15 +69,15 @@ async def list_issued_keys(message: Message, state: FSMContext, page: int = 1):
 @router.message(F.text == "📋 Возвращённые")
 async def list_returned_keys(message: Message, state: FSMContext, page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
-        await message.answer("Нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     await show_key_list(message, state, status="returned", title="✅ Возвращённые ключи", page=page)
 
 async def show_key_list(message: Message, state: FSMContext, status: str, title: str, page: int = 1):
     employee = await get_employee(message.from_user.id)
-    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
-        await message.answer("Нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     limit = 10
     offset = (page - 1) * limit
@@ -142,7 +141,7 @@ async def key_back_to_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.delete()
     employee = await get_employee(callback.from_user.id)
-    if employee and has_permission(employee, Permission.KEYS_MANAGE):
+    if employee:
         await callback.message.answer("🔑 Управление ключами:", reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Выдать ключ")],
@@ -152,6 +151,8 @@ async def key_back_to_menu(callback: CallbackQuery, state: FSMContext):
             ],
             resize_keyboard=True
         ))
+    else:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
     await callback.answer()
 
 @router.callback_query(F.data == "key_back_to_list")
@@ -166,8 +167,8 @@ async def key_back_to_list(callback: CallbackQuery, state: FSMContext):
 @router.message(F.text == "➕ Выдать ключ")
 async def start_create_key(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
-        await message.answer("Нет прав.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     await state.clear()
     await state.set_state(KeyCreate.key_number)
@@ -216,7 +217,7 @@ async def confirm_create_key(message: Message, state: FSMContext):
     data = await state.get_data()
     employee = await get_employee(message.from_user.id)
     if not employee:
-        await message.answer("Ошибка.")
+        await message.answer("Вы не зарегистрированы.")
         await state.clear()
         return
     try:
@@ -258,8 +259,8 @@ async def cancel_create_key(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("key:"))
 async def show_key_card(callback: CallbackQuery):
     employee = await get_employee(callback.from_user.id)
-    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
-        await callback.answer("У вас нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     key_id = int(callback.data.split(":")[1])
     k = await get_key(key_id)
@@ -290,8 +291,8 @@ async def show_key_card(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("key_return:"))
 async def key_return(callback: CallbackQuery):
     employee = await get_employee(callback.from_user.id)
-    if not employee or not has_permission(employee, Permission.KEYS_MANAGE):
-        await callback.answer("У вас нет прав", show_alert=True)
+    if not employee:
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     key_id = int(callback.data.split(":")[1])
     k = await return_key(key_id)
@@ -346,7 +347,7 @@ async def key_comment_add(callback: CallbackQuery, state: FSMContext):
     key_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
     if not employee:
-        await callback.answer("Ошибка", show_alert=True)
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     await state.set_state(KeyCommentState.waiting_for_comment)
     await state.update_data(key_id=key_id)
@@ -360,7 +361,7 @@ async def key_comment_process(message: Message, state: FSMContext):
     key_id = data.get("key_id")
     employee = await get_employee(message.from_user.id)
     if not employee:
-        await message.answer("Ошибка")
+        await message.answer("Вы не зарегистрированы")
         await state.clear()
         return
     comment = await add_key_comment(key_id, employee.id, employee.full_name, message.text)

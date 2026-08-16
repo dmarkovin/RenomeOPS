@@ -69,10 +69,10 @@ def pass_action_keyboard(pass_id: int, status: str, user_role: str, checked_in: 
 def pass_main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Заказать пропуск")],
-            [KeyboardButton(text="📋 Активные пропуски")],
-            [KeyboardButton(text="📜 История пропусков")],
-            [KeyboardButton(text="🔍 Поиск по пропускам")],
+            [KeyboardButton(text="Заказать пропуск")],
+            [KeyboardButton(text="Активные пропуски")],
+            [KeyboardButton(text="История пропусков")],
+            [KeyboardButton(text="Поиск по пропускам")],
             [KeyboardButton(text="⬅️ Назад")],
         ],
         resize_keyboard=True
@@ -81,9 +81,9 @@ def pass_main_menu_keyboard() -> ReplyKeyboardMarkup:
 def pass_assign_type_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="👥 Всей охране")],
-            [KeyboardButton(text="👤 Конкретному сотруднику")],
-            [KeyboardButton(text="⏭ Пропустить")],
+            [KeyboardButton(text="Всей охране")],
+            [KeyboardButton(text="Конкретному сотруднику")],
+            [KeyboardButton(text="Пропустить")],
         ],
         resize_keyboard=True
     )
