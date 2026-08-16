@@ -30,6 +30,7 @@ def task_list_keyboard(
         priority = int(task.priority) if task.priority is not None else 3
         status_emoji = get_task_status_emoji(task.status)
         priority_emoji = get_priority_emoji(priority)
+        priority_name = get_priority_name(priority)
         text = f"{status_emoji} {priority_emoji} #{task.id} {task.title[:25]}"
         buttons.append([InlineKeyboardButton(text=text, callback_data=f"task:{task.id}")])
 
@@ -46,6 +47,16 @@ def task_list_keyboard(
     sort_buttons.append(InlineKeyboardButton("📅 По дате", callback_data="task_sort:date"))
     sort_buttons.append(InlineKeyboardButton("🔥 По приоритету", callback_data="task_sort:priority"))
     buttons.append(sort_buttons)
+
+    # Фильтр по приоритету (без звёздочек)
+    filter_buttons = []
+    filter_buttons.append(InlineKeyboardButton("🔽 Все", callback_data="task_filter:all"))
+    for p in [1, 2, 3, 4, 5]:
+        label = get_priority_name(p)
+        if filter_priority == p:
+            label = f"✅ {label}"
+        filter_buttons.append(InlineKeyboardButton(label, callback_data=f"task_filter:{p}"))
+    buttons.append(filter_buttons)
 
     buttons.append([InlineKeyboardButton("⬅️ В главное меню", callback_data="tasks_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

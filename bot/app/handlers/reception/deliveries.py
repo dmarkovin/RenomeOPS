@@ -195,7 +195,9 @@ async def show_delivery_list(message: Message, state: FSMContext, status=None, t
 
     kb = InlineKeyboardMarkup(inline_keyboard=[])
     for d in deliveries[:10]:
-        kb.inline_keyboard.append([InlineKeyboardButton(text=f"📦 #{d.id}", callback_data=f"delivery:{d.id}")])
+        # Добавляем ФИО и квартиру в кнопку
+        label = f"📦 #{d.id} {d.recipient} (кв.{d.apartment})"
+        kb.inline_keyboard.append([InlineKeyboardButton(text=label, callback_data=f"delivery:{d.id}")])
     nav = []
     if page > 1:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"delivery_page:{page-1}"))

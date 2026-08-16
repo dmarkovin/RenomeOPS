@@ -29,7 +29,7 @@ def employee_selection_keyboard(employees: List, prefix: str = "assign_emp") -> 
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="assign_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# ===== Для платных услуг =====
+# ===== Дополнительные клавиатуры для услуг =====
 def service_team_selection_keyboard(teams: List[dict]) -> InlineKeyboardMarkup:
     buttons = []
     for team_data in teams:

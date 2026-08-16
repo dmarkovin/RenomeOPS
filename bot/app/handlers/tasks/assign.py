@@ -19,7 +19,7 @@ from app.keyboards.assign import (
     employee_selection_keyboard,
     assign_type_keyboard
 )
-from app.services.notification_service import notify_user, notify_team
+from app.services.notification_service import notify_user, notify_team, notify_user_with_button, notify_team_with_button
 from app.handlers.tasks.card import safe_edit_or_reply, show_task_card
 from app.handlers.tasks.list import show_list
 import logging
@@ -50,7 +50,7 @@ async def start_assign(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await callback.message.answer(
         "Выберите способ назначения:",
-        reply_markup=assign_type_keyboard(task_id)  # <-- передаём task_id
+        reply_markup=assign_type_keyboard(task_id)
     )
     await callback.answer()
 
@@ -85,7 +85,7 @@ async def assign_team_selected(callback: CallbackQuery, state: FSMContext):
     task = await assign_task_to_team(task_id, team, employee.id)
     if task:
         await callback.answer("✅ Задача назначена на команду")
-        await notify_team(team, f"📢 Задача #{task_id} назначена на вашу команду.")
+        await notify_team_with_button(team, f"📢 Задача #{task_id} назначена на вашу команду.", task_id)
         await state.clear()
         await show_task_card(callback, state)
     else:
@@ -149,7 +149,7 @@ async def assign_confirm_yes(callback: CallbackQuery, state: FSMContext):
         assignee = await get_employee_by_id(emp_id)
         await callback.answer("✅ Задача назначена на сотрудника")
         if assignee and assignee.telegram_id:
-            await notify_user(assignee.telegram_id, f"📢 Вам назначена задача #{task_id}.")
+            await notify_user_with_button(assignee.telegram_id, f"📢 Вам назначена задача #{task_id}.", task_id)
         await state.clear()
         await show_task_card(callback, state)
     else:
@@ -207,7 +207,7 @@ async def transfer_employee_selected(callback: CallbackQuery, state: FSMContext)
         assignee = await get_employee_by_id(emp_id)
         await callback.answer("✅ Задача передана")
         if assignee and assignee.telegram_id:
-            await notify_user(assignee.telegram_id, f"📢 Вам передана задача #{task_id} от {employee.full_name}.")
+            await notify_user_with_button(assignee.telegram_id, f"📢 Вам передана задача #{task_id} от {employee.full_name}.", task_id)
         await state.clear()
         await show_task_card(callback, state)
     else:

@@ -2,14 +2,13 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-from app.services.employees.service import get_employee
+from app.services.employees.service import get_employee, count_employees
 from app.services.tasks.service import (
     count_open_tasks,
-    count_tasks_by_status,
     count_checking_tasks,
+    count_tasks_by_status,
 )
 from app.services.services.service import get_all_orders
-from app.services.employees.service import count_employees
 from app.keyboards.main_menu import main_menu_keyboard
 from app.database.models import UserRole
 import logging

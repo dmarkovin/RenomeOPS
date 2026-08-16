@@ -15,7 +15,6 @@ from app.keyboards.object_navigation import (
 )
 from app.keyboards.assign import (
     employee_selection_keyboard,
-    team_selection_keyboard,
     service_team_selection_keyboard,
     service_employee_selection_keyboard
 )

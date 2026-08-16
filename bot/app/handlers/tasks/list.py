@@ -94,6 +94,7 @@ async def show_list(
         tasks = []
         show_assignee = True
 
+        # Админ, консьерж, директор видят все открытые
         if list_type == "open":
             if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
                 if isinstance(target, CallbackQuery):
@@ -108,6 +109,7 @@ async def show_list(
             title = "📋 Мои задачи"
             show_assignee = False
         elif list_type == "team":
+            # Задачи команды, не назначенные конкретному исполнителю
             tasks = await get_team_tasks(employee.id, limit=1000, offset=0)
             title = "📋 Новые задачи"
             show_assignee = False
@@ -121,6 +123,7 @@ async def show_list(
             tasks = await get_checking_tasks(limit=1000, offset=0)
             title = "📋 Задачи на проверке"
         elif list_type == "archive_all":
+            # Админ видит все закрытые, консьерж/директор — без feedback и админских
             tasks = await get_tasks_by_status("closed", limit=1000, offset=0, user_id=employee.id)
             title = "📦 Архив (все закрытые заявки)"
         elif list_type == "archive_paid":
@@ -188,7 +191,6 @@ async def show_list(
         else:
             await target.answer(f"❌ Ошибка при загрузке списка: {str(e)}", parse_mode=None)
 
-# ========== Меню архива ==========
 async def show_archive_menu(target, state: FSMContext):
     if isinstance(target, CallbackQuery):
         user_id = target.from_user.id
@@ -264,7 +266,7 @@ async def show_archive(message: Message, state: FSMContext):
     await show_archive_menu(message, state)
 
 @router.message(F.text == "📊 Статистика")
-async def show_statistics(message: Message):
+async def show_statistics_message(message: Message):
     employee = await get_employee(message.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR):
         await message.answer("Только для администратора и директора.")
