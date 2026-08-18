@@ -1,0 +1,1554 @@
+diff --git a/bot/app/handlers/passes/passes.py b/bot/app/handlers/passes/passes.py
+index d29ecf4..e71f511 100644
+--- a/bot/app/handlers/passes/passes.py
++++ b/bot/app/handlers/passes/passes.py
+@@ -22,7 +22,6 @@ from app.keyboards.date_picker import date_selection_keyboard
+ from app.keyboards.main_menu import main_menu_keyboard
+ from app.services.notification_service import notify_user, notify_concierges, notify_security, notify_team
+ from app.database import AsyncSessionLocal
+-from app.metrics import bot_errors_total
+ 
+ router = Router()
+ 
+@@ -55,8 +54,7 @@ async def safe_delete_message(message):
+ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
+     try:
+         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+-    except Exception as e:
+-        bot_errors_total.labels(error_type=type(e).__name__).inc()
++    except Exception:
+         await safe_delete_message(callback.message)
+         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+ 
+@@ -97,11 +95,13 @@ async def process_type(message: Message, state: FSMContext):
+     if text not in ("👤 Гость", "🚗 Автомобиль"):
+         await message.answer("Пожалуйста, выберите кнопкой.")
+         return
+-    await state.update_data(type="guest" if text == "👤 Гость" else "car")
+-    await state.set_state(PassCreate.guest_name if text == "👤 Гость" else PassCreate.car_number)
+     if text == "👤 Гость":
++        await state.update_data(type="guest", car_number="")  # <-- устанавливаем пустую строку для car_number
++        await state.set_state(PassCreate.guest_name)
+         await message.answer("Введите имя гостя:", reply_markup=ReplyKeyboardRemove())
+-    else:
++    else:  # Автомобиль
++        await state.update_data(type="car", guest_name="")  # <-- устанавливаем пустую строку для guest_name
++        await state.set_state(PassCreate.car_number)
+         await message.answer("Введите номер автомобиля:", reply_markup=ReplyKeyboardRemove())
+ 
+ @router.message(PassCreate.guest_name)
+@@ -306,19 +306,32 @@ async def confirm_create_pass(message: Message, state: FSMContext):
+         await state.clear()
+         return
+     try:
++        # Подготовка данных с гарантией не-None для обязательных полей
++        pass_type = data.get("type")
++        guest_name = data.get("guest_name") or ""
++        car_number = data.get("car_number") or ""
++        apartment = data.get("apartment")
++        purpose = data.get("purpose") or ""
++        start_date = data.get("start_date")
++        end_date = data.get("end_date")
++        comment = data.get("comment", "")
++        photo_ids = data.get("photos", [])
++        assigned_to = data.get("assigned_to")
++        assigned_team = data.get("assigned_team")
++
+         p = await create_pass(
+-            type=data.get("type"),
+-            guest_name=data.get("guest_name"),
+-            car_number=data.get("car_number"),
+-            apartment=data.get("apartment"),
+-            purpose=data.get("purpose"),
+-            start_date=data.get("start_date"),
+-            end_date=data.get("end_date"),
+-            comment=data.get("comment", ""),
+-            photo_ids=data.get("photos", []),
++            type=pass_type,
++            guest_name=guest_name,
++            car_number=car_number,
++            apartment=apartment,
++            purpose=purpose,
++            start_date=start_date,
++            end_date=end_date,
++            comment=comment,
++            photo_ids=photo_ids,
+             created_by=employee.id,
+-            assigned_to=data.get("assigned_to"),
+-            assigned_team=data.get("assigned_team")
++            assigned_to=assigned_to,
++            assigned_team=assigned_team
+         )
+         await state.clear()
+         if p.assigned_to:
+@@ -332,8 +345,9 @@ async def confirm_create_pass(message: Message, state: FSMContext):
+         await message.answer(f"✅ Пропуск #{p.id} создан!", reply_markup=pass_main_menu_keyboard())
+         await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
+     except Exception as e:
+-        bot_errors_total.labels(error_type=type(e).__name__).inc()
+-        await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
++        # Показываем детальную ошибку
++        error_text = str(e) if str(e) else "Неизвестная ошибка при создании пропуска"
++        await message.answer(f"❌ Ошибка: {error_text}", parse_mode=None)
+         await state.clear()
+ 
+ @router.message(StateFilter(PassCreate.confirm), F.text == "❌ Отмена")
+diff --git a/bot/app/handlers/reception/deliveries.py b/bot/app/handlers/reception/deliveries.py
+index bb9ac42..6f0178b 100644
+--- a/bot/app/handlers/reception/deliveries.py
++++ b/bot/app/handlers/reception/deliveries.py
+@@ -143,4 +143,241 @@ async def delivery_cancel(message: Message, state: FSMContext):
+     await state.clear()
+     await message.answer("Отменено", reply_markup=reception_menu_keyboard())
+ 
+-# ... остальная часть файла без изменений (списки, архив, комментарии и т.д.) - но для краткости я пропущу, так как они уже были корректными.
++# ========== Список активных посылок (pending + received) ==========
++@router.message(F.text == "📋 Активные посылки")
++async def list_active_deliveries(message: Message, state: FSMContext, page: int = 1):
++    await show_delivery_list(message, state, status=["pending", "received"], title="📦 Активные посылки", page=page)
++
++# ========== Архив доставок (completed) ==========
++@router.message(F.text == "📦 Архив доставок")
++async def list_completed_deliveries(message: Message, state: FSMContext, page: int = 1):
++    await show_delivery_list(message, state, status="completed", title="📦 Архив доставок", page=page)
++
++async def show_delivery_list(message: Message, state: FSMContext, status=None, title="Посылки", page: int = 1):
++    employee = await get_employee(message.from_user.id)
++    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
++        await message.answer("Нет прав.")
++        return
++    limit = 10
++    offset = (page - 1) * limit
++    deliveries = await get_all_deliveries(status=status, limit=limit, offset=offset)
++    total = len(deliveries)
++    total_pages = (total + limit - 1) // limit if total > 0 else 1
++
++    if not deliveries:
++        await message.answer(f"{title}\n\nНет записей.", reply_markup=reception_menu_keyboard())
++        return
++
++    text = f"{title} (стр. {page}/{total_pages}):\n\n"
++    for d in deliveries:
++        status_emoji = {"pending": "🟡", "received": "🔵", "completed": "✅"}.get(d.status, "⚪")
++        text += f"{status_emoji} #{d.id} {d.recipient} – кв.{d.apartment} ({d.status})\n"
++
++    kb = InlineKeyboardMarkup(inline_keyboard=[])
++    for d in deliveries[:10]:
++        kb.inline_keyboard.append([InlineKeyboardButton(text=f"📦 #{d.id}", callback_data=f"delivery:{d.id}")])
++    nav = []
++    if page > 1:
++        nav.append(InlineKeyboardButton("◀️", callback_data=f"delivery_page:{page-1}"))
++    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="ignore"))
++    if page < total_pages:
++        nav.append(InlineKeyboardButton("▶️", callback_data=f"delivery_page:{page+1}"))
++    if nav:
++        kb.inline_keyboard.append(nav)
++    kb.inline_keyboard.append([InlineKeyboardButton("⬅️ Назад в меню", callback_data="delivery_back_to_menu")])
++
++    await state.update_data(delivery_list_status=status, delivery_list_page=page)
++    sent = await message.answer(text, reply_markup=kb)
++    await state.update_data(delivery_message_id=sent.message_id, delivery_chat_id=sent.chat.id)
++
++@router.callback_query(F.data.startswith("delivery_page:"))
++async def paginate_deliveries(callback: CallbackQuery, state: FSMContext):
++    page = int(callback.data.split(":")[1])
++    data = await state.get_data()
++    status = data.get('delivery_list_status')
++    await show_delivery_list(callback.message, state, status=status, page=page)
++    await callback.answer()
++
++@router.callback_query(F.data == "delivery_back_to_menu")
++async def delivery_back_to_menu(callback: CallbackQuery, state: FSMContext):
++    await state.clear()
++    await callback.message.delete()
++    employee = await get_employee(callback.from_user.id)
++    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
++        await callback.message.answer("📦 Меню доставки:", reply_markup=reception_menu_keyboard())
++    await callback.answer()
++
++@router.callback_query(F.data == "delivery_back_to_list")
++async def delivery_back_to_list(callback: CallbackQuery, state: FSMContext):
++    data = await state.get_data()
++    status = data.get('delivery_list_status')
++    page = data.get('delivery_list_page', 1)
++    await callback.message.delete()
++    await show_delivery_list(callback.message, state, status=status, page=page)
++
++# ========== Карточка посылки ==========
++@router.callback_query(F.data.startswith("delivery:"))
++async def show_delivery_card(callback: CallbackQuery):
++    delivery_id = int(callback.data.split(":")[1])
++    d = await get_delivery(delivery_id)
++    if not d:
++        await callback.answer("Не найдена", show_alert=True)
++        return
++    text = (
++        f"📦 Посылка #{d.id}\n"
++        f"Получатель: {d.recipient}\n"
++        f"Квартира: {d.apartment or '—'}\n"
++        f"Курьер: {d.courier_service or '—'}\n"
++        f"Статус: {d.status}\n"
++        f"Комментарий: {d.comment or '—'}\n"
++        f"Создана: {d.created_at.strftime('%d.%m.%Y %H:%M')}"
++    )
++    kb = InlineKeyboardMarkup(inline_keyboard=[])
++    if d.status == "pending":
++        kb.inline_keyboard.append([InlineKeyboardButton(text="📥 Получено", callback_data=f"delivery_receive:{d.id}")])
++    if d.status == "received":
++        kb.inline_keyboard.append([InlineKeyboardButton(text="✅ Завершить", callback_data=f"delivery_complete:{d.id}")])
++    kb.inline_keyboard.append([InlineKeyboardButton(text="💬 Комментарии", callback_data=f"delivery_comment_menu:{d.id}")])
++    kb.inline_keyboard.append([InlineKeyboardButton(text="📜 История", callback_data=f"delivery_history:{d.id}")])
++    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="delivery_back_to_list")])
++    await safe_edit_or_reply(callback, text, kb)
++    await callback.answer()
++
++@router.callback_query(F.data.startswith("delivery_receive:"))
++async def delivery_receive(callback: CallbackQuery):
++    delivery_id = int(callback.data.split(":")[1])
++    d = await update_delivery_status(delivery_id, "received")
++    if d:
++        await callback.answer("✅ Посылка отмечена как полученная")
++        await show_delivery_card(callback)
++    else:
++        await callback.answer("Ошибка", show_alert=True)
++
++@router.callback_query(F.data.startswith("delivery_complete:"))
++async def delivery_complete(callback: CallbackQuery):
++    delivery_id = int(callback.data.split(":")[1])
++    d = await update_delivery_status(delivery_id, "completed")
++    if d:
++        await callback.answer("✅ Посылка завершена")
++        await show_delivery_card(callback)
++    else:
++        await callback.answer("Ошибка", show_alert=True)
++
++# ========== Комментарии ==========
++@router.callback_query(F.data.startswith("delivery_comment_menu:"))
++async def delivery_comment_menu(callback: CallbackQuery):
++    delivery_id = int(callback.data.split(":")[1])
++    await callback.message.delete()
++    kb = InlineKeyboardMarkup(inline_keyboard=[
++        [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"delivery_comment_list:{delivery_id}")],
++        [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"delivery_comment_add:{delivery_id}")],
++        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delivery_comment_back:{delivery_id}")]
++    ])
++    await callback.message.answer("💬 Меню комментариев:", reply_markup=kb)
++    await callback.answer()
++
++@router.callback_query(F.data.startswith("delivery_comment_list:"))
++async def delivery_comment_list(callback: CallbackQuery):
++    delivery_id = int(callback.data.split(":")[1])
++    d = await get_delivery(delivery_id)
++    if not d:
++        await callback.answer("Не найдена", show_alert=True)
++        return
++    comments = d.comments or []
++    if not comments:
++        text = "💬 Комментариев пока нет."
++    else:
++        text = f"💬 <b>Комментарии к посылке #{delivery_id}</b>\n\n"
++        for c in comments[:10]:
++            user_name = c.get("author_name", "—")
++            created_at = c.get("created_at", "")
++            text += f"👤 {user_name} | {created_at}\n"
++            text += f"{c.get('text', '')}\n\n"
++    await callback.message.delete()
++    await callback.message.answer(
++        text,
++        parse_mode="HTML",
++        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
++            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"delivery_comment_menu:{delivery_id}")]
++        ])
++    )
++    await callback.answer()
++
++@router.callback_query(F.data.startswith("delivery_comment_add:"))
++async def delivery_comment_add(callback: CallbackQuery, state: FSMContext):
++    delivery_id = int(callback.data.split(":")[1])
++    employee = await get_employee(callback.from_user.id)
++    if not employee:
++        await callback.answer("Ошибка", show_alert=True)
++        return
++    await state.set_state(DeliveryCommentState.waiting_for_comment)
++    await state.update_data(delivery_id=delivery_id)
++    await callback.message.delete()
++    await callback.message.answer("✍️ Введите текст комментария:")
++    await callback.answer()
++
++@router.message(StateFilter(DeliveryCommentState.waiting_for_comment), F.text)
++async def delivery_comment_process(message: Message, state: FSMContext):
++    data = await state.get_data()
++    delivery_id = data.get("delivery_id")
++    employee = await get_employee(message.from_user.id)
++    if not employee:
++        await message.answer("Ошибка")
++        await state.clear()
++        return
++    comment = await add_delivery_comment(delivery_id, employee.id, employee.full_name, message.text)
++    if comment:
++        await message.answer("✅ Комментарий добавлен.")
++    else:
++        await message.answer("❌ Ошибка.")
++    await state.clear()
++    await message.answer(
++        "💬 Меню комментариев:",
++        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
++            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"delivery_comment_list:{delivery_id}")],
++            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"delivery_comment_add:{delivery_id}")],
++            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delivery_comment_back:{delivery_id}")]
++        ])
++    )
++
++@router.callback_query(F.data.startswith("delivery_comment_back:"))
++async def delivery_comment_back(callback: CallbackQuery):
++    delivery_id = int(callback.data.split(":")[1])
++    await callback.message.delete()
++    await show_delivery_card(callback)
++    await callback.answer()
++
++# ========== История ==========
++@router.callback_query(F.data.startswith("delivery_history:"))
++async def delivery_history(callback: CallbackQuery):
++    delivery_id = int(callback.data.split(":")[1])
++    history = await get_delivery_history(delivery_id)
++    if not history:
++        await callback.answer("История пуста", show_alert=True)
++        return
++    text = f"📜 <b>История посылки #{delivery_id}</b>\n\n"
++    for entry in history[:10]:
++        text += f"🕒 {entry.get('created_at', '')}\n"
++        text += f"👤 {entry.get('author', 'Система')}\n"
++        text += f"📌 {entry.get('action', '')}\n"
++        text += f"📝 {entry.get('description', '')}\n\n"
++    await callback.message.delete()
++    await callback.message.answer(
++        text,
++        parse_mode="HTML",
++        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
++            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delivery:{delivery_id}")]
++        ])
++    )
++    await callback.answer()
++
++# ========== Обработчик для кнопки "Назад" из меню ==========
++@router.message(F.text == "⬅️ Назад" and F.chat.type == "private")
++async def back_from_deliveries(message: Message, state: FSMContext):
++    await state.clear()
++    employee = await get_employee(message.from_user.id)
++    if employee:
++        from app.keyboards.main_menu import main_menu_keyboard
++        await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
++    else:
++        await message.answer("Возврат...")
+diff --git a/bot/app/handlers/reception/documents.py b/bot/app/handlers/reception/documents.py
+index bc533db..7c1aed6 100644
+--- a/bot/app/handlers/reception/documents.py
++++ b/bot/app/handlers/reception/documents.py
+@@ -7,7 +7,8 @@ from aiogram.filters.state import StateFilter
+ from app.services.employees.service import get_employee
+ from app.services.reception.document_service import (
+     create_document, get_document, get_documents,
+-    update_document_status, delete_document
++    update_document_status, delete_document,
++    add_document_comment, get_document_history
+ )
+ from app.database.models import UserRole
+ from app.keyboards.reception_documents import (
+@@ -27,6 +28,22 @@ class DocumentCreate(StatesGroup):
+     photo = State()
+     confirm = State()
+ 
++class DocumentCommentState(StatesGroup):
++    waiting_for_comment = State()
++
++async def safe_delete_message(message):
++    try:
++        await message.delete()
++    except Exception:
++        pass
++
++async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
++    try:
++        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
++    except Exception:
++        await safe_delete_message(callback.message)
++        await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
++
+ # ========== Главное меню документов ==========
+ @router.message(F.text == "📄 Документы")
+ async def documents_menu(message: Message, state: FSMContext):
+@@ -224,9 +241,8 @@ async def show_doc_list(message: Message, state: FSMContext, doc_type: str = Non
+         text += f"{type_emoji} #{d.id} {d.name} ({d.doc_type})\n"
+ 
+     sent = await message.answer(text, reply_markup=doc_list_keyboard(docs, page, total_pages))
+-    await state.update_data(doc_type=doc_type, doc_status=status, doc_message_id=sent.message_id, doc_chat_id=sent.chat.id)
++    await state.update_data(doc_type=doc_type, doc_status=status, doc_message_id=sent.message_id, doc_chat_id=sent.chat.id, doc_page=page)
+ 
+-# ========== Пагинация ==========
+ @router.callback_query(F.data.startswith("doc_page:"))
+ async def paginate_docs(callback: CallbackQuery, state: FSMContext, bot):
+     page = int(callback.data.split(":")[1])
+@@ -263,6 +279,7 @@ async def paginate_docs(callback: CallbackQuery, state: FSMContext, bot):
+         reply_markup=doc_list_keyboard(docs, page, total_pages)
+     )
+     await callback.answer()
++    await state.update_data(doc_page=page)
+ 
+ # ========== Карточка документа ==========
+ @router.callback_query(F.data.startswith("doc:"))
+@@ -283,7 +300,25 @@ async def show_doc_card(callback: CallbackQuery):
+         f"Комментарий: {d.comment or '—'}\n"
+         f"Создан: {d.created_at.strftime('%d.%m.%Y %H:%M')}"
+     )
+-    await callback.message.edit_text(text, reply_markup=doc_action_keyboard(d.id, d.status))
++    kb = InlineKeyboardMarkup(inline_keyboard=[])
++    if d.status == "active" and d.doc_type in ("storage", "issued"):
++        kb.inline_keyboard.append([InlineKeyboardButton(text="✅ Отметить возврат", callback_data=f"doc_return:{d.id}")])
++    kb.inline_keyboard.append([InlineKeyboardButton(text="💬 Комментарии", callback_data=f"doc_comment_menu:{d.id}")])
++    kb.inline_keyboard.append([InlineKeyboardButton(text="📜 История", callback_data=f"doc_history:{d.id}")])
++    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="doc_back_to_list")])
++    await safe_edit_or_reply(callback, text, kb)
++    await callback.answer()
++
++@router.callback_query(F.data == "doc_back_to_list")
++async def doc_back_to_list(callback: CallbackQuery, state: FSMContext):
++    data = await state.get_data()
++    doc_type = data.get('doc_type')
++    doc_status = data.get('doc_status')
++    page = data.get('doc_page', 1)
++    await callback.message.delete()
++    employee = await get_employee(callback.from_user.id)
++    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
++        await show_doc_list(callback.message, state, doc_type=doc_type, status=doc_status, page=page)
+     await callback.answer()
+ 
+ @router.callback_query(F.data.startswith("doc_return:"))
+@@ -296,7 +331,7 @@ async def doc_return(callback: CallbackQuery):
+     else:
+         await callback.answer("Ошибка", show_alert=True)
+ 
+-@router.callback_query(F.data == "doc_back")
++@router.callback_query(F.data == "doc_back_to_menu")
+ async def back_to_doc_menu(callback: CallbackQuery, state: FSMContext):
+     await state.clear()
+     await callback.message.delete()
+@@ -304,3 +339,122 @@ async def back_to_doc_menu(callback: CallbackQuery, state: FSMContext):
+     if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
+         await callback.message.answer("📄 Управление документами:", reply_markup=doc_main_menu_keyboard())
+     await callback.answer()
++
++# ========== Комментарии ==========
++@router.callback_query(F.data.startswith("doc_comment_menu:"))
++async def doc_comment_menu(callback: CallbackQuery):
++    doc_id = int(callback.data.split(":")[1])
++    await callback.message.delete()
++    kb = InlineKeyboardMarkup(inline_keyboard=[
++        [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"doc_comment_list:{doc_id}")],
++        [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"doc_comment_add:{doc_id}")],
++        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"doc_comment_back:{doc_id}")]
++    ])
++    await callback.message.answer("💬 Меню комментариев:", reply_markup=kb)
++    await callback.answer()
++
++@router.callback_query(F.data.startswith("doc_comment_list:"))
++async def doc_comment_list(callback: CallbackQuery):
++    doc_id = int(callback.data.split(":")[1])
++    d = await get_document(doc_id)
++    if not d:
++        await callback.answer("Не найден", show_alert=True)
++        return
++    comments = d.comments or []
++    if not comments:
++        text = "💬 Комментариев пока нет."
++    else:
++        text = f"💬 <b>Комментарии к документу #{doc_id}</b>\n\n"
++        for c in comments[:10]:
++            user_name = c.get("author_name", "—")
++            created_at = c.get("created_at", "")
++            text += f"👤 {user_name} | {created_at}\n"
++            text += f"{c.get('text', '')}\n\n"
++    await callback.message.delete()
++    await callback.message.answer(
++        text,
++        parse_mode="HTML",
++        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
++            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"doc_comment_menu:{doc_id}")]
++        ])
++    )
++    await callback.answer()
++
++@router.callback_query(F.data.startswith("doc_comment_add:"))
++async def doc_comment_add(callback: CallbackQuery, state: FSMContext):
++    doc_id = int(callback.data.split(":")[1])
++    employee = await get_employee(callback.from_user.id)
++    if not employee:
++        await callback.answer("Ошибка", show_alert=True)
++        return
++    await state.set_state(DocumentCommentState.waiting_for_comment)
++    await state.update_data(doc_id=doc_id)
++    await callback.message.delete()
++    await callback.message.answer("✍️ Введите текст комментария:")
++    await callback.answer()
++
++@router.message(StateFilter(DocumentCommentState.waiting_for_comment), F.text)
++async def doc_comment_process(message: Message, state: FSMContext):
++    data = await state.get_data()
++    doc_id = data.get("doc_id")
++    employee = await get_employee(message.from_user.id)
++    if not employee:
++        await message.answer("Ошибка")
++        await state.clear()
++        return
++    comment = await add_document_comment(doc_id, employee.id, employee.full_name, message.text)
++    if comment:
++        await message.answer("✅ Комментарий добавлен.")
++    else:
++        await message.answer("❌ Ошибка.")
++    await state.clear()
++    await message.answer(
++        "💬 Меню комментариев:",
++        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
++            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"doc_comment_list:{doc_id}")],
++            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"doc_comment_add:{doc_id}")],
++            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"doc_comment_back:{doc_id}")]
++        ])
++    )
++
++@router.callback_query(F.data.startswith("doc_comment_back:"))
++async def doc_comment_back(callback: CallbackQuery):
++    doc_id = int(callback.data.split(":")[1])
++    await callback.message.delete()
++    await show_doc_card(callback)
++    await callback.answer()
++
++# ========== История ==========
++@router.callback_query(F.data.startswith("doc_history:"))
++async def doc_history(callback: CallbackQuery):
++    doc_id = int(callback.data.split(":")[1])
++    history = await get_document_history(doc_id)
++    if not history:
++        await callback.answer("История пуста", show_alert=True)
++        return
++    text = f"📜 <b>История документа #{doc_id}</b>\n\n"
++    for entry in history[:10]:
++        text += f"🕒 {entry.get('created_at', '')}\n"
++        text += f"👤 {entry.get('author', 'Система')}\n"
++        text += f"📌 {entry.get('action', '')}\n"
++        text += f"📝 {entry.get('description', '')}\n\n"
++    await callback.message.delete()
++    await callback.message.answer(
++        text,
++        parse_mode="HTML",
++        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
++            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"doc:{doc_id}")]
++        ])
++    )
++    await callback.answer()
++
++# ========== Обработчик для кнопки "Назад" из меню ==========
++@router.message(F.text == "⬅️ Назад" and F.chat.type == "private")
++async def back_from_documents(message: Message, state: FSMContext):
++    await state.clear()
++    employee = await get_employee(message.from_user.id)
++    if employee:
++        from app.keyboards.main_menu import main_menu_keyboard
++        await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
++    else:
++        await message.answer("Возврат...")
+diff --git a/bot/app/handlers/reception/keys.py b/bot/app/handlers/reception/keys.py
+index 3be6ec5..90f1295 100644
+--- a/bot/app/handlers/reception/keys.py
++++ b/bot/app/handlers/reception/keys.py
+@@ -24,6 +24,19 @@ class KeyCreate(StatesGroup):
+ class KeyCommentState(StatesGroup):
+     waiting_for_comment = State()
+ 
++async def safe_delete_message(message):
++    try:
++        await message.delete()
++    except Exception:
++        pass
++
++async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=None, parse_mode="HTML"):
++    try:
++        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
++    except Exception:
++        await safe_delete_message(callback.message)
++        await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
++
+ # ========== Главное меню ключей ==========
+ @router.message(F.text == "🔑 Ключи")
+ async def keys_main_menu(message: Message, state: FSMContext):
+@@ -79,7 +92,6 @@ async def show_key_list(message: Message, state: FSMContext, status: str, title:
+     sent = await message.answer(text, reply_markup=key_list_keyboard(keys, page, total_pages, status))
+     await state.update_data(key_status=status, key_page=page, key_message_id=sent.message_id, key_chat_id=sent.chat.id)
+ 
+-# ========== Пагинация ==========
+ @router.callback_query(F.data.startswith("key_page:"))
+ async def paginate_keys(callback: CallbackQuery, state: FSMContext, bot):
+     page = int(callback.data.split(":")[1])
+@@ -116,9 +128,8 @@ async def paginate_keys(callback: CallbackQuery, state: FSMContext, bot):
+     )
+     await callback.answer()
+ 
+-# ========== Кнопка "Назад" в списке ключей ==========
+-@router.callback_query(F.data == "key_back")
+-async def key_list_back(callback: CallbackQuery, state: FSMContext):
++@router.callback_query(F.data == "key_back_to_menu")
++async def key_back_to_menu(callback: CallbackQuery, state: FSMContext):
+     await state.clear()
+     await callback.message.delete()
+     employee = await get_employee(callback.from_user.id)
+@@ -134,6 +145,14 @@ async def key_list_back(callback: CallbackQuery, state: FSMContext):
+         ))
+     await callback.answer()
+ 
++@router.callback_query(F.data == "key_back_to_list")
++async def key_back_to_list(callback: CallbackQuery, state: FSMContext):
++    data = await state.get_data()
++    status = data.get('key_status', 'issued')
++    page = data.get('key_page', 1)
++    await callback.message.delete()
++    await show_key_list(callback.message, state, status=status, page=page)
++
+ # ========== Создание ключа ==========
+ @router.message(F.text == "➕ Выдать ключ")
+ async def start_create_key(message: Message, state: FSMContext):
+@@ -250,8 +269,8 @@ async def show_key_card(callback: CallbackQuery):
+     ])
+     if k.status == "issued":
+         kb.inline_keyboard.append([InlineKeyboardButton(text="✅ Вернуть", callback_data=f"key_return:{key_id}")])
+-    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="key_back_from_card")])
+-    await callback.message.edit_text(text, reply_markup=kb)
++    kb.inline_keyboard.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="key_back_to_list")])
++    await safe_edit_or_reply(callback, text, kb)
+     await callback.answer()
+ 
+ # ========== Возврат ключа ==========
+@@ -270,14 +289,12 @@ async def key_return(callback: CallbackQuery):
+ async def key_comment_menu(callback: CallbackQuery):
+     key_id = int(callback.data.split(":")[1])
+     await callback.message.delete()
+-    await callback.message.answer(
+-        "💬 Меню комментариев:",
+-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+-            [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"key_comment_list:{key_id}")],
+-            [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"key_comment_add:{key_id}")],
+-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_comment_back:{key_id}")],
+-        ])
+-    )
++    kb = InlineKeyboardMarkup(inline_keyboard=[
++        [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"key_comment_list:{key_id}")],
++        [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"key_comment_add:{key_id}")],
++        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_comment_back:{key_id}")]
++    ])
++    await callback.message.answer("💬 Меню комментариев:", reply_markup=kb)
+     await callback.answer()
+ 
+ @router.callback_query(F.data.startswith("key_comment_list:"))
+@@ -340,7 +357,7 @@ async def key_comment_process(message: Message, state: FSMContext):
+         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+             [InlineKeyboardButton(text="📋 Посмотреть комментарии", callback_data=f"key_comment_list:{key_id}")],
+             [InlineKeyboardButton(text="✏️ Добавить комментарий", callback_data=f"key_comment_add:{key_id}")],
+-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_comment_back:{key_id}")],
++            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"key_comment_back:{key_id}")]
+         ])
+     )
+ 
+@@ -375,19 +392,13 @@ async def key_history(callback: CallbackQuery):
+     )
+     await callback.answer()
+ 
+-# ========== Назад из карточки ==========
+-@router.callback_query(F.data == "key_back_from_card")
+-async def key_back_from_card(callback: CallbackQuery, state: FSMContext):
+-    await callback.message.delete()
+-    employee = await get_employee(callback.from_user.id)
+-    if employee and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE):
+-        await callback.message.answer("🔑 Управление ключами:", reply_markup=ReplyKeyboardMarkup(
+-            keyboard=[
+-                [KeyboardButton(text="➕ Выдать ключ")],
+-                [KeyboardButton(text="📋 Список выданных")],
+-                [KeyboardButton(text="📋 Возвращённые")],
+-                [KeyboardButton(text="⬅️ Назад")],
+-            ],
+-            resize_keyboard=True
+-        ))
+-    await callback.answer()
++# ========== Обработчик для кнопки "Назад" из меню ==========
++@router.message(F.text == "⬅️ Назад" and F.chat.type == "private")
++async def back_from_keys(message: Message, state: FSMContext):
++    await state.clear()
++    employee = await get_employee(message.from_user.id)
++    if employee:
++        from app.keyboards.main_menu import main_menu_keyboard
++        await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
++    else:
++        await message.answer("Возврат...")
+diff --git a/bot/app/handlers/services/admin.py b/bot/app/handlers/services/admin.py
+index 7c62504..597ac3a 100644
+--- a/bot/app/handlers/services/admin.py
++++ b/bot/app/handlers/services/admin.py
+@@ -15,6 +15,7 @@ from app.keyboards.services import (
+     service_admin_list_keyboard,
+     service_admin_edit_keyboard
+ )
++import logging
+ 
+ router = Router()
+ 
+@@ -27,8 +28,19 @@ class ServiceEdit(StatesGroup):
+ 
+ # ===== Вспомогательная функция проверки прав =====
+ async def check_admin(user_id: int) -> bool:
+-    employee = await get_employee(user_id)
+-    return employee is not None and employee.role == UserRole.ADMIN
++    try:
++        employee = await get_employee(user_id)
++        if not employee:
++            logging.warning(f"check_admin: пользователь {user_id} не найден")
++            return False
++        # Сравниваем со значением Enum или строкой
++        is_admin = employee.role == UserRole.ADMIN or str(employee.role) == "ADMIN"
++        if not is_admin:
++            logging.warning(f"check_admin: пользователь {user_id} имеет роль {employee.role}, требуется ADMIN")
++        return is_admin
++    except Exception as e:
++        logging.error(f"check_admin: ошибка {e}")
++        return False
+ 
+ # ===== Главное меню управления услугами =====
+ @router.message(F.text == "💳 Управление услугами")
+@@ -71,8 +83,6 @@ async def service_admin_create(callback: CallbackQuery, state: FSMContext):
+     await callback.message.answer("Введите название услуги:", reply_markup=ReplyKeyboardRemove())
+     await callback.answer()
+ 
+-# ... (остальные обработчики без изменений, но я дам полный файл)
+-
+ @router.message(ServiceEdit.name)
+ async def service_edit_name(message: Message, state: FSMContext):
+     if not await check_admin(message.from_user.id):
+diff --git a/bot/app/handlers/tasks/card.py b/bot/app/handlers/tasks/card.py
+index 2929ccf..976f20a 100644
+--- a/bot/app/handlers/tasks/card.py
++++ b/bot/app/handlers/tasks/card.py
+@@ -20,7 +20,6 @@ from app.keyboards.waiting import waiting_time_keyboard
+ from app.services.notification_service import notify_user, notify_admins, notify_concierges
+ from app.states.tasks.waiting import TaskWaiting
+ from app.states.tasks.photo import TaskAddPhoto
+-from app.metrics import bot_errors_total
+ 
+ router = Router()
+ 
+@@ -34,6 +33,9 @@ class TaskCheckState(StatesGroup):
+     waiting_for_comment = State()
+     waiting_for_photo = State()
+ 
++class TaskPauseState(StatesGroup):
++    waiting_for_comment = State()
++
+ async def safe_delete_message(message):
+     try:
+         await message.delete()
+@@ -44,7 +46,6 @@ async def safe_edit_or_reply(callback: CallbackQuery, text: str, reply_markup=No
+     try:
+         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+     except Exception as e:
+-        bot_errors_total.labels(error_type=type(e).__name__).inc()
+         await safe_delete_message(callback.message)
+         await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+ 
+@@ -81,19 +82,26 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
+         address_parts.append(f"эт. {task.floor}")
+     if task.apartment:
+         address_parts.append(f"кв. {task.apartment}")
+-    elif task.location_type == "common_area":
+-        address_parts.append(f"общая зона")
+-    elif task.location_type == "parking":
+-        if task.parking_level is not None and task.parking_spot is not None:
+-            address_parts.append(f"паркинг {task.parking_level} эт., место {task.parking_spot}")
+-    elif task.location_type == "cellar" and task.cellar is not None:
+-        address_parts.append(f"келлер {task.cellar}")
+     address = ", ".join(address_parts) if address_parts else "—"
+ 
+     text = (
+         f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
+         f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
+         f"🏢 <b>Адрес:</b> {address}\n"
++    )
++
++    if task.location_type:
++        location_info = f"📍 <b>Тип объекта:</b> {task.location_type}"
++        if task.location_type == "common_area" and task.common_area:
++            location_info += f" ({task.common_area})"
++        elif task.location_type == "parking":
++            if task.parking_level is not None and task.parking_spot is not None:
++                location_info += f" (уровень {task.parking_level}, место {task.parking_spot})"
++        elif task.location_type == "cellar" and task.cellar is not None:
++            location_info += f" (келлер {task.cellar})"
++        text += location_info + "\n"
++
++    text += (
+         f"🔢 <b>Приоритет:</b> {task.priority}\n"
+         f"📊 <b>Статус:</b> {task.status}\n\n"
+         f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
+@@ -105,7 +113,6 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
+     if task.closed_at:
+         text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
+ 
+-    # Добавляем информацию о вложениях
+     if task.photos:
+         text += f"📷 Фото: {len(task.photos)} шт.\n"
+     if task.video_ids:
+@@ -137,13 +144,46 @@ async def pause_task(callback: CallbackQuery, state: FSMContext):
+         await callback.answer("Ошибка", show_alert=True)
+         return
+     task = await get_task(task_id)
+-    if not task or task.assigned_to != employee.id:
+-        await callback.answer("Вы не исполнитель этой задачи", show_alert=True)
++    if not task:
++        await callback.answer("Заявка не найдена", show_alert=True)
++        return
++    if employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
++        if task.assigned_to != employee.id:
++            await callback.answer("Вы не можете приостановить эту заявку", show_alert=True)
++            return
++    if task.status not in ("accepted", "in_progress"):
++        await callback.answer("Невозможно приостановить заявку в текущем статусе", show_alert=True)
+         return
+-    await state.update_data(task_id=task_id, action="pause")
+-    await safe_edit_or_reply(callback, "Выберите срок ожидания или введите время вручную:", waiting_time_keyboard(task_id))
++    await state.update_data(task_id=task_id)
++    await state.set_state(TaskPauseState.waiting_for_comment)
++    await callback.message.delete()
++    await callback.message.answer("✍️ Введите причину приостановки:")
+     await callback.answer()
+ 
++@router.message(StateFilter(TaskPauseState.waiting_for_comment), F.text)
++async def process_pause_comment(message: Message, state: FSMContext):
++    data = await state.get_data()
++    task_id = data.get("task_id")
++    comment = message.text.strip()
++    if not comment:
++        await message.answer("Комментарий обязателен. Введите текст:")
++        return
++    employee = await get_employee(message.from_user.id)
++    if not employee:
++        await message.answer("Ошибка")
++        await state.clear()
++        return
++    await add_comment(task_id, employee.id, f"⏸ Приостановка: {comment}")
++    task = await change_status(task_id, "paused", employee.id, comment)
++    if task:
++        await message.answer("✅ Заявка приостановлена.")
++        task = await get_task(task_id)
++        if task:
++            await message.answer(f"📋 Карточка задачи #{task_id}", reply_markup=task_actions_keyboard(task, employee))
++    else:
++        await message.answer("❌ Ошибка приостановки")
++    await state.clear()
++
+ @router.callback_query(F.data.startswith("task_resume:"))
+ async def resume_task(callback: CallbackQuery, state: FSMContext):
+     task_id = int(callback.data.split(":")[1])
+@@ -170,8 +210,21 @@ async def start_check_task(callback: CallbackQuery, state: FSMContext):
+         await callback.answer("Ошибка", show_alert=True)
+         return
+     task = await get_task(task_id)
+-    if not task or task.assigned_to != employee.id:
+-        await callback.answer("Вы не исполнитель", show_alert=True)
++    if not task:
++        await callback.answer("Заявка не найдена", show_alert=True)
++        return
++    can_check = False
++    if task.assigned_to == employee.id:
++        can_check = True
++    elif employee.role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
++        can_check = True
++    elif task.assigned_team == employee.team and task.assigned_to is None:
++        can_check = True
++    if not can_check:
++        await callback.answer("Вы не можете отправить эту заявку на проверку", show_alert=True)
++        return
++    if task.status not in ("in_progress", "paused"):
++        await callback.answer("Невозможно отправить на проверку в текущем статусе", show_alert=True)
+         return
+     await state.update_data(task_id=task_id)
+     await state.set_state(TaskCheckState.waiting_for_comment)
+@@ -281,7 +334,6 @@ async def change_task_status(callback: CallbackQuery, state: FSMContext):
+         await notify_admins(f"🔄 Задача #{task_id} возвращена на доработку исполнителем {employee.full_name}")
+     await show_task_card(callback, state)
+ 
+-# ========== Комментарии (сразу показываем список) ==========
+ @router.callback_query(F.data.startswith("task_comment_list:"))
+ async def show_comments(callback: CallbackQuery, state: FSMContext):
+     task_id = int(callback.data.split(":")[1])
+@@ -349,7 +401,6 @@ async def comment_back_to_task(callback: CallbackQuery, state: FSMContext):
+     await show_task_card(callback, state)
+     await callback.answer()
+ 
+-# ========== История ==========
+ @router.callback_query(F.data.startswith("task_history:"))
+ async def show_task_history(callback: CallbackQuery, state: FSMContext):
+     task_id = int(callback.data.split(":")[1])
+@@ -390,7 +441,13 @@ async def show_all_history(callback: CallbackQuery, state: FSMContext):
+         text += f"📌 {entry.action}\n"
+         text += f"📝 {entry.description}\n\n"
+     await safe_delete_message(callback.message)
+-    await callback.message.answer(text, parse_mode="HTML")
++    await callback.message.answer(
++        text,
++        parse_mode="HTML",
++        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
++            [InlineKeyboardButton(text="⬅️ Назад к карточке", callback_data=f"task:{task_id}")]
++        ])
++    )
+     await callback.answer()
+ 
+ @router.callback_query(F.data.startswith("task_history_back:"))
+@@ -400,7 +457,6 @@ async def history_back_to_task(callback: CallbackQuery, state: FSMContext):
+     await show_task_card(callback, state)
+     await callback.answer()
+ 
+-# ========== Фото и видео ==========
+ @router.callback_query(F.data.startswith("task_video:"))
+ async def show_task_videos(callback: CallbackQuery, state: FSMContext):
+     task_id = int(callback.data.split(":")[1])
+@@ -542,7 +598,6 @@ async def finish_add_photo(message: Message, state: FSMContext):
+     else:
+         await message.answer("Возврат в меню.")
+ 
+-# ========== Ожидание ==========
+ @router.callback_query(F.data.startswith("task_wait:"))
+ async def start_wait(callback: CallbackQuery, state: FSMContext):
+     task_id = int(callback.data.split(":")[1])
+@@ -579,7 +634,7 @@ async def process_wait_comment(message: Message, state: FSMContext):
+         await message.answer("Ошибка")
+         await state.clear()
+         return
+-    wait_until = datetime.utcnow() + timedelta(hours=hours)
++    wait_until = datetime.now() + timedelta(hours=hours)
+     task = await change_status(task_id, "waiting", employee.id, comment, wait_until)
+     if task:
+         await message.answer(f"✅ Задача отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}")
+diff --git a/bot/app/keyboards/task_actions.py b/bot/app/keyboards/task_actions.py
+index 855a42a..d053680 100644
+--- a/bot/app/keyboards/task_actions.py
++++ b/bot/app/keyboards/task_actions.py
+@@ -32,23 +32,38 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
+     if can_take and status not in ("closed", "checking"):
+         buttons.append([InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take:{task_id}")])
+ 
+-    # ====== Если пользователь является исполнителем ======
+-    if task.assigned_to == employee.id:
+-        # Приостановить
+-        if status in ("accepted", "in_progress"):
++    # ====== Если пользователь является исполнителем или имеет право на управление ======
++    is_assignee = (task.assigned_to == employee.id)
++    is_team_member = (task.assigned_team == employee.team and task.assigned_to is None)
++    is_admin_concierge = (role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR))
++
++    # Приостановить (только для исполнителя или админа/консьержа/директора)
++    if status in ("accepted", "in_progress"):
++        if is_assignee or is_admin_concierge:
+             buttons.append([InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"task_pause:{task_id}")])
+-        # Возобновить
+-        if status == "paused":
+-            buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
+-        # Выполнено (на проверку) – теперь через отдельный обработчик
+-        if status in ("in_progress", "paused"):
++
++    # Возобновить (только для исполнителя)
++    if status == "paused" and is_assignee:
++        buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
++
++    # Выполнено (отправить на проверку) – расширенное условие
++    if status in ("in_progress", "paused"):
++        can_check = False
++        if is_assignee:
++            can_check = True
++        elif is_admin_concierge:
++            can_check = True
++        elif is_team_member:
++            can_check = True
++        if can_check:
+             buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task_check_start:{task_id}")])
+-        # Передать
+-        if status != "closed":
+-            buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
++
++    # Передать (только для исполнителя)
++    if status != "closed" and is_assignee:
++        buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
+ 
+     # ====== Для администратора, консьержа, директора ======
+-    if role in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE):
++    if is_admin_concierge:
+         if status != "closed":
+             buttons.append([InlineKeyboardButton(text="👤 Назначить", callback_data=f"task_assign:{task_id}")])
+         if status == "checking":
+diff --git a/bot/app/keyboards/task_list.py b/bot/app/keyboards/task_list.py
+index 6e77c4e..6879a17 100644
+--- a/bot/app/keyboards/task_list.py
++++ b/bot/app/keyboards/task_list.py
+@@ -12,13 +12,26 @@ def get_task_status_emoji(status: TaskStatus) -> str:
+     }
+     return emoji_map.get(status, "⚪")
+ 
+-def task_list_keyboard(tasks: List, page: int, total_pages: int) -> InlineKeyboardMarkup:
++def get_priority_emoji(priority: int) -> str:
++    if priority <= 1:
++        return "🟢"
++    elif priority <= 3:
++        return "🟡"
++    else:
++        return "🔴"
++
++def get_priority_name(priority: int) -> str:
++    return {1: "Низкий", 2: "Средний", 3: "Высокий", 4: "Критичный", 5: "Аварийный"}.get(priority, str(priority))
++
++def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str = "open", filter_priority: int = None) -> InlineKeyboardMarkup:
+     buttons = []
+     for task in tasks[:10]:
+         status_emoji = get_task_status_emoji(task.status)
+-        text = f"{status_emoji} #{task.id} {task.title[:25]}"
++        priority_emoji = get_priority_emoji(task.priority)
++        text = f"{status_emoji} {priority_emoji} #{task.id} {task.title[:25]}"
+         buttons.append([InlineKeyboardButton(text=text, callback_data=f"task:{task.id}")])
+ 
++    # Навигация
+     nav_buttons = []
+     if page > 1:
+         nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"task_page:{page-1}"))
+@@ -28,5 +41,20 @@ def task_list_keyboard(tasks: List, page: int, total_pages: int) -> InlineKeyboa
+     if nav_buttons:
+         buttons.append(nav_buttons)
+ 
++    # Кнопки сортировки и фильтра
++    sort_buttons = []
++    sort_buttons.append(InlineKeyboardButton("📅 По дате", callback_data="task_sort:date"))
++    sort_buttons.append(InlineKeyboardButton("🔥 По приоритету", callback_data="task_sort:priority"))
++    buttons.append(sort_buttons)
++
++    filter_buttons = []
++    filter_buttons.append(InlineKeyboardButton("🔽 Все", callback_data="task_filter:all"))
++    for p in [1, 2, 3, 4, 5]:
++        label = f"{p}★"
++        if filter_priority == p:
++            label = f"✅ {p}★"
++        filter_buttons.append(InlineKeyboardButton(label, callback_data=f"task_filter:{p}"))
++    buttons.append(filter_buttons)
++
+     buttons.append([InlineKeyboardButton("⬅️ В главное меню", callback_data="tasks_back")])
+     return InlineKeyboardMarkup(inline_keyboard=buttons)
+diff --git a/bot/app/main.py b/bot/app/main.py
+index 50c59bb..382ed36 100644
+--- a/bot/app/main.py
++++ b/bot/app/main.py
+@@ -2,9 +2,10 @@ import asyncio
+ import logging
+ from aiogram import Bot, Dispatcher
+ from aiogram.client.default import DefaultBotProperties
++from aiogram.types import TelegramObject
+ 
+ from app.config import settings
+-from app.database.db import init_db
++from app.database.db import init_db, close_db
+ from app.handlers import routers
+ from app.middlewares.db import DatabaseMiddleware
+ from app.middlewares.auth import AuthMiddleware
+@@ -26,6 +27,14 @@ dp.update.middleware(MetricsMiddleware())
+ for router in routers:
+     dp.include_router(router)
+ 
++# Глобальный обработчик ошибок
++@dp.errors()
++async def global_error_handler(update: TelegramObject, exception: Exception):
++    logger.error(f"Global error: {exception}", exc_info=True)
++    # Метрика уже инкрементится в MetricsMiddleware
++    # Можно добавить уведомление админам при критических ошибках
++    return True
++
+ async def main():
+     logger.info("Initializing database...")
+     await init_db()
+@@ -42,10 +51,15 @@ async def main():
+             await update_business_metrics()
+             await asyncio.sleep(60)  # раз в минуту
+     asyncio.create_task(background_metrics())
+-    await dp.start_polling(bot)
++    try:
++        await dp.start_polling(bot)
++    finally:
++        await close_db()
++        await bot.session.close()
++        logger.info("Bot stopped gracefully.")
+ 
+ if __name__ == "__main__":
+     try:
+         asyncio.run(main())
+     except KeyboardInterrupt:
+-        logger.info("Bot stopped.")
++        logger.info("Bot stopped by user.")
+diff --git a/bot/app/services/employees/service.py b/bot/app/services/employees/service.py
+index ce1b9ef..ed07e16 100644
+--- a/bot/app/services/employees/service.py
++++ b/bot/app/services/employees/service.py
+@@ -36,7 +36,7 @@ async def activate_employee(user_id: int, telegram_id: int, username: str) -> Op
+             user.telegram_id = telegram_id
+             user.username = username
+             user.active = True
+-            user.registered_at = datetime.utcnow()
++            user.registered_at = datetime.now()
+             # Инвайт-код остаётся прежним, но после активации он больше не используется
+             await db.commit()
+             await db.refresh(user)
+diff --git a/bot/app/services/logs/service.py b/bot/app/services/logs/service.py
+index 0d406be..20c950d 100644
+--- a/bot/app/services/logs/service.py
++++ b/bot/app/services/logs/service.py
+@@ -25,7 +25,7 @@ async def add_log(
+ 
+             description=description,
+ 
+-            created_at=datetime.utcnow()
++            created_at=datetime.now()
+ 
+         )
+ 
+diff --git a/bot/app/services/notification_service.py b/bot/app/services/notification_service.py
+index b09a84e..e18c353 100644
+--- a/bot/app/services/notification_service.py
++++ b/bot/app/services/notification_service.py
+@@ -6,9 +6,11 @@ from app.services.settings.service import get_user_settings
+ from app.database.models import UserRole, Team
+ import asyncio
+ import logging
++import time
+ 
+ bot: Bot = None
+-_settings_cache = {}  # простой кеш для настроек уведомлений
++_settings_cache = {}  # кеш: ключ = f"{telegram_id}:{notification_type}", значение = (результат, время)
++CACHE_TTL = 300  # 5 минут
+ 
+ def set_bot(bot_instance: Bot):
+     global bot
+@@ -17,20 +19,27 @@ def set_bot(bot_instance: Bot):
+ async def _can_send(telegram_id: int, notification_type: str) -> bool:
+     """Проверяет, включены ли уведомления данного типа для пользователя по его telegram_id"""
+     try:
+-        # Кешируем настройки на время жизни сессии (или на 5 минут)
+         cache_key = f"{telegram_id}:{notification_type}"
++        now = time.time()
++        # Проверяем кеш
+         if cache_key in _settings_cache:
+-            return _settings_cache[cache_key]
++            value, cached_at = _settings_cache[cache_key]
++            if now - cached_at < CACHE_TTL:
++                return value
++            else:
++                # Кеш устарел, удаляем
++                del _settings_cache[cache_key]
++
+         employee = await get_employee(telegram_id)
+         if not employee:
+-            _settings_cache[cache_key] = False
++            _settings_cache[cache_key] = (False, now)
+             return False
+         settings = await get_user_settings(employee.id)
+         if not settings:
+-            _settings_cache[cache_key] = True
++            _settings_cache[cache_key] = (True, now)
+             return True
+         result = getattr(settings, notification_type, True)
+-        _settings_cache[cache_key] = result
++        _settings_cache[cache_key] = (result, now)
+         return result
+     except Exception as e:
+         logging.error(f"Ошибка в _can_send для telegram_id {telegram_id}: {e}")
+@@ -94,7 +103,6 @@ async def notify_concierges(text: str, notification_type: str = "notify_checking
+         if emp.telegram_id and await _can_send(emp.telegram_id, notification_type):
+             await _send_message(emp.telegram_id, text)
+ 
+-# ===== ДОБАВЛЕНА ФУНКЦИЯ notify_security =====
+ async def notify_security(text: str, notification_type: str = "notify_security"):
+     if not bot:
+         return
+diff --git a/bot/app/services/passes/service.py b/bot/app/services/passes/service.py
+index d279ac9..a5f543c 100644
+--- a/bot/app/services/passes/service.py
++++ b/bot/app/services/passes/service.py
+@@ -13,7 +13,7 @@ def _add_history(pass_obj, action: str, user_id: int = None, details: str = "",
+         "user_id": user_id,
+         "user_name": user_name or "Система",
+         "details": details,
+-        "created_at": datetime.utcnow().isoformat()
++        "created_at": datetime.now().isoformat()
+     }
+     pass_obj.history.append(entry)
+ 
+@@ -32,6 +32,9 @@ async def create_pass(
+     assigned_to: int = None,
+     assigned_team: str = None
+ ) -> Pass:
++    # Валидация дат
++    if start_date and end_date and end_date < start_date:
++        raise ValueError("Дата окончания не может быть раньше даты начала")
+     async with AsyncSessionLocal() as db:
+         if assigned_to:
+             user = await db.get(User, assigned_to)
+@@ -109,7 +112,7 @@ async def update_pass_status(pass_id: int, status: str, user_id: int = None) ->
+             return None
+         old_status = p.status
+         p.status = status
+-        p.updated_at = datetime.utcnow()
++        p.updated_at = datetime.now()
+         user_name = None
+         if user_id:
+             user = await db.get(User, user_id)
+@@ -126,8 +129,8 @@ async def check_in(pass_id: int, user_id: int = None) -> Optional[Pass]:
+         p = await db.get(Pass, pass_id)
+         if not p or p.status != "active":
+             return None
+-        p.checked_in_at = datetime.utcnow()
+-        p.updated_at = datetime.utcnow()
++        p.checked_in_at = datetime.now()
++        p.updated_at = datetime.now()
+         user_name = None
+         if user_id:
+             user = await db.get(User, user_id)
+@@ -144,8 +147,8 @@ async def check_out(pass_id: int, user_id: int = None) -> Optional[Pass]:
+         p = await db.get(Pass, pass_id)
+         if not p or p.status != "active":
+             return None
+-        p.checked_out_at = datetime.utcnow()
+-        p.updated_at = datetime.utcnow()
++        p.checked_out_at = datetime.now()
++        p.updated_at = datetime.now()
+         user_name = None
+         if user_id:
+             user = await db.get(User, user_id)
+@@ -168,9 +171,9 @@ async def add_pass_comment(pass_id: int, user_id: int, author_name: str, text: s
+             "author_id": user_id,
+             "author_name": author_name,
+             "text": text,
+-            "created_at": datetime.utcnow().isoformat()
++            "created_at": datetime.now().isoformat()
+         })
+-        p.updated_at = datetime.utcnow()
++        p.updated_at = datetime.now()
+         _add_history(p, "COMMENT", user_id, f"Добавлен комментарий: {text[:50]}", author_name)
+         await db.commit()
+         return True
+diff --git a/bot/app/services/patrol/service.py b/bot/app/services/patrol/service.py
+index 8d96487..8889342 100644
+--- a/bot/app/services/patrol/service.py
++++ b/bot/app/services/patrol/service.py
+@@ -57,8 +57,8 @@ async def complete_patrol(patrol_id: int) -> Optional[Patrol]:
+         if not patrol:
+             return None
+         patrol.status = "completed"
+-        patrol.end_time = datetime.utcnow()
+-        patrol.updated_at = datetime.utcnow()
++        patrol.end_time = datetime.now()
++        patrol.updated_at = datetime.now()
+         await db.commit()
+         await db.refresh(patrol)
+         return patrol
+diff --git a/bot/app/services/reception/delivery_service.py b/bot/app/services/reception/delivery_service.py
+index eadbe8e..4c4f449 100644
+--- a/bot/app/services/reception/delivery_service.py
++++ b/bot/app/services/reception/delivery_service.py
+@@ -47,7 +47,7 @@ async def update_delivery_status(delivery_id: int, status: str) -> Optional[Deli
+         if not delivery:
+             return None
+         delivery.status = status
+-        delivery.updated_at = datetime.utcnow()
++        delivery.updated_at = datetime.now()
+         await db.commit()
+         await db.refresh(delivery)
+         return delivery
+@@ -63,9 +63,9 @@ async def add_delivery_comment(delivery_id: int, user_id: int, author_name: str,
+             "author_id": user_id,
+             "author_name": author_name,
+             "text": text,
+-            "created_at": datetime.utcnow().isoformat()
++            "created_at": datetime.now().isoformat()
+         })
+-        delivery.updated_at = datetime.utcnow()
++        delivery.updated_at = datetime.now()
+         await db.commit()
+         return True
+ 
+diff --git a/bot/app/services/reception/document_service.py b/bot/app/services/reception/document_service.py
+index 80488d0..75192a0 100644
+--- a/bot/app/services/reception/document_service.py
++++ b/bot/app/services/reception/document_service.py
+@@ -2,7 +2,7 @@ from datetime import datetime
+ from typing import List, Optional
+ from sqlalchemy import select
+ from app.database import AsyncSessionLocal
+-from app.database.models import Document
++from app.database.models import Document, User
+ 
+ async def create_document(
+     name: str,
+@@ -24,9 +24,14 @@ async def create_document(
+             comment=comment or "",
+             photo_ids=photo_ids or [],
+             created_by=created_by,
+-            status="active"
++            status="active",
++            comments=[],  # инициализируем пустым списком
++            history=[]    # инициализируем пустым списком
+         )
+         db.add(doc)
++        await db.flush()
++        # Добавляем запись в историю
++        _add_history(doc, "CREATED", created_by, "Документ создан")
+         await db.commit()
+         await db.refresh(doc)
+         return doc
+@@ -56,8 +61,11 @@ async def update_document_status(doc_id: int, status: str) -> Optional[Document]
+         doc = await db.get(Document, doc_id)
+         if not doc:
+             return None
++        old_status = doc.status
+         doc.status = status
+-        doc.updated_at = datetime.utcnow()
++        doc.updated_at = datetime.now()
++        # Добавляем историю
++        _add_history(doc, "STATUS_CHANGE", None, f"Статус изменён с {old_status} на {status}")
+         await db.commit()
+         await db.refresh(doc)
+         return doc
+@@ -70,3 +78,45 @@ async def delete_document(doc_id: int) -> bool:
+         await db.delete(doc)
+         await db.commit()
+         return True
++
++# ===== Функции для комментариев и истории =====
++
++def _add_history(doc, action: str, user_id: int = None, details: str = ""):
++    """Добавляет запись в историю документа"""
++    if doc.history is None:
++        doc.history = []
++    entry = {
++        "action": action,
++        "user_id": user_id,
++        "user_name": None,  # можно будет подставить при отображении
++        "details": details,
++        "created_at": datetime.now().isoformat()
++    }
++    doc.history.append(entry)
++
++async def add_document_comment(doc_id: int, user_id: int, author_name: str, text: str) -> bool:
++    """Добавляет комментарий к документу"""
++    async with AsyncSessionLocal() as db:
++        doc = await db.get(Document, doc_id)
++        if not doc:
++            return False
++        if doc.comments is None:
++            doc.comments = []
++        doc.comments.append({
++            "author_id": user_id,
++            "author_name": author_name,
++            "text": text,
++            "created_at": datetime.now().isoformat()
++        })
++        doc.updated_at = datetime.now()
++        _add_history(doc, "COMMENT", user_id, f"Добавлен комментарий: {text[:50]}...")
++        await db.commit()
++        return True
++
++async def get_document_history(doc_id: int) -> List[dict]:
++    """Возвращает историю документа"""
++    async with AsyncSessionLocal() as db:
++        doc = await db.get(Document, doc_id)
++        if not doc:
++            return []
++        return doc.history or []
+diff --git a/bot/app/services/reception/key_service.py b/bot/app/services/reception/key_service.py
+index 2490c20..6523b2a 100644
+--- a/bot/app/services/reception/key_service.py
++++ b/bot/app/services/reception/key_service.py
+@@ -45,8 +45,8 @@ async def return_key(key_id: int) -> Optional[Key]:
+         if not key or key.status == "returned":
+             return None
+         key.status = "returned"
+-        key.returned_at = datetime.utcnow()
+-        key.updated_at = datetime.utcnow()
++        key.returned_at = datetime.now()
++        key.updated_at = datetime.now()
+         await db.commit()
+         await db.refresh(key)
+         return key
+@@ -62,9 +62,9 @@ async def add_key_comment(key_id: int, user_id: int, author_name: str, text: str
+             "author_id": user_id,
+             "author_name": author_name,
+             "text": text,
+-            "created_at": datetime.utcnow().isoformat()
++            "created_at": datetime.now().isoformat()
+         })
+-        key.updated_at = datetime.utcnow()
++        key.updated_at = datetime.now()
+         await db.commit()
+         return True
+ 
+diff --git a/bot/app/services/services/service.py b/bot/app/services/services/service.py
+index ba5e351..10d0bd4 100644
+--- a/bot/app/services/services/service.py
++++ b/bot/app/services/services/service.py
+@@ -119,7 +119,7 @@ async def update_order_status(order_id: int, status: str) -> Optional[ServiceOrd
+         if not order:
+             return None
+         order.status = status
+-        order.updated_at = datetime.utcnow()
++        order.updated_at = datetime.now()
+         await db.commit()
+         await db.refresh(order)
+         return order
+diff --git a/bot/app/services/settings/service.py b/bot/app/services/settings/service.py
+index da4fd74..796a92b 100644
+--- a/bot/app/services/settings/service.py
++++ b/bot/app/services/settings/service.py
+@@ -29,7 +29,7 @@ async def update_setting(user_id: int, setting_name: str, value: bool) -> Option
+             db.add(settings)
+         if hasattr(settings, setting_name):
+             setattr(settings, setting_name, value)
+-            settings.updated_at = datetime.utcnow()
++            settings.updated_at = datetime.now()
+             await db.commit()
+             await db.refresh(settings)
+             return settings
+diff --git a/bot/app/services/tasks/service.py b/bot/app/services/tasks/service.py
+index 05f7d62..ad081c8 100644
+--- a/bot/app/services/tasks/service.py
++++ b/bot/app/services/tasks/service.py
+@@ -218,7 +218,7 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
+                 return None
+             task.assigned_team = team
+             task.assigned_to = None
+-            task.updated_at = datetime.utcnow()
++            task.updated_at = datetime.now()
+             history = TaskHistory(
+                 task_id=task.id,
+                 user_id=assigned_by,
+@@ -250,7 +250,7 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
+             task.assigned_team = employee.team
+             if task.status == "created":
+                 task.status = "accepted"
+-            task.updated_at = datetime.utcnow()
++            task.updated_at = datetime.now()
+             history = TaskHistory(
+                 task_id=task.id,
+                 user_id=assigned_by,
+@@ -284,7 +284,7 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
+             task.assigned_to = user_id
+             if task.status == "created":
+                 task.status = "accepted"
+-            task.updated_at = datetime.utcnow()
++            task.updated_at = datetime.now()
+             history = TaskHistory(
+                 task_id=task.id,
+                 user_id=user_id,
+@@ -319,7 +319,7 @@ async def transfer_task(
+             old_name = old_assignee.full_name if old_assignee else "неизвестно"
+             task.assigned_to = to_user_id
+             task.assigned_team = new_assignee.team
+-            task.updated_at = datetime.utcnow()
++            task.updated_at = datetime.now()
+             history_text = f"Передано от {old_name} к {new_assignee.full_name}"
+             if comment:
+                 history_text += f"\nКомментарий: {comment}"
+@@ -353,9 +353,9 @@ async def change_status(
+                 return None
+             old_status = task.status
+             task.status = new_status
+-            task.updated_at = datetime.utcnow()
++            task.updated_at = datetime.now()
+             if new_status == "closed":
+-                task.closed_at = datetime.utcnow()
++                task.closed_at = datetime.now()
+                 tasks_closed_total.inc()
+             if new_status == "waiting" and wait_until:
+                 task.wait_until = wait_until
+@@ -745,3 +745,12 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
+             query = query.where(cast(Task.status, String) != "closed")
+         result = await db.execute(query)
+         return result.scalar()
++
++async def count_tasks_by_status(status: str, user_id: int = None) -> int:
++    """Возвращает количество задач с указанным статусом (опционально для пользователя)"""
++    async with AsyncSessionLocal() as db:
++        query = select(func.count(Task.id)).where(Task.status == status)
++        if user_id is not None:
++            query = query.where(or_(Task.assigned_to == user_id, Task.created_by == user_id))
++        result = await db.execute(query)
++        return result.scalar() or 0
+diff --git a/bot/check_waiting_tasks.py b/bot/check_waiting_tasks.py
+index c047f55..cbb0245 100644
+--- a/bot/check_waiting_tasks.py
++++ b/bot/check_waiting_tasks.py
+@@ -6,7 +6,7 @@ from sqlalchemy import select, and_
+ from app.database import AsyncSessionLocal
+ from app.database.models import Task, TaskStatus
+ from app.services.employees.service import get_employee
+-from app.services.notification_service import set_bot
++from app.services.notification_service import set_bot, notify_admins
+ from app.config import settings
+ from aiogram import Bot
+ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+@@ -14,7 +14,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+ async def check_waiting_tasks():
+     bot = Bot(token=settings.BOT_TOKEN)
+     set_bot(bot)
+-    now = datetime.utcnow()
++    now = datetime.now()  # Используем локальное время (МСК)
+     async with AsyncSessionLocal() as db:
+         stmt = select(Task).where(
+             and_(
+@@ -25,6 +25,7 @@ async def check_waiting_tasks():
+         result = await db.execute(stmt)
+         tasks = result.scalars().all()
+         for task in tasks:
++            # Если есть исполнитель – уведомляем его
+             if task.assigned_to:
+                 employee = await get_employee(task.assigned_to)
+                 if employee and employee.telegram_id:
+@@ -41,6 +42,13 @@ async def check_waiting_tasks():
+                         )
+                     except Exception as e:
+                         print(f"Ошибка отправки уведомления для задачи {task.id}: {e}")
++            else:
++                # Если исполнитель не назначен – уведомляем администраторов
++                await notify_admins(
++                    f"⏰ Задача #{task.id} «{task.title}» была отложена, но не назначена исполнитель.\n"
++                    f"Срок ожидания истёк. Требуется назначение.",
++                    notification_type="notify_admin"
++                )
+     await bot.session.close()
+ 
+ if __name__ == "__main__":
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 018c13e..e148fb7 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -28,6 +28,8 @@ services:
+     restart: unless-stopped
+     env_file:
+       - .env
++    environment:
++      - TZ=Europe/Moscow
+     depends_on:
+       - postgres
+       - redis
+@@ -44,6 +46,8 @@ services:
+     restart: unless-stopped
+     env_file:
+       - .env
++    environment:
++      - TZ=Europe/Moscow
+     depends_on:
+       - postgres
+       - redis

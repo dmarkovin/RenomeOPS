@@ -46,6 +46,12 @@ class PassSearch(StatesGroup):
 class PassCommentState(StatesGroup):
     waiting_for_comment = State()
 
+def format_datetime_msk(dt: datetime) -> str:
+    if not dt:
+        return "—"
+    msk = dt + timedelta(hours=3)
+    return msk.strftime('%d.%m.%Y %H:%M')
+
 async def safe_delete_message(message):
     try:
         await message.delete()
@@ -329,8 +335,15 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             await notify_team(p.assigned_team, f"🪪 Новый пропуск #{p.id} назначен на вашу команду.")
         await notify_concierges(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await notify_security(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
-        await message.answer(f"✅ Пропуск #{p.id} создан!", reply_markup=pass_main_menu_keyboard())
-        await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
+        await message.answer(
+            f"✅ Пропуск #{p.id} создан!",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="👁️ Посмотреть пропуск", callback_data=f"pass:{p.id}")],
+                    [InlineKeyboardButton(text="🏠 В главное меню", callback_data="pass_menu_back")]
+                ]
+            )
+        )
     except Exception as e:
         bot_errors_total.labels(error_type=type(e).__name__).inc()
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
@@ -425,7 +438,7 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
     sent = await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
     await state.update_data(pass_message_id=sent.message_id, pass_chat_id=sent.chat.id)
 
-# ========== Поиск ==========
+# ========== Поиск (исправлено) ==========
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -433,7 +446,10 @@ async def start_search_pass(message: Message, state: FSMContext):
         await message.answer("У вас нет прав для поиска пропусков.")
         return
     await state.set_state(PassSearch.query)
-    await message.answer("Введите текст для поиска (имя гостя, номер авто, квартира, ID):")
+    await message.answer("Введите текст для поиска:\n"
+                         "#ID – поиск по номеру пропуска\n"
+                         "Цифры – поиск по квартире или ID\n"
+                         "Текст – поиск по имени гостя, номеру авто, цели")
 
 @router.message(StateFilter(PassSearch.query))
 async def process_search_pass(message: Message, state: FSMContext):
@@ -443,27 +459,21 @@ async def process_search_pass(message: Message, state: FSMContext):
         await state.clear()
         return
     query = message.text.strip()
-    if len(query) < 2:
+    if len(query) < 2 and not query.startswith('#'):
         await message.answer("Введите минимум 2 символа.")
         return
-    passes = await search_passes(query, limit=20, status="active")
+
+    # Ищем активные пропуска (status = 'active')
+    passes = await search_passes(query, limit=50, status="active")
     if not passes:
         await message.answer("Ничего не найдено.")
         await state.clear()
         return
-    text = "🔍 Результаты поиска по пропускам:\n\n"
+
+    text = "🔍 Результаты поиска (активные пропуска):\n\n"
     buttons = []
-    for p in passes:
-        if p.status == "active":
-            status_emoji = "🟢"
-        elif p.status == "used":
-            status_emoji = "🔵"
-        elif p.status == "expired":
-            status_emoji = "🔴"
-        elif p.status == "completed":
-            status_emoji = "✅"
-        else:
-            status_emoji = "⚪"
+    for p in passes[:10]:
+        status_emoji = "🟢"
         label = f"{status_emoji} #{p.id} "
         if p.type == "guest":
             label += f"Гость: {p.guest_name or '—'}"
@@ -473,9 +483,80 @@ async def process_search_pass(message: Message, state: FSMContext):
             label += f" | кв.{p.apartment}"
         label += f" | {p.purpose or '—'}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"pass:{p.id}")])
+
+    # Кнопка "Выполненные пропуска"
+    buttons.append([InlineKeyboardButton(text="📜 Выполненные пропуска", callback_data=f"search_completed:{query}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="pass_menu_back")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer(text, reply_markup=kb)
     await state.clear()
+
+# ========== Поиск выполненных пропусков ==========
+@router.callback_query(F.data.startswith("search_completed:"))
+async def search_completed_passes(callback: CallbackQuery):
+    query = callback.data.split(":", 1)[1]
+    employee = await get_employee(callback.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
+        await callback.answer("Нет прав", show_alert=True)
+        return
+    # Ищем выполненные пропуска: статусы 'completed' и 'expired'
+    passes = await search_passes(query, limit=50, status=None)  # получим все, затем отфильтруем
+    completed_passes = [p for p in passes if p.status in ("completed", "expired")]
+    if not completed_passes:
+        await callback.message.edit_text("Нет выполненных пропусков.")
+        await callback.answer()
+        return
+    text = "📜 Результаты поиска (выполненные пропуска):\n\n"
+    buttons = []
+    for p in completed_passes[:10]:
+        status_emoji = "✅" if p.status == "completed" else "❗"
+        label = f"{status_emoji} #{p.id} "
+        if p.type == "guest":
+            label += f"Гость: {p.guest_name or '—'}"
+        else:
+            label += f"Авто: {p.car_number or '—'}"
+        if p.apartment:
+            label += f" | кв.{p.apartment}"
+        label += f" | {p.purpose or '—'}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"pass:{p.id}")])
+
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад к активным", callback_data=f"search_active:{query}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="pass_menu_back")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("search_active:"))
+async def search_active_passes(callback: CallbackQuery):
+    query = callback.data.split(":", 1)[1]
+    employee = await get_employee(callback.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
+        await callback.answer("Нет прав", show_alert=True)
+        return
+    passes = await search_passes(query, limit=50, status="active")
+    if not passes:
+        await callback.message.edit_text("Активных пропусков не найдено.")
+        await callback.answer()
+        return
+    text = "🔍 Результаты поиска (активные пропуска):\n\n"
+    buttons = []
+    for p in passes[:10]:
+        status_emoji = "🟢"
+        label = f"{status_emoji} #{p.id} "
+        if p.type == "guest":
+            label += f"Гость: {p.guest_name or '—'}"
+        else:
+            label += f"Авто: {p.car_number or '—'}"
+        if p.apartment:
+            label += f" | кв.{p.apartment}"
+        label += f" | {p.purpose or '—'}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"pass:{p.id}")])
+
+    buttons.append([InlineKeyboardButton(text="📜 Выполненные пропуска", callback_data=f"search_completed:{query}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="pass_menu_back")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
 
 # ========== Карточка пропуска ==========
 @router.callback_query(F.data.startswith("pass:"))
@@ -487,34 +568,53 @@ async def show_pass_card(callback: CallbackQuery):
         return
     employee = await get_employee(callback.from_user.id)
     user_role = employee.role.value if employee else None
+
+    status_emoji = {
+        "active": "🟢",
+        "used": "🔵",
+        "expired": "❗",
+        "completed": "✅"
+    }.get(p.status, "⚪")
+
+    if p.type == "guest":
+        type_icon = "👤"
+        name = p.guest_name or "—"
+    else:
+        type_icon = "🚗"
+        name = p.car_number or "—"
+
     text = (
-        f"🪪 Пропуск #{p.id}\n"
-        f"Тип: {p.type}\n"
-        f"Гость: {p.guest_name or '—'}\n"
-        f"Авто: {p.car_number or '—'}\n"
-        f"Квартира: {p.apartment or '—'}\n"
-        f"Цель: {p.purpose or '—'}\n"
-        f"Начало: {p.start_date.strftime('%d.%m.%Y %H:%M')}\n"
-        f"Окончание: {p.end_date.strftime('%d.%m.%Y %H:%M')}\n"
-        f"Статус: {p.status}\n"
-        f"Въезд: {p.checked_in_at.strftime('%d.%m.%Y %H:%M') if p.checked_in_at else '—'}\n"
-        f"Выезд: {p.checked_out_at.strftime('%d.%m.%Y %H:%M') if p.checked_out_at else '—'}\n"
-        f"Комментарий: {p.comment or '—'}"
+        f"{status_emoji} {type_icon} <b>Пропуск #{p.id}</b>\n"
+        f"{type_icon} <b>Тип:</b> {p.type}\n"
+        f"👤 <b>Гость/Авто:</b> {name}\n"
+        f"🏠 <b>Квартира:</b> {p.apartment or '—'}\n"
+        f"📝 <b>Цель:</b> {p.purpose or '—'}\n"
+        f"📅 <b>Период:</b> {format_datetime_msk(p.start_date)} – {format_datetime_msk(p.end_date)}\n"
+        f"📊 <b>Статус:</b> {p.status}\n"
     )
-    history_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{p.id}")]
-    ])
-    action_kb = pass_action_keyboard(
+    if p.checked_in_at:
+        text += f"✅ <b>Въезд:</b> {format_datetime_msk(p.checked_in_at)}\n"
+    if p.checked_out_at:
+        text += f"🚗 <b>Выезд:</b> {format_datetime_msk(p.checked_out_at)}\n"
+    if p.comment:
+        text += f"💬 <b>Комментарий:</b> {p.comment}\n"
+    if p.photo_ids:
+        text += f"📷 <b>Фото:</b> {len(p.photo_ids)} шт.\n"
+    if p.creator:
+        text += f"👤 <b>Создал:</b> {p.creator.full_name}\n"
+    text += f"📅 <b>Создан:</b> {format_datetime_msk(p.created_at)}"
+
+    kb = pass_action_keyboard(
         p.id,
         p.status,
         user_role,
         bool(p.checked_in_at),
         bool(p.checked_out_at)
     )
-    merged_buttons = action_kb.inline_keyboard + history_kb.inline_keyboard
-    await safe_edit_or_reply(callback, text, InlineKeyboardMarkup(inline_keyboard=merged_buttons))
+    await safe_edit_or_reply(callback, text, kb)
     await callback.answer()
 
+# ========== История пропуска ==========
 @router.callback_query(F.data.startswith("pass_history:"))
 async def show_pass_history(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
@@ -528,15 +628,14 @@ async def show_pass_history(callback: CallbackQuery):
         user_name = entry.get("user_name", "Система")
         details = entry.get("details", "")
         created_at = entry.get("created_at")
-        if isinstance(created_at, str):
+        if created_at:
             try:
-                created_at = datetime.fromisoformat(created_at)
+                dt = datetime.fromisoformat(created_at)
+                created_at_str = format_datetime_msk(dt)
             except:
-                pass
-        if isinstance(created_at, datetime):
-            created_at_str = created_at.strftime("%d.%m.%Y %H:%M")
+                created_at_str = created_at
         else:
-            created_at_str = str(created_at) if created_at else "—"
+            created_at_str = "—"
         text += f"🕒 {created_at_str} – <b>{user_name}</b>: {action}\n"
         if details:
             text += f"   📝 {details}\n"
@@ -628,7 +727,7 @@ async def pass_comment_list(callback: CallbackQuery):
             created_at = c.get("created_at", "")
             text += f"👤 {user_name} | {created_at}\n"
             text += f"{c.get('text', '')}\n\n"
-    await callback.message.delete()
+    await safe_delete_message(callback.message)
     await callback.message.answer(
         text,
         parse_mode="HTML",
@@ -647,7 +746,7 @@ async def pass_comment_add(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(PassCommentState.waiting_for_comment)
     await state.update_data(pass_id=pass_id)
-    await callback.message.delete()
+    await safe_delete_message(callback.message)
     await callback.message.answer("✍️ Введите текст комментария:")
     await callback.answer()
 
@@ -678,11 +777,11 @@ async def pass_comment_process(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("pass_comment_back:"))
 async def pass_comment_back(callback: CallbackQuery):
     pass_id = int(callback.data.split(":")[1])
-    await callback.message.delete()
+    await safe_delete_message(callback.message)
     await show_pass_card(callback)
     await callback.answer()
 
-# ========== Пагинация ==========
+# ========== Пагинация и возврат ==========
 @router.callback_query(F.data.startswith("pass_page:"))
 async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
     page = int(callback.data.split(":")[1])
@@ -746,9 +845,14 @@ async def paginate_passes(callback: CallbackQuery, state: FSMContext, bot):
 
 @router.callback_query(F.data == "pass_back")
 async def back_to_pass_list(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(pass_list_type="active", pass_page=1)
+    data = await state.get_data()
+    list_type = data.get('pass_list_type', 'active')
+    page = data.get('pass_page', 1)
     await callback.message.delete()
-    await list_active_passes(callback.message, state, 1, user_id=callback.from_user.id)
+    if list_type == 'active':
+        await list_active_passes(callback.message, state, page, user_id=callback.from_user.id)
+    else:
+        await list_history(callback.message, state, page)
     await callback.answer()
 
 @router.callback_query(F.data == "pass_menu_back")

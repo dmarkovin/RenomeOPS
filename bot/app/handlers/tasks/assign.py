@@ -20,15 +20,18 @@ from app.keyboards.assign import (
 )
 from app.keyboards.main_menu import main_menu_keyboard
 from app.states.tasks.transfer import TaskTransfer
-from app.services.notification_service import notify_user, notify_team
-from app.keyboards.task_actions import task_actions_keyboard, get_task_status_emoji
-from app.handlers.tasks.card import safe_edit_or_reply
+from app.services.notification_service import (
+    notify_user_with_button,
+    notify_team_with_button,
+    notify_admins_with_button
+)
+from app.keyboards.task_actions import task_actions_keyboard
 
 router = Router()
 
 # ---------- Назначение ----------
 @router.callback_query(F.data.startswith("task_assign:"))
-async def start_assign(callback: CallbackQuery, state: FSMContext):
+async def start_assign(callback: CallbackQuery):
     task_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
@@ -58,7 +61,7 @@ async def choose_team_for_assign(callback: CallbackQuery):
     await callback.answer()
 
 @router.callback_query(F.data.startswith("assign_team:"))
-async def assign_to_team(callback: CallbackQuery, state: FSMContext):
+async def assign_to_team(callback: CallbackQuery):
     _, team_str, task_id_str = callback.data.split(":")
     team = Team(team_str)
     task_id = int(task_id_str)
@@ -70,35 +73,18 @@ async def assign_to_team(callback: CallbackQuery, state: FSMContext):
     if not task:
         await callback.answer("Ошибка назначения", show_alert=True)
         return
-    await notify_team(team, f"📢 Новая задача #{task_id} назначена на вашу команду.\nНазвание: {task.title}")
-
-    # Получаем актуальные данные для карточки
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Ошибка", show_alert=True)
-        return
-    task = await get_task(task_id)  # обновляем
-    if not task:
-        await callback.answer("Задача не найдена", show_alert=True)
-        return
-
-    # Рендерим карточку напрямую
-    status_emoji = get_task_status_emoji(task.status)
-    text = (
-        f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
-        f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-        f"🏢 <b>Адрес:</b> {task.building or '—'} {task.apartment or '—'}\n"
-        f"🔢 <b>Приоритет:</b> {task.priority}\n"
-        f"📊 <b>Статус:</b> {task.status}\n\n"
-        f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
-        f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
-        f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+    # Уведомление команде с кнопкой
+    await notify_team_with_button(
+        team,
+        f"📋 Новая задача #{task_id}: {task.title}\nПриоритет: {task.priority}\n---\nНажмите кнопку, чтобы перейти к задаче.",
+        "👁️ Посмотреть заявку",
+        f"task:{task_id}"
     )
-    if task.wait_until:
-        text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
-    if task.closed_at:
-        text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
-    await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
+    await callback.message.delete()
+    await callback.message.answer(
+        f"✅ Задача #{task_id} назначена на команду {team.value}.",
+        reply_markup=task_actions_keyboard(task, admin)
+    )
     await callback.answer("Назначено")
 
 @router.callback_query(F.data.startswith("assign_type_user:"))
@@ -119,7 +105,7 @@ async def choose_user_for_assign(callback: CallbackQuery):
     await callback.answer()
 
 @router.callback_query(F.data.startswith("assign_emp:"))
-async def assign_employee(callback: CallbackQuery, state: FSMContext):
+async def assign_employee(callback: CallbackQuery):
     _, emp_id_str, task_id_str = callback.data.split(":")
     emp_id = int(emp_id_str)
     task_id = int(task_id_str)
@@ -132,38 +118,21 @@ async def assign_employee(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка назначения", show_alert=True)
         return
     new_assignee = await get_employee_by_id(emp_id)
-    if new_assignee and new_assignee.telegram_id:
-        await notify_user(
+    if not new_assignee:
+        await callback.answer("Сотрудник не найден", show_alert=True)
+        return
+    if new_assignee.telegram_id:
+        await notify_user_with_button(
             new_assignee.telegram_id,
-            f"📢 Вам назначена задача #{task_id}: {task.title}\nНазначил: {admin.full_name}"
+            f"📋 Вам назначена задача #{task_id}: {task.title}\nНазначил: {admin.full_name}",
+            "👁️ Посмотреть заявку",
+            f"task:{task_id}"
         )
-
-    # Получаем актуальные данные для карточки
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Ошибка", show_alert=True)
-        return
-    task = await get_task(task_id)  # обновляем
-    if not task:
-        await callback.answer("Задача не найдена", show_alert=True)
-        return
-
-    status_emoji = get_task_status_emoji(task.status)
-    text = (
-        f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
-        f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-        f"🏢 <b>Адрес:</b> {task.building or '—'} {task.apartment or '—'}\n"
-        f"🔢 <b>Приоритет:</b> {task.priority}\n"
-        f"📊 <b>Статус:</b> {task.status}\n\n"
-        f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
-        f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
-        f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+    await callback.message.delete()
+    await callback.message.answer(
+        f"✅ Задача #{task_id} назначена на {new_assignee.full_name}.",
+        reply_markup=task_actions_keyboard(task, admin)
     )
-    if task.wait_until:
-        text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
-    if task.closed_at:
-        text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
-    await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
     await callback.answer("Назначено")
 
 # ---------- Возврат к выбору типа назначения ----------
@@ -178,7 +147,7 @@ async def back_to_assign_type(callback: CallbackQuery):
 
 # ---------- Пропуск назначения (возврат к карточке) ----------
 @router.callback_query(F.data.startswith("assign_skip:"))
-async def skip_assign(callback: CallbackQuery, state: FSMContext):
+async def skip_assign(callback: CallbackQuery):
     task_id = int(callback.data.split(":")[1])
     employee = await get_employee(callback.from_user.id)
     task = await get_task(task_id)
@@ -186,25 +155,14 @@ async def skip_assign(callback: CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.message.answer("Назначение пропущено.")
         return
-    status_emoji = get_task_status_emoji(task.status)
-    text = (
-        f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
-        f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-        f"🏢 <b>Адрес:</b> {task.building or '—'} {task.apartment or '—'}\n"
-        f"🔢 <b>Приоритет:</b> {task.priority}\n"
-        f"📊 <b>Статус:</b> {task.status}\n\n"
-        f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
-        f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
-        f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+    await callback.message.delete()
+    await callback.message.answer(
+        "Назначение пропущено.",
+        reply_markup=task_actions_keyboard(task, employee)
     )
-    if task.wait_until:
-        text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
-    if task.closed_at:
-        text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
-    await safe_edit_or_reply(callback, text, task_actions_keyboard(task, employee))
     await callback.answer()
 
-# ---------- Передача задачи ----------
+# ---------- Передача задачи (исполнитель -> другому) ----------
 @router.callback_query(F.data.startswith("task_transfer:"))
 async def start_transfer(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -256,31 +214,18 @@ async def process_transfer_comment(message: Message, state: FSMContext):
         return
     new_assignee = await get_employee_by_id(to_emp_id)
     if new_assignee and new_assignee.telegram_id:
-        await notify_user(
+        await notify_user_with_button(
             new_assignee.telegram_id,
             f"📢 Вам передана задача #{task_id}: {task.title}\n"
             f"От: {from_emp.full_name}\n"
-            f"Комментарий: {comment or 'без комментария'}"
+            f"Комментарий: {comment or 'без комментария'}",
+            "👁️ Посмотреть заявку",
+            f"task:{task_id}"
         )
-    # Показываем карточку
-    task = await get_task(task_id)
-    if task and from_emp:
-        status_emoji = get_task_status_emoji(task.status)
-        text = (
-            f"{status_emoji} <b>#{task.id} {task.title}</b>\n\n"
-            f"📄 <b>Описание:</b>\n{task.description or '—'}\n\n"
-            f"🏢 <b>Адрес:</b> {task.building or '—'} {task.apartment or '—'}\n"
-            f"🔢 <b>Приоритет:</b> {task.priority}\n"
-            f"📊 <b>Статус:</b> {task.status}\n\n"
-            f"👤 <b>Создал:</b> {task.creator.full_name if task.creator else '—'}\n"
-            f"👥 <b>Исполнитель:</b> {task.assignee.full_name if task.assignee else 'не назначен'}\n"
-            f"🕒 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-        )
-        if task.wait_until:
-            text += f"⏳ <b>Ожидание до:</b> {task.wait_until.strftime('%d.%m.%Y %H:%M')}\n"
-        if task.closed_at:
-            text += f"🔒 <b>Закрыта:</b> {task.closed_at.strftime('%d.%m.%Y %H:%M')}\n"
-        await message.answer(text, reply_markup=task_actions_keyboard(task, from_emp))
+    await message.answer(
+        f"✅ Задача #{task_id} передана {new_assignee.full_name}.",
+        reply_markup=task_actions_keyboard(task, from_emp)
+    )
     await state.clear()
 
 @router.callback_query(F.data == "cancel_action")

@@ -34,6 +34,9 @@ from app.services.settings.service import get_user_settings, update_setting
 from app.services.employees.service import count_employees
 from app.services.services.service import get_all_services
 from app.keyboards.patrol import patrol_main_menu_keyboard
+from sqlalchemy import func, select, and_
+from app.database import AsyncSessionLocal
+from app.database.models import Task
 
 router = Router()
 
@@ -74,38 +77,6 @@ async def show_settings(message: Message):
     await message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
 
 # ========== Смена роли ==========
-@router.message(F.text == "🔄 Сменить роль")
-async def change_role(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee:
-        await message.answer("Вы не зарегистрированы.")
-        return
-    await state.set_state(RoleChange.select_role)
-    await message.answer(
-        "Выберите новую роль:",
-        reply_markup=role_selection_keyboard(employee.id)
-    )
-
-@router.callback_query(F.data.startswith("emp_set_role:"), StateFilter(RoleChange.select_role))
-async def set_role(callback: CallbackQuery, state: FSMContext):
-    _, user_id_str, role_str = callback.data.split(":")
-    user_id = int(user_id_str)
-    new_role = UserRole(role_str)
-    employee = await get_employee(callback.from_user.id)
-    if not employee:
-        await callback.answer("Ошибка", show_alert=True)
-        return
-    if user_id != employee.id:
-        await callback.answer("Вы можете менять только свою роль.", show_alert=True)
-        return
-    await update_employee_role(user_id, new_role)
-    await callback.answer(f"✅ Ваша роль изменена на {new_role.value}")
-    await state.clear()
-    await callback.message.delete()
-    await callback.message.answer("Главное меню:", reply_markup=main_menu_keyboard(new_role))
-    await callback.answer()
-
-# ========== Смена команды ==========
 @router.message(F.text == "🔄 Сменить команду")
 async def change_team(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -163,6 +134,9 @@ async def process_team_change_reason(message: Message, state: FSMContext):
     await state.clear()
 
 # ========== Уведомления ==========
+class SettingsStates(StatesGroup):
+    notification_settings = State()
+
 @router.message(F.text == "🔔 Уведомления")
 async def notification_settings(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -189,9 +163,6 @@ async def notification_settings(message: Message, state: FSMContext):
     ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="notif_back")]])
     await state.set_state(SettingsStates.notification_settings)
     await message.answer("Настройки уведомлений:", reply_markup=kb)
-
-class SettingsStates(StatesGroup):
-    notification_settings = State()
 
 @router.callback_query(F.data.startswith("notif_toggle:"), StateFilter(SettingsStates.notification_settings))
 async def toggle_notification(callback: CallbackQuery, state: FSMContext):
@@ -285,60 +256,96 @@ async def show_detailed_statistics(message: Message):
         await message.answer("Только для администратора и директора.")
         return
 
-    total_open = await count_open_tasks()
-    total_checking = await count_checking_tasks()
-    total_closed = await count_tasks_by_status("closed")
-    total_waiting = await count_tasks_by_status("waiting")
-    total_in_progress = await count_tasks_by_status("in_progress")
-    total_accepted = await count_tasks_by_status("accepted")
+    # === Сбор данных ===
+    async with AsyncSessionLocal() as db:
+        # Общая статистика по задачам
+        total_open = await count_open_tasks()
+        total_checking = await count_checking_tasks()
+        total_closed = await count_tasks_by_status("closed")
+        total_waiting = await count_tasks_by_status("waiting")
+        total_in_progress = await count_tasks_by_status("in_progress")
+        total_accepted = await count_tasks_by_status("accepted")
+        total_created = await count_tasks_by_status("created")
 
-    all_tasks = []
-    for status in ["created", "accepted", "in_progress", "checking", "waiting", "paused", "closed"]:
-        tasks = await get_tasks_by_status(status, limit=1000)
-        all_tasks.extend(tasks)
+        # Задачи по командам (все статусы, кроме closed)
+        team_stats = {}
+        for team in Team:
+            stmt = select(func.count()).select_from(Task).where(
+                and_(
+                    cast(Task.assigned_team, String) == team.value,
+                    cast(Task.status, String) != "closed"
+                )
+            )
+            count = (await db.execute(stmt)).scalar()
+            team_stats[team.value] = count
 
-    from collections import Counter
-    assignee_counter = Counter()
-    for t in all_tasks:
-        if t.assigned_to:
-            assignee_counter[t.assigned_to] += 1
-    top_assignees = []
-    for user_id, count in assignee_counter.most_common(5):
-        user = await get_employee_by_id(user_id)
-        if user:
-            top_assignees.append(f"{user.full_name}: {count} задач")
+        # Закрытые задачи по командам
+        closed_by_team = {}
+        for team in Team:
+            stmt = select(func.count()).select_from(Task).where(
+                and_(
+                    cast(Task.assigned_team, String) == team.value,
+                    cast(Task.status, String) == "closed"
+                )
+            )
+            count = (await db.execute(stmt)).scalar()
+            closed_by_team[team.value] = count
 
-    team_task_counts = {}
-    for team in Team:
-        count = 0
-        for t in all_tasks:
-            if t.assigned_team == team and t.status != "closed":
-                count += 1
-        team_task_counts[team.value] = count
+        # Топ исполнителей (закрытые задачи)
+        top_executors = []
+        result = await db.execute(
+            select(Task.assigned_to, func.count())
+            .where(cast(Task.status, String) == "closed")
+            .group_by(Task.assigned_to)
+            .order_by(func.count().desc())
+            .limit(5)
+        )
+        for user_id, count in result:
+            if user_id:
+                user = await get_employee_by_id(user_id)
+                if user:
+                    top_executors.append(f"{user.full_name}: {count}")
 
+        # Среднее время выполнения
+        avg_time_result = await db.execute(
+            select(func.avg(func.extract('epoch', Task.closed_at - Task.created_at)))
+            .where(cast(Task.status, String) == "closed")
+        )
+        avg_seconds = avg_time_result.scalar()
+        if avg_seconds:
+            avg_hours = avg_seconds / 3600
+            avg_time_str = f"{avg_hours:.1f} ч."
+        else:
+            avg_time_str = "Нет данных"
+
+    # Статистика по пропускам
     active_passes = await count_passes_by_status("active")
     used_passes = await count_passes_by_status("used")
     expired_passes = await count_passes_by_status("expired")
     completed_passes = await count_passes_by_status("completed")
-    completed_total = completed_passes + used_passes
 
+    # Доставка
     all_deliveries = await get_all_deliveries(limit=10000)
     pending_deliveries = len([d for d in all_deliveries if d.status == "pending"])
     received_deliveries = len([d for d in all_deliveries if d.status == "received"])
     completed_deliveries = len([d for d in all_deliveries if d.status == "completed"])
 
+    # Ключи
     issued_keys = len(await get_keys(status="issued", limit=10000))
     returned_keys = len(await get_keys(status="returned", limit=10000))
 
+    # Документы
     docs = await get_documents(limit=10000)
     doc_types = {}
     for d in docs:
         doc_types[d.doc_type] = doc_types.get(d.doc_type, 0) + 1
 
+    # Обходы
     patrols = await get_patrols(limit=10000)
     active_patrols = len([p for p in patrols if p.status == "active"])
     completed_patrols = len([p for p in patrols if p.status == "completed"])
 
+    # Сотрудники
     total_employees = await count_employees(active=None)
     active_employees = await count_employees(active=True)
     inactive_employees = total_employees - active_employees
@@ -347,24 +354,29 @@ async def show_detailed_statistics(message: Message):
         cnt = await count_employees(role=role)
         role_counts[role.value] = cnt
 
+    # Формируем текст
     text = (
         f"📊 <b>Расширенная статистика системы</b>\n\n"
         f"<b>📋 Заявки</b>\n"
-        f"Всего открытых: {total_open}\n"
+        f"Создано: {total_created}\n"
+        f"Принято: {total_accepted}\n"
         f"В работе: {total_in_progress}\n"
         f"На проверке: {total_checking}\n"
         f"Ожидают: {total_waiting}\n"
         f"Закрыто: {total_closed}\n"
-        f"Принято: {total_accepted}\n\n"
-        f"<b>Топ исполнителей:</b>\n"
-        + ("\n".join(top_assignees) if top_assignees else "Нет данных") + "\n\n"
-        f"<b>Задачи по командам:</b>\n"
-        + "\n".join([f"{team}: {count}" for team, count in team_task_counts.items() if count > 0]) + "\n\n"
+        f"Открыто (всего): {total_open}\n"
+        f"Среднее время выполнения: {avg_time_str}\n\n"
+        f"<b>📋 Задачи по командам (открытые):</b>\n"
+        + "\n".join([f"{team}: {count}" for team, count in team_stats.items() if count > 0]) + "\n\n"
+        f"<b>📋 Закрыто по командам:</b>\n"
+        + "\n".join([f"{team}: {count}" for team, count in closed_by_team.items() if count > 0]) + "\n\n"
+        f"<b>🏆 Топ исполнителей:</b>\n"
+        + ("\n".join(top_executors) if top_executors else "Нет данных") + "\n\n"
         f"<b>🚗 Пропуска</b>\n"
         f"Активные: {active_passes}\n"
         f"Использованные: {used_passes}\n"
-        f"Выполненные: {completed_total}\n"
-        f"Просроченные: {expired_passes}\n\n"
+        f"Просроченные: {expired_passes}\n"
+        f"Выполненные: {completed_passes}\n\n"
         f"<b>📦 Доставка</b>\n"
         f"Ожидают: {pending_deliveries}\n"
         f"Получены: {received_deliveries}\n"

@@ -1,100 +1,103 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import select
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
+
 from app.database import AsyncSessionLocal
 from app.database.models import Delivery
+from app.services.employees.service import get_employee_by_id
+
 
 async def create_delivery(
     recipient: str,
-    apartment: int = None,
-    courier_service: str = None,
-    comment: str = "",
-    created_by: int = None,
-    photo_ids: List[str] = None
+    apartment: Optional[int],
+    courier_service: Optional[str],
+    comment: str,
+    created_by: int,
+    photo_ids: List[str] = None,
 ) -> Delivery:
     async with AsyncSessionLocal() as db:
-        delivery = Delivery(
+        d = Delivery(
             recipient=recipient,
             apartment=apartment,
-            courier_service=courier_service or "",
+            courier_service=courier_service,
             comment=comment,
-            created_by=created_by,
             photo_ids=photo_ids or [],
-            status="pending",
-            comments=[]
+            created_by=created_by,
+            status="pending"
         )
-        db.add(delivery)
+        db.add(d)
+        # история
+        creator_name = "Система"
+        if created_by:
+            creator = await get_employee_by_id(created_by)
+            if creator:
+                creator_name = creator.full_name
+        d.comments = []
         await db.commit()
-        await db.refresh(delivery)
-        return delivery
+        await db.refresh(d)
+        return d
+
 
 async def get_delivery(delivery_id: int) -> Optional[Delivery]:
     async with AsyncSessionLocal() as db:
-        return await db.get(Delivery, delivery_id)
+        result = await db.execute(
+            select(Delivery)
+            .where(Delivery.id == delivery_id)
+            .options(selectinload(Delivery.creator))
+        )
+        return result.scalar_one_or_none()
 
-async def get_all_deliveries(status: str = None, limit: int = 20, offset: int = 0) -> List[Delivery]:
+
+async def get_all_deliveries(
+    status: str = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> List[Delivery]:
     async with AsyncSessionLocal() as db:
-        query = select(Delivery).order_by(Delivery.created_at.desc())
+        query = select(Delivery).options(selectinload(Delivery.creator))
         if status:
             query = query.where(Delivery.status == status)
-        query = query.limit(limit).offset(offset)
+        query = query.order_by(Delivery.created_at.desc()).limit(limit).offset(offset)
         result = await db.execute(query)
         return result.scalars().all()
 
+
 async def update_delivery_status(delivery_id: int, status: str) -> Optional[Delivery]:
     async with AsyncSessionLocal() as db:
-        delivery = await db.get(Delivery, delivery_id)
-        if not delivery:
+        d = await db.get(Delivery, delivery_id)
+        if not d:
             return None
-        delivery.status = status
-        delivery.updated_at = datetime.utcnow()
+        d.status = status
+        d.updated_at = datetime.utcnow()
         await db.commit()
-        await db.refresh(delivery)
-        return delivery
+        await db.refresh(d)
+        return d
 
-async def add_delivery_comment(delivery_id: int, user_id: int, author_name: str, text: str) -> bool:
+
+async def add_delivery_comment(
+    delivery_id: int,
+    user_id: int,
+    user_name: str,
+    text: str
+) -> bool:
     async with AsyncSessionLocal() as db:
-        delivery = await db.get(Delivery, delivery_id)
-        if not delivery:
+        d = await db.get(Delivery, delivery_id)
+        if not d:
             return False
-        if delivery.comments is None:
-            delivery.comments = []
-        delivery.comments.append({
+        if not isinstance(d.comments, list):
+            d.comments = []
+        d.comments.append({
             "author_id": user_id,
-            "author_name": author_name,
+            "author_name": user_name,
             "text": text,
             "created_at": datetime.utcnow().isoformat()
         })
-        delivery.updated_at = datetime.utcnow()
+        d.updated_at = datetime.utcnow()
         await db.commit()
         return True
 
+
 async def get_delivery_history(delivery_id: int) -> List[dict]:
-    async with AsyncSessionLocal() as db:
-        delivery = await db.get(Delivery, delivery_id)
-        if not delivery:
-            return []
-        history = []
-        if delivery.created_at:
-            history.append({
-                "created_at": delivery.created_at.strftime('%d.%m.%Y %H:%M'),
-                "author": "Система",
-                "action": "Создана",
-                "description": f"Получатель: {delivery.recipient}"
-            })
-        if delivery.status == "received" or delivery.status == "completed":
-            history.append({
-                "created_at": delivery.updated_at.strftime('%d.%m.%Y %H:%M') if delivery.updated_at else delivery.created_at.strftime('%d.%m.%Y %H:%M'),
-                "author": "Система",
-                "action": f"Статус изменён на {delivery.status}",
-                "description": ""
-            })
-        if delivery.comments:
-            for c in delivery.comments:
-                history.append({
-                    "created_at": c.get("created_at", ""),
-                    "author": c.get("author_name", "—"),
-                    "action": "Комментарий",
-                    "description": c.get("text", "")
-                })
-        return sorted(history, key=lambda x: x.get("created_at", ""), reverse=True)
+    d = await get_delivery(delivery_id)
+    return d.comments or []  # history в доставке хранится в comments (или можно отдельно)

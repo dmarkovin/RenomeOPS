@@ -102,7 +102,7 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
-    video_ids = Column(JSON, default=list)
+    video_ids = Column(MutableList.as_mutable(JSON), default=list)
     __table_args__ = (
         Index("ix_tasks_status", "status"),
         Index("ix_tasks_assigned_to", "assigned_to"),
@@ -217,6 +217,7 @@ class Pass(Base):
     comments = Column(MutableList.as_mutable(JSON), default=list)
     creator = relationship("User", foreign_keys=[created_by])
     assignee = relationship("User", foreign_keys=[assigned_to])
+    __table_args__ = (Index("ix_passes_status", "status"),)
 
 # ===========================
 # Доставка (Ресепшен)
@@ -229,15 +230,16 @@ class Delivery(Base):
     courier_service = Column(String(255), nullable=True)
     comment = Column(Text)
     photo_ids = Column(JSON, default=list)
-    comments = Column(JSON, default=list)
+    comments = Column(MutableList.as_mutable(JSON), default=list)
     created_by = Column(Integer, ForeignKey("users.id"))
     status = Column(String(20), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     creator = relationship("User", foreign_keys=[created_by])
+    __table_args__ = (Index("ix_deliveries_status", "status"),)
 
 # ===========================
-# Ключи (Ресепшен)
+# Ключи (Ресепшен) – оставляем, но не используем в меню
 # ===========================
 class Key(Base):
     __tablename__ = "keys"
@@ -254,10 +256,13 @@ class Key(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    history = Column(MutableList.as_mutable(JSON), default=list)
+    comments = Column(MutableList.as_mutable(JSON), default=list)
     creator = relationship("User", foreign_keys=[created_by])
+    __table_args__ = (Index("ix_keys_status", "status"),)
 
 # ===========================
-# Документы (Ресепшен)
+# Документы (Ресепшен) – оставляем, но не используем в меню
 # ===========================
 class Document(Base):
     __tablename__ = "documents"
@@ -277,7 +282,10 @@ class Document(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    history = Column(MutableList.as_mutable(JSON), default=list)
+    comments = Column(MutableList.as_mutable(JSON), default=list)
     creator = relationship("User", foreign_keys=[created_by])
+    __table_args__ = (Index("ix_documents_status", "status"),)
 
 # ===========================
 # Обходы (охрана)
@@ -298,6 +306,7 @@ class Patrol(Base):
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
     creator = relationship("User", foreign_keys=[created_by])
     task = relationship("Task", foreign_keys=[task_id])
+    __table_args__ = (Index("ix_patrols_status", "status"),)
 
 # ===========================
 # Настройки уведомлений пользователя

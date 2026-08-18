@@ -103,10 +103,12 @@ async def show_list(
             tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
         elif list_type == "my":
-            tasks = await get_tasks_for_employee(employee.id, limit=1000, offset=0)
+            # Мои задачи – где пользователь назначен (включая задачи, назначенные лично, даже если команда не совпадает)
+            tasks = await get_tasks_for_employee(employee.id, limit=1000, offset=0, include_team=False)
             title = "📋 Мои задачи"
             show_assignee = False
         elif list_type == "team":
+            # Новые задачи команды – где задача назначена на команду, но ещё не взята (assigned_to is NULL)
             tasks = await get_team_tasks(employee.id, limit=1000, offset=0)
             title = "📋 Новые задачи"
             show_assignee = False

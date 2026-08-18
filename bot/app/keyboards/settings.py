@@ -6,10 +6,7 @@ def settings_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="👤 Профиль")],
         [KeyboardButton(text="🔔 Уведомления")],
         [KeyboardButton(text="📢 Сообщить о проблеме")],
+        [KeyboardButton(text="🔄 Сменить команду")],
+        [KeyboardButton(text="⬅️ Назад")]
     ]
-    if role == UserRole.ADMIN:
-        buttons.append([KeyboardButton(text="🔄 Сменить роль")])
-    else:
-        buttons.append([KeyboardButton(text="🔄 Сменить команду")])
-    buttons.append([KeyboardButton(text="⬅️ Назад")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)

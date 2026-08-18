@@ -37,7 +37,7 @@ class TaskCreate(StatesGroup):
     enter_applicant_name = State()
     enter_applicant_phone = State()
     enter_priority = State()
-    enter_photo = State()
+    enter_media = State()
     confirm = State()
 
 @router.message(F.text == "➕ Создать заявку")
@@ -250,10 +250,12 @@ async def process_applicant_phone(message: Message, state: FSMContext):
 async def process_priority(callback: CallbackQuery, state: FSMContext):
     priority = int(callback.data.split(":")[1])
     await state.update_data(priority=priority)
-    await state.set_state(TaskCreate.enter_photo)
+    await state.set_state(TaskCreate.enter_media)
     await callback.message.delete()
     await callback.message.answer(
-        "🖼 Пришлите фото (опционально) или нажмите **Готово**:",
+        "🖼 Отправьте фото или видео (опционально).\n"
+        "Можно отправить несколько файлов.\n"
+        "Когда закончите, нажмите **Готово**:",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="✅ Готово")]],
             resize_keyboard=True
@@ -261,16 +263,24 @@ async def process_priority(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-@router.message(StateFilter(TaskCreate.enter_photo), F.photo)
-async def process_photo(message: Message, state: FSMContext):
+@router.message(StateFilter(TaskCreate.enter_media), F.photo)
+async def process_media_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
     photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
     await message.answer(f"✅ Добавлено фото ({len(photos)})")
 
-@router.message(StateFilter(TaskCreate.enter_photo), F.text == "✅ Готово")
-async def finish_photo(message: Message, state: FSMContext):
+@router.message(StateFilter(TaskCreate.enter_media), F.video)
+async def process_media_video(message: Message, state: FSMContext):
+    data = await state.get_data()
+    videos = data.get("videos", [])
+    videos.append(message.video.file_id)
+    await state.update_data(videos=videos)
+    await message.answer(f"✅ Добавлено видео ({len(videos)})")
+
+@router.message(StateFilter(TaskCreate.enter_media), F.text == "✅ Готово")
+async def finish_media(message: Message, state: FSMContext):
     await state.set_state(TaskCreate.confirm)
     data = await state.get_data()
     text = (
@@ -281,7 +291,8 @@ async def finish_photo(message: Message, state: FSMContext):
         f"Заявитель: {data.get('applicant_name')} ({data.get('applicant_type')})\n"
         f"Телефон: {data.get('applicant_phone') or '—'}\n"
         f"Приоритет: {data.get('priority')}\n"
-        f"Фото: {len(data.get('photos', []))} шт.\n\n"
+        f"Фото: {len(data.get('photos', []))} шт.\n"
+        f"Видео: {len(data.get('videos', []))} шт.\n\n"
         f"Подтвердить создание?"
     )
     await message.answer(text, reply_markup=ReplyKeyboardMarkup(
@@ -314,7 +325,8 @@ async def confirm_create(message: Message, state: FSMContext):
             applicant_name=data.get('applicant_name'),
             applicant_phone=data.get('applicant_phone'),
             priority=data.get('priority', 3),
-            photo_ids=data.get('photos', [])
+            photo_ids=data.get('photos', []),
+            video_ids=data.get('videos', [])
         )
         await state.clear()
         await notify_admins(f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}")
@@ -322,7 +334,8 @@ async def confirm_create(message: Message, state: FSMContext):
             await notify_team_with_button(
                 Team.TEAM_CONCIERGE,
                 f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}\nНазначьте исполнителя.",
-                task.id
+                "Посмотреть заявку",
+                f"task:{task.id}"
             )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task.id}")],
@@ -332,7 +345,6 @@ async def confirm_create(message: Message, state: FSMContext):
             f"✅ Заявка #{task.id} создана!",
             reply_markup=kb
         )
-        # Сбрасываем клавиатуру
         await message.answer("Выберите действие:", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)

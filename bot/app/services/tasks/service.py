@@ -59,7 +59,8 @@ async def create_task(
     is_role_change: bool = False,
     service_order_id: int = None,
     assigned_to: int = None,
-    assigned_team: Team = None
+    assigned_team: Team = None,
+    video_ids: List[str] = None,
 ) -> Task:
     async with AsyncSessionLocal() as db:
         task = Task(
@@ -84,6 +85,7 @@ async def create_task(
             service_order_id=service_order_id,
             assigned_to=assigned_to,
             assigned_team=assigned_team,
+            video_ids=video_ids or [],
             status="created"
         )
         db.add(task)
@@ -152,24 +154,41 @@ async def get_tasks_for_employee(
     status: str = None,
     limit: int = 20,
     offset: int = 0,
+    include_team: bool = True,
 ) -> List[Task]:
+    """
+    Возвращает задачи, где пользователь является исполнителем (assigned_to)
+    и/или его команда (assigned_team), в зависимости от include_team.
+    Без фильтра по статусу – показывает все задачи.
+    Для администратора/консьержа/директора – все задачи (кроме feedback? в этой функции они не используются).
+    """
     async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
             return []
 
-        query = select(Task).where(
-            or_(
-                Task.assigned_to == user_id,
-                cast(Task.assigned_team, String) == employee.team.value,
+        if include_team:
+            query = select(Task).where(
+                or_(
+                    Task.assigned_to == user_id,
+                    cast(Task.assigned_team, String) == employee.team.value,
+                )
             )
-        )
+        else:
+            query = select(Task).where(Task.assigned_to == user_id)
+
+        # Исключаем is_feedback для всех, кроме администратора
         if employee.role != UserRole.ADMIN:
             query = query.where(Task.is_feedback == False)
+
+        # Исключаем задачи, назначенные на группу ADMIN_TEAM, для не-админов
         if employee.role != UserRole.ADMIN:
             query = query.where(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
+
+        # Если статус указан, добавляем фильтр
         if status:
             query = query.where(cast(Task.status, String) == status)
+
         query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
         query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
         result = await db.execute(query)
@@ -184,17 +203,20 @@ async def count_open_tasks() -> int:
         return result.scalar()
 
 
-async def count_tasks_for_employee(user_id: int, status: str = None) -> int:
+async def count_tasks_for_employee(user_id: int, status: str = None, include_team: bool = True) -> int:
     async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
             return 0
-        query = select(func.count()).select_from(Task).where(
-            or_(
-                Task.assigned_to == user_id,
-                cast(Task.assigned_team, String) == employee.team.value,
+        if include_team:
+            query = select(func.count()).select_from(Task).where(
+                or_(
+                    Task.assigned_to == user_id,
+                    cast(Task.assigned_team, String) == employee.team.value,
+                )
             )
-        )
+        else:
+            query = select(func.count()).select_from(Task).where(Task.assigned_to == user_id)
         if employee.role != UserRole.ADMIN:
             query = query.where(Task.is_feedback == False)
         if employee.role != UserRole.ADMIN:
@@ -659,6 +681,7 @@ async def count_regular_closed_tasks(user_id: int = None) -> int:
 
 
 async def search_tasks(query: str, limit: int = 20) -> List[Task]:
+    """Поиск задач по ID, названию, описанию или исполнителю"""
     async with AsyncSessionLocal() as db:
         if query.isdigit():
             task = await db.get(Task, int(query))
@@ -702,6 +725,7 @@ async def get_team_tasks(
     limit: int = 20,
     offset: int = 0,
 ) -> List[Task]:
+    """Задачи, назначенные на команду, но не взятые (assigned_to IS NULL)"""
     async with AsyncSessionLocal() as db:
         employee = await db.get(User, user_id)
         if not employee:
