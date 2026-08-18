@@ -6,8 +6,13 @@ from aiogram.filters.state import StateFilter
 
 from app.services.employees.service import get_employee, update_employee_role, update_employee_team, get_all_employees, get_employee_by_id
 from app.services.tasks.service import (
-    count_open_tasks, count_tasks_by_status, count_checking_tasks,
-    get_open_tasks, get_tasks_by_status, count_team_tasks, get_team_tasks
+    count_open_tasks,
+    count_tasks_by_status,
+    count_checking_tasks,
+    get_open_tasks,
+    get_tasks_by_status,
+    count_team_tasks,
+    get_team_tasks
 )
 from app.services.passes.service import count_passes_by_status
 from app.services.reception.delivery_service import get_all_deliveries
@@ -34,7 +39,7 @@ from app.services.settings.service import get_user_settings, update_setting
 from app.services.employees.service import count_employees
 from app.services.services.service import get_all_services
 from app.keyboards.patrol import patrol_main_menu_keyboard
-from sqlalchemy import func, select, and_
+from sqlalchemy import func, select, and_, cast, String
 from app.database import AsyncSessionLocal
 from app.database.models import Task
 
@@ -76,7 +81,7 @@ async def show_settings(message: Message):
         return
     await message.answer("⚙ Настройки:", reply_markup=settings_keyboard(employee.role))
 
-# ========== Смена роли ==========
+# ========== Смена команды ==========
 @router.message(F.text == "🔄 Сменить команду")
 async def change_team(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)

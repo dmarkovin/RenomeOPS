@@ -87,7 +87,6 @@ def tasks_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📋 Мои задачи")],
             [KeyboardButton(text="🔍 Поиск по заявкам")],
             [KeyboardButton(text="📦 Архив")],
-            [KeyboardButton(text="⚙ Настройки")],
             [KeyboardButton(text="⬅️ Назад")]
         ]
     elif role == UserRole.DIRECTOR:
@@ -96,7 +95,6 @@ def tasks_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📋 Список заявок")],
             [KeyboardButton(text="🔍 Поиск по заявкам")],
             [KeyboardButton(text="📦 Архив")],
-            [KeyboardButton(text="⚙ Настройки")],
             [KeyboardButton(text="⬅️ Назад")]
         ]
     elif role == UserRole.CONCIERGE:
@@ -107,7 +105,6 @@ def tasks_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📋 Ожидают проверки")],
             [KeyboardButton(text="🔍 Поиск по заявкам")],
             [KeyboardButton(text="📦 Архив")],
-            [KeyboardButton(text="⚙ Настройки")],
             [KeyboardButton(text="⬅️ Назад")]
         ]
     else:
@@ -115,7 +112,6 @@ def tasks_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📋 Мои задачи")],
             [KeyboardButton(text="📋 Новые задачи")],
             [KeyboardButton(text="📦 Архив")],
-            [KeyboardButton(text="⚙ Настройки")],
             [KeyboardButton(text="⬅️ Назад")]
         ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)

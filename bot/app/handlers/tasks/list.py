@@ -103,12 +103,18 @@ async def show_list(
             tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
         elif list_type == "my":
-            # Мои задачи – где пользователь назначен (включая задачи, назначенные лично, даже если команда не совпадает)
-            tasks = await get_tasks_for_employee(employee.id, limit=1000, offset=0, include_team=False)
-            title = "📋 Мои задачи"
+            # Показываем только активные (не закрытые) задачи
+            tasks = await get_tasks_for_employee(
+                employee.id,
+                limit=1000,
+                offset=0,
+                include_team=False  # только личные задачи
+            )
+            # Фильтруем закрытые задачи
+            tasks = [t for t in tasks if t.status != "closed"]
+            title = "📋 Мои активные задачи"
             show_assignee = False
         elif list_type == "team":
-            # Новые задачи команды – где задача назначена на команду, но ещё не взята (assigned_to is NULL)
             tasks = await get_team_tasks(employee.id, limit=1000, offset=0)
             title = "📋 Новые задачи"
             show_assignee = False
@@ -130,7 +136,7 @@ async def show_list(
             show_assignee = False
         elif list_type == "archive_regular":
             tasks = await get_regular_closed_tasks(limit=1000, offset=0, user_id=employee.id)
-            title = "📋 Личные задачи"
+            title = "📋 Архив задач"
             show_assignee = False
         elif list_type == "archive_feedback":
             if employee.role != UserRole.ADMIN:
@@ -208,7 +214,7 @@ async def show_archive_menu(target, state: FSMContext):
     buttons = [
         [InlineKeyboardButton(text="📋 Все закрытые", callback_data="archive_category:all")],
         [InlineKeyboardButton(text="💰 Платные услуги", callback_data="archive_category:paid")],
-        [InlineKeyboardButton(text="📋 Личные задачи", callback_data="archive_category:regular")],
+        [InlineKeyboardButton(text="📋 Мои закрытые", callback_data="archive_category:regular")],
     ]
     if employee.role == UserRole.ADMIN:
         buttons.append([InlineKeyboardButton(text="📢 Обращения (проблемы)", callback_data="archive_category:feedback")])
