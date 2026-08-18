@@ -23,8 +23,8 @@ from app.metrics import tasks_created_total, tasks_closed_total
 STATUS_TRANSITIONS = {
     'created': ['accepted', 'waiting', 'paused', 'closed'],
     'waiting': ['accepted', 'paused', 'closed'],
-    'accepted': ['in_progress', 'paused', 'closed'],
-    'in_progress': ['checking', 'paused', 'closed'],
+    'accepted': ['in_progress', 'waiting', 'paused', 'closed'],
+    'in_progress': ['checking', 'waiting', 'paused', 'closed'],
     'checking': ['closed', 'in_progress'],
     'paused': ['in_progress', 'accepted', 'closed'],
     'closed': [],
@@ -297,7 +297,7 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
 
 
 # ==========================
-# Назначение на конкретного сотрудника
+# Назначение на конкретного сотрудника (с поддержкой force)
 # ==========================
 async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
@@ -305,23 +305,32 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            if task.status not in ('created', 'waiting'):
+            # Если не принудительно, разрешаем только для created и waiting
+            if not force and task.status not in ("created", "waiting"):
+                return None
+            # Если принудительно, запрещаем только closed и checking
+            if force and task.status in ("closed", "checking"):
                 return None
             employee = await db.get(User, user_id)
             if not employee or not employee.active:
                 return None
+            # Если не принудительно, проверяем команду
             if not force and task.assigned_team and employee.team != task.assigned_team:
                 return None
+            # Назначаем
             task.assigned_to = user_id
             task.assigned_team = employee.team
+            # Устанавливаем статус accepted, если он ещё не accepted
             if task.status == "created":
+                task.status = "accepted"
+            elif force and task.status != "accepted":
                 task.status = "accepted"
             task.updated_at = datetime.utcnow()
             history = TaskHistory(
                 task_id=task.id,
                 user_id=assigned_by,
                 action="ASSIGNED_USER",
-                description=f"Назначен исполнитель: {employee.full_name}",
+                description=f"Назначен исполнитель: {employee.full_name}" + (" (принудительно)" if force else ""),
             )
             db.add(history)
             await db.commit()

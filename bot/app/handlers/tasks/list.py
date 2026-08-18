@@ -33,15 +33,6 @@ async def safe_delete_message(message):
     except Exception:
         pass
 
-def get_navigation_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="⬅️ Назад")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True
-    )
-
 def get_task_list_text(title: str, tasks, page, total_pages, show_assignee=True):
     if not tasks:
         return None
@@ -103,14 +94,12 @@ async def show_list(
             tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
             title = "📋 Все открытые заявки"
         elif list_type == "my":
-            # Показываем только активные (не закрытые) задачи
             tasks = await get_tasks_for_employee(
                 employee.id,
                 limit=1000,
                 offset=0,
-                include_team=False  # только личные задачи
+                include_team=False
             )
-            # Фильтруем закрытые задачи
             tasks = [t for t in tasks if t.status != "closed"]
             title = "📋 Мои активные задачи"
             show_assignee = False
@@ -174,9 +163,9 @@ async def show_list(
         if not tasks_page:
             text = f"{title}\n\nНет записей."
             if isinstance(target, CallbackQuery):
-                await target.message.answer(text, reply_markup=get_navigation_keyboard())
+                await target.message.answer(text, reply_markup=None)
             else:
-                await target.answer(text, reply_markup=get_navigation_keyboard())
+                await target.answer(text, reply_markup=None)
             return
 
         text = get_task_list_text(title, tasks_page, page, total_pages, show_assignee)
@@ -184,10 +173,8 @@ async def show_list(
 
         if isinstance(target, CallbackQuery):
             await target.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
-            await target.message.answer("Выберите действие:", reply_markup=get_navigation_keyboard())
         else:
             await target.answer(text, reply_markup=reply_markup, parse_mode="HTML")
-            await target.answer("Выберите действие:", reply_markup=get_navigation_keyboard())
     except Exception as e:
         print(f"ERROR in show_list: {e}")
         if isinstance(target, CallbackQuery):

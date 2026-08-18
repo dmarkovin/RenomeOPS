@@ -22,15 +22,16 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
     buttons = []
 
     # ====== Кнопка "Взять в работу" ======
-    can_take = False
-    if task.assigned_to is None and employee.team is not None:
-        if task.assigned_team is None or task.assigned_team == employee.team:
+    # Показываем только если исполнитель не назначен (assigned_to is None)
+    if task.assigned_to is None:
+        can_take = False
+        if employee.team is not None:
+            if task.assigned_team is None or task.assigned_team == employee.team:
+                can_take = True
+        if role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
             can_take = True
-    if role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        can_take = True
-
-    if can_take and status not in ("closed", "checking"):
-        buttons.append([InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take:{task_id}")])
+        if can_take and status not in ("closed", "checking", "waiting"):
+            buttons.append([InlineKeyboardButton(text="📥 Взять в работу", callback_data=f"task_take:{task_id}")])
 
     # ====== Если пользователь является исполнителем ======
     if task.assigned_to == employee.id:
@@ -40,7 +41,7 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
         # Возобновить (если статус paused)
         if status == "paused":
             buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
-        # Выполнено (на проверку) – для всех исполнителей, включая технику, клининг, охрану
+        # Выполнено (на проверку) – для всех исполнителей
         if status in ("in_progress", "paused", "accepted"):
             buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task_check_start:{task_id}")])
         # Передать

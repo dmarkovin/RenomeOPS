@@ -162,7 +162,7 @@ async def pause_task(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Вы не исполнитель этой задачи", show_alert=True)
         return
     await state.update_data(task_id=task_id, action="pause")
-    await safe_edit_or_reply(callback, "⏸ Выберите срок ожидания или введите время вручную:", waiting_time_keyboard(task_id))
+    await safe_edit_or_reply(callback, "⏸ Выберите срок ожидания:", waiting_time_keyboard(task_id))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("task_resume:"))
@@ -370,7 +370,7 @@ async def comment_back_to_task(callback: CallbackQuery, state: FSMContext):
     await show_task_card(callback, state)
     await callback.answer()
 
-# ========== История (исправлено: добавлена кнопка "Назад") ==========
+# ========== История (исправлена сортировка: сначала старые) ==========
 @router.callback_query(F.data.startswith("task_history:"))
 async def show_task_history(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -378,6 +378,8 @@ async def show_task_history(callback: CallbackQuery, state: FSMContext):
     if not history:
         await callback.answer("История пуста", show_alert=True)
         return
+    # Переворачиваем: сначала старые записи, потом новые
+    history = list(reversed(history))
     text = f"📜 <b>История задачи #{task_id}</b>\n\n"
     for entry in history[:5]:
         user_name = entry.user.full_name if entry.user else "—"
@@ -403,6 +405,8 @@ async def show_all_history(callback: CallbackQuery, state: FSMContext):
     if not history:
         await callback.answer("История пуста", show_alert=True)
         return
+    # Переворачиваем: сначала старые
+    history = list(reversed(history))
     text = f"📜 <b>Вся история задачи #{task_id}</b>\n\n"
     for entry in history:
         user_name = entry.user.full_name if entry.user else "—"
@@ -569,7 +573,7 @@ async def finish_add_photo(message: Message, state: FSMContext):
     else:
         await message.answer("Возврат в меню.")
 
-# ========== Ожидание (исправлено) ==========
+# ========== Ожидание (исправлено: добавлен комментарий в задачу) ==========
 @router.callback_query(F.data.startswith("task_wait:"))
 async def start_wait(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -589,7 +593,6 @@ async def waiting_time_selected(callback: CallbackQuery, state: FSMContext):
     hours = int(hours_str)
     await state.update_data(task_id=task_id, hours=hours)
     await state.set_state(TaskWaiting.comment)
-    # Удаляем сообщение с выбором времени и показываем запрос комментария
     await safe_delete_message(callback.message)
     await callback.message.answer(
         "✍️ Введите комментарий (обязательно):",
@@ -614,6 +617,8 @@ async def process_wait_comment(message: Message, state: FSMContext):
         await message.answer("Ошибка")
         await state.clear()
         return
+    # Добавляем комментарий в задачу
+    await add_comment(task_id, employee.id, comment)
     wait_until = datetime.utcnow() + timedelta(hours=hours)
     task = await change_status(task_id, "waiting", employee.id, comment, wait_until)
     if task:
@@ -622,7 +627,6 @@ async def process_wait_comment(message: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
         await notify_concierges(f"⏳ Задача #{task_id} отложена до {wait_until.strftime('%d.%m.%Y %H:%M')}. Комментарий: {comment}")
-        # Показываем карточку задачи
         await message.answer(f"📋 Карточка задачи #{task_id}:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Посмотреть заявку", callback_data=f"task:{task_id}")]
         ]))
@@ -636,7 +640,6 @@ async def cancel_wait_comment(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
     if employee:
         await message.answer("❌ Отменено", reply_markup=ReplyKeyboardRemove())
-        # Показываем карточку задачи
         data = await state.get_data()
         task_id = data.get("task_id")
         if task_id:

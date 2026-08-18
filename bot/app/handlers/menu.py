@@ -142,6 +142,25 @@ async def process_team_change_reason(message: Message, state: FSMContext):
 class SettingsStates(StatesGroup):
     notification_settings = State()
 
+def notification_keyboard(settings) -> InlineKeyboardMarkup:
+    buttons = []
+    for setting, label in [
+        ("notify_task_assigned", "Назначение задач"),
+        ("notify_task_status_changed", "Изменение статуса"),
+        ("notify_task_comment", "Комментарии"),
+        ("notify_new_task_team", "Новые задачи команды"),
+        ("notify_checking", "Проверка задач"),
+        ("notify_admin", "Административные"),
+    ]:
+        status = getattr(settings, setting, True)
+        emoji = "✅" if status else "❌"
+        buttons.append([InlineKeyboardButton(
+            text=f"{emoji} {label}",
+            callback_data=f"notif_toggle:{setting}"
+        )])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="notif_back")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 @router.message(F.text == "🔔 Уведомления")
 async def notification_settings(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -152,22 +171,11 @@ async def notification_settings(message: Message, state: FSMContext):
     if not settings:
         await message.answer("Настройки уведомлений не найдены.")
         return
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"{'✅' if getattr(settings, setting, True) else '❌'} {label}",
-            callback_data=f"notif_toggle:{setting}"
-        )]
-        for setting, label in [
-            ("notify_task_assigned", "Назначение задач"),
-            ("notify_task_status_changed", "Изменение статуса"),
-            ("notify_task_comment", "Комментарии"),
-            ("notify_new_task_team", "Новые задачи команды"),
-            ("notify_checking", "Проверка задач"),
-            ("notify_admin", "Административные"),
-        ]
-    ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="notif_back")]])
     await state.set_state(SettingsStates.notification_settings)
-    await message.answer("Настройки уведомлений:", reply_markup=kb)
+    await message.answer(
+        "Настройки уведомлений:",
+        reply_markup=notification_keyboard(settings)
+    )
 
 @router.callback_query(F.data.startswith("notif_toggle:"), StateFilter(SettingsStates.notification_settings))
 async def toggle_notification(callback: CallbackQuery, state: FSMContext):
@@ -183,7 +191,12 @@ async def toggle_notification(callback: CallbackQuery, state: FSMContext):
     current = getattr(settings, setting, True)
     await update_setting(employee.id, setting, not current)
     await callback.answer("✅ Настройка обновлена")
-    await notification_settings(callback.message, state)
+    # Обновляем клавиатуру в текущем сообщении
+    settings = await get_user_settings(employee.id)  # обновляем объект
+    if settings:
+        await callback.message.edit_reply_markup(reply_markup=notification_keyboard(settings))
+    else:
+        await callback.message.edit_text("Ошибка загрузки настроек.")
 
 @router.callback_query(F.data == "notif_back", StateFilter(SettingsStates.notification_settings))
 async def back_from_notifications(callback: CallbackQuery, state: FSMContext):
