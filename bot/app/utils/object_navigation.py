@@ -1,6 +1,5 @@
 from typing import Dict, List, Tuple, Union
 
-# Общие зоны для первого этажа (каждая зона имеет уникальный ID внутри подъезда)
 COMMON_AREAS = {
     "building1_entrance1": [
         (1, "Ресепшен"),
@@ -63,7 +62,7 @@ def get_common_area_name(building_id: int, entrance: int, area_id: int) -> str:
     return None
 
 OBJECT_DATA = {
-    1: {  # Корпус 1 (Новослободская 24астр1)
+    1: {
         "name": "Новослободская 24астр1",
         "entrances": {
             1: {
@@ -80,7 +79,7 @@ OBJECT_DATA = {
         "parking_floors": [-1],
         "cellars": 35,
     },
-    2: {  # Корпус 2 (Новослободская 24астр2)
+    2: {
         "name": "Новослободская 24астр2",
         "entrances": {
             1: {

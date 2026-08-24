@@ -54,8 +54,10 @@ def parking_floor_keyboard(building_id: int, floors: List[int]) -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def parking_spot_keyboard(building_id: int, floor: int, spots: List[int], offset: int = 0) -> InlineKeyboardMarkup:
-    buttons = []
+    print(f"DEBUG parking_spot_keyboard: building={building_id}, floor={floor}, offset={offset}, len(spots)={len(spots)}")
     page_spots = spots[offset:offset+20]
+    print(f"DEBUG parking_spot_keyboard: page_spots={page_spots}")
+    buttons = []
     for spot in page_spots:
         buttons.append([InlineKeyboardButton(text=f"🚗 Место {spot}", callback_data=f"obj_parking_spot:{building_id}:{floor}:{spot}")])
     nav_buttons = []
@@ -70,8 +72,10 @@ def parking_spot_keyboard(building_id: int, floor: int, spots: List[int], offset
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def cellar_keyboard(building_id: int, cellars: List[int], offset: int = 0) -> InlineKeyboardMarkup:
-    buttons = []
+    print(f"DEBUG cellar_keyboard: building={building_id}, offset={offset}, len(cellars)={len(cellars)}")
     page_cellars = cellars[offset:offset+20]
+    print(f"DEBUG cellar_keyboard: page_cellars={page_cellars}")
+    buttons = []
     for cellar in page_cellars:
         buttons.append([InlineKeyboardButton(text=f"🔐 Келлер {cellar}", callback_data=f"obj_cellar:{building_id}:{cellar}")])
     nav_buttons = []

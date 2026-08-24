@@ -40,6 +40,12 @@ class TaskCreate(StatesGroup):
     enter_media = State()
     confirm = State()
 
+async def safe_delete_message(message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
 @router.message(F.text == "➕ Создать заявку")
 async def start_create_task(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -168,13 +174,11 @@ async def process_parking_floor(callback: CallbackQuery, state: FSMContext):
     _, building_str, floor_str = callback.data.split(":")
     building = int(building_str)
     floor = int(floor_str)
-    print(f"DEBUG parking_floor: building={building}, floor={floor}")
-    await state.update_data(parking_floor=floor, parking_offset=0)  # сброс offset
+    await state.update_data(parking_floor=floor, parking_offset=0)
     spots = get_parking_spots(building, floor)
-    print(f"DEBUG parking_floor: spots len={len(spots)}")
     await state.set_state(TaskCreate.select_parking_spot)
     await callback.message.edit_text(
-        f"🚗 Выберите машиноместо на этаже {floor} (показаны первые 20):",
+        f"🚗 Выберите машиноместо на этаже {floor} (страница 1):",
         reply_markup=parking_spot_keyboard(building, floor, spots, 0)
     )
     await callback.answer()
@@ -202,16 +206,34 @@ async def parking_more(callback: CallbackQuery, state: FSMContext):
     building = int(building_str)
     floor = int(floor_str)
     offset = int(offset_str)
-    print(f"DEBUG parking_more: building={building}, floor={floor}, offset={offset}")
     spots = get_parking_spots(building, floor)
     next_spots = spots[offset:offset+20]
     if not next_spots:
         await callback.answer("Больше нет мест", show_alert=True)
         return
-    await state.update_data(parking_offset=offset+20)
-    kb = parking_spot_keyboard(building, floor, spots, offset+20)
-    await callback.message.edit_text(
-        f"🚗 Выберите машиноместо на этаже {floor} (показаны места {offset+1}-{offset+len(next_spots)}):",
+    page_num = offset // 20 + 1
+    await safe_delete_message(callback.message)
+    kb = parking_spot_keyboard(building, floor, spots, offset)
+    await callback.message.answer(
+        f"🚗 Выберите машиноместо на этаже {floor} (страница {page_num}):",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_parking_spot), F.data.startswith("obj_parking_back:"))
+async def parking_back(callback: CallbackQuery, state: FSMContext):
+    _, building_str, floor_str, offset_str = callback.data.split(":")
+    building = int(building_str)
+    floor = int(floor_str)
+    offset = int(offset_str)
+    spots = get_parking_spots(building, floor)
+    if offset < 0:
+        offset = 0
+    page_num = offset // 20 + 1
+    await safe_delete_message(callback.message)
+    kb = parking_spot_keyboard(building, floor, spots, offset)
+    await callback.message.answer(
+        f"🚗 Выберите машиноместо на этаже {floor} (страница {page_num}):",
         reply_markup=kb
     )
     await callback.answer()
@@ -252,10 +274,28 @@ async def cellar_more(callback: CallbackQuery, state: FSMContext):
     if not next_cellars:
         await callback.answer("Больше нет келлеров", show_alert=True)
         return
-    await state.update_data(cellar_offset=offset+20)
-    kb = cellar_keyboard(building, cellars, offset+20)
-    await callback.message.edit_text(
-        f"🔐 Выберите келлер для корпуса {building} (показаны {offset+1}-{offset+len(next_cellars)}):",
+    page_num = offset // 20 + 1
+    await safe_delete_message(callback.message)
+    kb = cellar_keyboard(building, cellars, offset)
+    await callback.message.answer(
+        f"🔐 Выберите келлер для корпуса {building} (страница {page_num}):",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_cellar), F.data.startswith("obj_cellar_back:"))
+async def cellar_back(callback: CallbackQuery, state: FSMContext):
+    _, building_str, offset_str = callback.data.split(":")
+    building = int(building_str)
+    offset = int(offset_str)
+    if offset < 0:
+        offset = 0
+    cellars = get_cellars(building)
+    page_num = offset // 20 + 1
+    await safe_delete_message(callback.message)
+    kb = cellar_keyboard(building, cellars, offset)
+    await callback.message.answer(
+        f"🔐 Выберите келлер для корпуса {building} (страница {page_num}):",
         reply_markup=kb
     )
     await callback.answer()
