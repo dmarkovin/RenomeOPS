@@ -18,7 +18,7 @@ from app.metrics import tasks_created_total, tasks_closed_total
 
 
 # ==========================
-# Допустимые переходы статусов (исправлено: добавлены переходы в waiting)
+# Допустимые переходы статусов
 # ==========================
 STATUS_TRANSITIONS = {
     'created': ['accepted', 'waiting', 'paused', 'closed'],
@@ -274,7 +274,7 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
 
 
 # ==========================
-# Назначение на команду (с принудительным)
+# Назначение на команду (с принудительным и подгрузкой)
 # ==========================
 async def assign_task_to_team(task_id: int, team: Team, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
@@ -299,11 +299,23 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int, force:
             )
             db.add(history)
             await db.commit()
-            return task
+        # Подгружаем связанные данные для корректного отображения в клавиатуре
+        task = await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.comments),
+                selectinload(Task.photos),
+                selectinload(Task.history).selectinload(TaskHistory.user),
+            )
+        )
+        return task.scalar_one_or_none()
 
 
 # ==========================
-# Назначение на конкретного сотрудника (с принудительным)
+# Назначение на конкретного сотрудника (с принудительным и подгрузкой)
 # ==========================
 async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
@@ -335,7 +347,19 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
             )
             db.add(history)
             await db.commit()
-            return task
+        # Подгружаем связанные данные
+        task = await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.comments),
+                selectinload(Task.photos),
+                selectinload(Task.history).selectinload(TaskHistory.user),
+            )
+        )
+        return task.scalar_one_or_none()
 
 
 # ==========================
@@ -369,7 +393,19 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
             )
             db.add(history)
             await db.commit()
-            return task
+        # Подгружаем связанные данные для отображения
+        task = await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.comments),
+                selectinload(Task.photos),
+                selectinload(Task.history).selectinload(TaskHistory.user),
+            )
+        )
+        return task.scalar_one_or_none()
 
 
 # ==========================
@@ -407,7 +443,19 @@ async def transfer_task(
             )
             db.add(history)
             await db.commit()
-            return task
+        # Подгружаем связанные данные
+        task = await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.comments),
+                selectinload(Task.photos),
+                selectinload(Task.history).selectinload(TaskHistory.user),
+            )
+        )
+        return task.scalar_one_or_none()
 
 
 # ==========================
@@ -452,7 +500,19 @@ async def change_status(
             )
             db.add(history)
             await db.commit()
-            return task
+        # Подгружаем связанные данные для отображения
+        task = await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.comments),
+                selectinload(Task.photos),
+                selectinload(Task.history).selectinload(TaskHistory.user),
+            )
+        )
+        return task.scalar_one_or_none()
 
 
 # ==========================
