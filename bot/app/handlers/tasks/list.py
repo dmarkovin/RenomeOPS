@@ -13,6 +13,7 @@ from app.services.tasks.service import (
     get_paid_closed_tasks,
     get_regular_closed_tasks,
     take_task,
+    search_tasks,
 )
 from app.database.models import UserRole
 from app.keyboards.tasks import (
@@ -381,6 +382,7 @@ async def back_to_main_menu(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
 
+# ========== Поиск по заявкам (с разделением на активные/выполненные) ==========
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -388,28 +390,130 @@ async def start_search(message: Message, state: FSMContext):
         await message.answer("Только для администратора, консьержа и директора.")
         return
     await state.set_state(TaskSearch.query)
-    await message.answer("Введите текст для поиска (ID, название, исполнитель):")
+    await message.answer(
+        "Введите текст для поиска:\n"
+        "#ID – поиск по номеру заявки\n"
+        "Цифры – поиск по квартире или ID\n"
+        "Текст – поиск по названию, описанию, исполнителю"
+    )
 
 @router.message(TaskSearch.query)
 async def process_search(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+        await message.answer("У вас нет прав для поиска.")
+        await state.clear()
+        return
     query = message.text.strip()
-    if len(query) < 2:
+    if len(query) < 2 and not query.startswith('#'):
         await message.answer("Введите минимум 2 символа.")
         return
-    from app.services.tasks.service import search_tasks
-    tasks = await search_tasks(query, limit=20)
-    if not tasks:
+
+    # Ищем открытые задачи
+    open_tasks = await search_tasks(query, limit=50)
+    # Фильтруем только активные (не closed)
+    active_tasks = [t for t in open_tasks if t.status != "closed"]
+    # Выполненные задачи
+    completed_tasks = [t for t in open_tasks if t.status == "closed"]
+
+    if not active_tasks and not completed_tasks:
         await message.answer("Ничего не найдено.")
         await state.clear()
         return
-    text = "🔍 Результаты поиска:\n\n"
-    for task in tasks:
+
+    # Отображаем активные задачи
+    if active_tasks:
+        text = "🔍 Результаты поиска (активные заявки):\n\n"
+        buttons = []
+        for task in active_tasks[:10]:
+            status_emoji = get_task_status_emoji(task.status)
+            priority_emoji = get_priority_emoji(task.priority)
+            assign_emoji = "👤" if task.assigned_to else ("👥" if task.assigned_team else "❓")
+            apartment = f" кв.{task.apartment}" if task.apartment else ""
+            label = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apartment} {task.title[:25]}"
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"task:{task.id}")])
+        if completed_tasks:
+            buttons.append([InlineKeyboardButton(text="📜 Выполненные заявки", callback_data=f"search_completed_tasks:{query}")])
+        buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="tasks_back")])
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await message.answer(text, reply_markup=kb)
+    else:
+        # Если активных нет, но есть выполненные – показываем их сразу
+        text = "🔍 Результаты поиска (выполненные заявки):\n\n"
+        buttons = []
+        for task in completed_tasks[:10]:
+            status_emoji = "✅"
+            priority_emoji = get_priority_emoji(task.priority)
+            assign_emoji = "👤" if task.assigned_to else ("👥" if task.assigned_team else "❓")
+            apartment = f" кв.{task.apartment}" if task.apartment else ""
+            label = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apartment} {task.title[:25]}"
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"task:{task.id}")])
+        buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="tasks_back")])
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await message.answer(text, reply_markup=kb)
+
+    await state.clear()
+
+# ========== Поиск выполненных заявок ==========
+@router.callback_query(F.data.startswith("search_completed_tasks:"))
+async def search_completed_tasks(callback: CallbackQuery):
+    query = callback.data.split(":", 1)[1]
+    employee = await get_employee(callback.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+        await callback.answer("Нет прав", show_alert=True)
+        return
+    # Ищем все задачи по запросу и фильтруем выполненные
+    tasks = await search_tasks(query, limit=50)
+    completed_tasks = [t for t in tasks if t.status == "closed"]
+
+    if not completed_tasks:
+        await callback.message.edit_text("Нет выполненных заявок.")
+        await callback.answer()
+        return
+
+    text = "📜 Результаты поиска (выполненные заявки):\n\n"
+    buttons = []
+    for task in completed_tasks[:10]:
+        status_emoji = "✅"
+        priority_emoji = get_priority_emoji(task.priority)
+        assign_emoji = "👤" if task.assigned_to else ("👥" if task.assigned_team else "❓")
+        apartment = f" кв.{task.apartment}" if task.apartment else ""
+        label = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apartment} {task.title[:25]}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"task:{task.id}")])
+
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад к активным", callback_data=f"search_active_tasks:{query}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="tasks_back")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("search_active_tasks:"))
+async def search_active_tasks(callback: CallbackQuery):
+    query = callback.data.split(":", 1)[1]
+    employee = await get_employee(callback.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+        await callback.answer("Нет прав", show_alert=True)
+        return
+    tasks = await search_tasks(query, limit=50)
+    active_tasks = [t for t in tasks if t.status != "closed"]
+
+    if not active_tasks:
+        await callback.message.edit_text("Активных заявок не найдено.")
+        await callback.answer()
+        return
+
+    text = "🔍 Результаты поиска (активные заявки):\n\n"
+    buttons = []
+    for task in active_tasks[:10]:
         status_emoji = get_task_status_emoji(task.status)
         priority_emoji = get_priority_emoji(task.priority)
-        priority_name = get_priority_name(task.priority)
-        assignee_name = task.assignee.full_name if task.assignee else "не назначен"
-        paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
-        text += f"{status_emoji} {priority_emoji} #{task.id} **{paid_marker}{task.title[:30]}**\n"
-        text += f"   Приоритет: {priority_name} | Исполнитель: {assignee_name}\n\n"
-    await message.answer(text, parse_mode="HTML")
-    await state.clear()
+        assign_emoji = "👤" if task.assigned_to else ("👥" if task.assigned_team else "❓")
+        apartment = f" кв.{task.apartment}" if task.apartment else ""
+        label = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apartment} {task.title[:25]}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"task:{task.id}")])
+
+    buttons.append([InlineKeyboardButton(text="📜 Выполненные заявки", callback_data=f"search_completed_tasks:{query}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="tasks_back")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()

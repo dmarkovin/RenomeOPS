@@ -18,11 +18,11 @@ from app.metrics import tasks_created_total, tasks_closed_total
 
 
 # ==========================
-# Допустимые переходы статусов (исправлено: добавлены переходы в waiting)
+# Допустимые переходы статусов
 # ==========================
 STATUS_TRANSITIONS = {
     'created': ['accepted', 'waiting', 'paused', 'closed'],
-    'waiting': ['accepted', 'paused', 'closed', 'in_progress'],  # можно вернуть в работу
+    'waiting': ['accepted', 'paused', 'closed', 'in_progress'],
     'accepted': ['in_progress', 'waiting', 'paused', 'closed'],
     'in_progress': ['checking', 'waiting', 'paused', 'closed'],
     'checking': ['closed', 'in_progress'],
@@ -272,24 +272,28 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
 
 
 # ==========================
-# Назначение на команду
+# Назначение на команду (с принудительным)
 # ==========================
-async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Optional[Task]:
+async def assign_task_to_team(task_id: int, team: Team, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
         async with db.begin():
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            if task.status not in ('created', 'waiting'):
+            if not force and task.status not in ('created', 'waiting'):
+                return None
+            if force and task.status in ("closed", "checking"):
                 return None
             task.assigned_team = team
             task.assigned_to = None
+            if force and task.status != "accepted":
+                task.status = "accepted"
             task.updated_at = datetime.utcnow()
             history = TaskHistory(
                 task_id=task.id,
                 user_id=assigned_by,
                 action="ASSIGNED_TEAM",
-                description=f"Задача назначена на команду {team.value}",
+                description=f"Задача назначена на команду {team.value}" + (" (принудительно)" if force else ""),
             )
             db.add(history)
             await db.commit()
@@ -297,7 +301,7 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
 
 
 # ==========================
-# Назначение на конкретного сотрудника (с принудительным назначением)
+# Назначение на конкретного сотрудника (с принудительным)
 # ==========================
 async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
@@ -305,21 +309,17 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            # Если не принудительно, разрешаем только для статусов created и waiting
             if not force and task.status not in ("created", "waiting"):
                 return None
-            # Если принудительно, запрещаем только для closed и checking
             if force and task.status in ("closed", "checking"):
                 return None
             employee = await db.get(User, user_id)
             if not employee or not employee.active:
                 return None
-            # Если не принудительно, проверяем команду
             if not force and task.assigned_team and employee.team != task.assigned_team:
                 return None
             task.assigned_to = user_id
             task.assigned_team = employee.team
-            # Устанавливаем статус accepted, если задача была создана или ожидает
             if task.status == "created":
                 task.status = "accepted"
             elif force and task.status != "accepted":
@@ -683,11 +683,29 @@ async def get_team_tasks(
 
 
 async def search_tasks(query: str, limit: int = 20) -> List[Task]:
+    """Поиск задач по ID, названию, описанию, исполнителю или квартире"""
     async with AsyncSessionLocal() as db:
-        if query.isdigit():
+        # Если запрос начинается с #, ищем по ID
+        if query.startswith('#'):
+            try:
+                task_id = int(query[1:])
+                task = await db.get(Task, task_id)
+                if task:
+                    return [task]
+            except ValueError:
+                pass
+        # Если запрос — цифры, ищем по ID или квартире
+        elif query.isdigit():
             task = await db.get(Task, int(query))
             if task:
                 return [task]
+            # Ищем по квартире
+            stmt = select(Task).where(Task.apartment == int(query))
+            result = await db.execute(stmt)
+            tasks = result.scalars().all()
+            if tasks:
+                return tasks[:limit]
+        # Общий поиск
         stmt = select(Task).where(
             or_(
                 Task.title.ilike(f"%{query}%"),

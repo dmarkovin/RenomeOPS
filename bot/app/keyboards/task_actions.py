@@ -22,7 +22,6 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
     buttons = []
 
     # ====== Кнопка "Взять в работу" ======
-    # Показываем только если исполнитель не назначен (assigned_to is None)
     if task.assigned_to is None:
         can_take = False
         if employee.team is not None:
@@ -35,16 +34,12 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
 
     # ====== Если пользователь является исполнителем ======
     if task.assigned_to == employee.id:
-        # Приостановить (если статус позволяет)
         if status in ("accepted", "in_progress"):
             buttons.append([InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"task_pause:{task_id}")])
-        # Возобновить (если статус paused или waiting)
         if status in ("paused", "waiting"):
             buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
-        # Выполнено (на проверку) – для всех исполнителей, включая статус waiting
         if status in ("in_progress", "paused", "accepted", "waiting"):
             buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task_check_start:{task_id}")])
-        # Передать
         if status != "closed":
             buttons.append([InlineKeyboardButton(text="↗️ Передать", callback_data=f"task_transfer:{task_id}")])
 
@@ -62,13 +57,26 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
         if status == "waiting":
             buttons.append([InlineKeyboardButton(text="🔄 Вернуть в работу", callback_data=f"task_status:{task_id}:start")])
 
-    # ====== Общие кнопки ======
+    # ====== Общие кнопки со счётчиками ======
+    comment_count = len(task.comments) if task.comments else 0
+    photo_count = len(task.photos) if task.photos else 0
+    video_count = len(task.video_ids) if task.video_ids else 0
+
     buttons.append([
-        InlineKeyboardButton(text="💬 Комментарии", callback_data=f"task_comment_list:{task_id}"),
-        InlineKeyboardButton(text="📷 Фото", callback_data=f"task_photo:{task_id}"),
+        InlineKeyboardButton(
+            text=f"💬 Комментарии ({comment_count})",
+            callback_data=f"task_comment_list:{task_id}"
+        ),
+        InlineKeyboardButton(
+            text=f"📷 Фото ({photo_count})",
+            callback_data=f"task_photo:{task_id}"
+        ),
     ])
     buttons.append([
-        InlineKeyboardButton(text="📹 Видео", callback_data=f"task_video:{task_id}"),
+        InlineKeyboardButton(
+            text=f"📹 Видео ({video_count})",
+            callback_data=f"task_video:{task_id}"
+        ),
         InlineKeyboardButton(text="📜 История", callback_data=f"task_history:{task_id}"),
     ])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="tasks_back")])

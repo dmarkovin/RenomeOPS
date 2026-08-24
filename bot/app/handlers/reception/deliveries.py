@@ -324,6 +324,25 @@ async def show_delivery_card(callback: CallbackQuery):
     await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
+# ========== Фото ==========
+@router.callback_query(F.data.startswith("delivery_photo:"))
+async def delivery_show_photos(callback: CallbackQuery):
+    delivery_id = int(callback.data.split(":")[1])
+    d = await get_delivery(delivery_id)
+    if not d or not d.photo_ids:
+        await callback.answer("Нет фото", show_alert=True)
+        return
+    await safe_delete_message(callback.message)
+    for photo_id in d.photo_ids:
+        await callback.message.answer_photo(photo_id)
+    await callback.message.answer(
+        "⬅️ Назад",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к карточке", callback_data=f"delivery:{delivery_id}")]
+        ])
+    )
+    await callback.answer()
+
 # ========== Действия ==========
 @router.callback_query(F.data.startswith("delivery_receive:"))
 async def delivery_receive(callback: CallbackQuery):
@@ -459,7 +478,7 @@ async def delivery_history(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== Назад ==========
+# ========== Назад (с сохранением контекста) ==========
 @router.callback_query(F.data == "delivery_back")
 async def delivery_back(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()

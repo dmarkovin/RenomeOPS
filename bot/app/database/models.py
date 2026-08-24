@@ -102,7 +102,7 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
-    video_ids = Column(MutableList.as_mutable(JSON), default=list)
+    video_ids = Column(MutableList.as_mutable(JSON), default=list)  # исправлено
     __table_args__ = (
         Index("ix_tasks_status", "status"),
         Index("ix_tasks_assigned_to", "assigned_to"),

@@ -438,7 +438,7 @@ async def list_history(message: Message, state: FSMContext, page: int = 1):
     sent = await message.answer(text, reply_markup=pass_list_keyboard(passes_page, page, total_pages))
     await state.update_data(pass_message_id=sent.message_id, pass_chat_id=sent.chat.id)
 
-# ========== Поиск (исправлено) ==========
+# ========== Поиск ==========
 @router.message(F.text == "🔍 Поиск по пропускам")
 async def start_search_pass(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
@@ -463,7 +463,6 @@ async def process_search_pass(message: Message, state: FSMContext):
         await message.answer("Введите минимум 2 символа.")
         return
 
-    # Ищем активные пропуска (status = 'active')
     passes = await search_passes(query, limit=50, status="active")
     if not passes:
         await message.answer("Ничего не найдено.")
@@ -484,7 +483,6 @@ async def process_search_pass(message: Message, state: FSMContext):
         label += f" | {p.purpose or '—'}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"pass:{p.id}")])
 
-    # Кнопка "Выполненные пропуска"
     buttons.append([InlineKeyboardButton(text="📜 Выполненные пропуска", callback_data=f"search_completed:{query}")])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="pass_menu_back")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -499,8 +497,7 @@ async def search_completed_passes(callback: CallbackQuery):
     if not employee or employee.role not in (UserRole.ADMIN, UserRole.DIRECTOR, UserRole.CONCIERGE, UserRole.SECURITY):
         await callback.answer("Нет прав", show_alert=True)
         return
-    # Ищем выполненные пропуска: статусы 'completed' и 'expired'
-    passes = await search_passes(query, limit=50, status=None)  # получим все, затем отфильтруем
+    passes = await search_passes(query, limit=50, status=None)
     completed_passes = [p for p in passes if p.status in ("completed", "expired")]
     if not completed_passes:
         await callback.message.edit_text("Нет выполненных пропусков.")

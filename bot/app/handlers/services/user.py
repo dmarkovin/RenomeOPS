@@ -1,11 +1,11 @@
 from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
 
 from app.services.employees.service import get_employee, get_employee_by_id
-from app.services.services.service import get_all_services, get_service, create_service_order, get_user_orders
+from app.services.services.service import get_all_services, get_service, create_service_order, get_user_orders, get_order
 from app.services.tasks.service import get_available_employees, get_teams_with_members
 from app.database.models import UserRole, Team
 from app.keyboards.services import service_catalog_keyboard
@@ -377,7 +377,15 @@ async def confirm_create_order(message: Message, state: FSMContext):
         elif data.get("assigned_team"):
             await notify_team(data["assigned_team"], f"📢 Новая платная услуга #{order.id} назначена на вашу команду.")
         await notify_admins(f"📢 Создан новый заказ услуги #{order.id} от {employee.full_name}.")
-        await message.answer(f"✅ Заказ #{order.id} создан!", reply_markup=main_menu_keyboard(employee.role))
+        await message.answer(
+            f"✅ Заказ #{order.id} создан!",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="👁️ Посмотреть заказ", callback_data=f"service_order_view:{order.id}")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                ]
+            )
+        )
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
         await state.clear()
@@ -405,6 +413,30 @@ async def show_user_orders(message: Message):
         text += f"ID: {o.id} | Услуга: {service_name} | Статус: {o.status} | {o.created_at.strftime('%d.%m.%Y %H:%M')}\n"
     await message.answer(text)
 
+# ========== Просмотр заказа ==========
+@router.callback_query(F.data.startswith("service_order_view:"))
+async def view_service_order(callback: CallbackQuery):
+    order_id = int(callback.data.split(":")[1])
+    order = await get_order(order_id)
+    if not order:
+        await callback.answer("Заказ не найден", show_alert=True)
+        return
+    service = await get_service(order.service_id)
+    service_name = service.name if service else "Неизвестно"
+    text = (
+        f"📦 Заказ #{order.id}\n"
+        f"Услуга: {service_name}\n"
+        f"Статус: {order.status}\n"
+        f"Локация: {order.building or '—'}, {order.apartment or '—'}\n"
+        f"Комментарий: {order.comment or '—'}\n"
+        f"Создан: {order.created_at.strftime('%d.%m.%Y %H:%M')}"
+    )
+    await callback.message.delete()
+    await callback.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="service_back")]
+    ]))
+    await callback.answer()
+
 # ========== ОБРАБОТЧИК КНОПКИ "НАЗАД" ==========
 @router.callback_query(F.data == "service_back")
 async def service_back(callback: CallbackQuery, state: FSMContext):
@@ -413,7 +445,6 @@ async def service_back(callback: CallbackQuery, state: FSMContext):
     if not employee:
         await callback.answer("Ошибка", show_alert=True)
         return
-    # Возвращаем в главное меню
     await callback.message.delete()
     await callback.message.answer(
         "Главное меню:",

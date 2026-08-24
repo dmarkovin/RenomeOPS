@@ -87,7 +87,6 @@ async def search_passes(query: str, limit: int = 20, status: str = None) -> List
         stmt = select(Pass).options(selectinload(Pass.creator), selectinload(Pass.assignee))
         if status:
             stmt = stmt.where(Pass.status == status)
-        # Если запрос начинается с #, ищем по ID
         if query.startswith('#'):
             try:
                 pass_id = int(query[1:])
@@ -95,7 +94,6 @@ async def search_passes(query: str, limit: int = 20, status: str = None) -> List
             except ValueError:
                 pass
         elif query.isdigit():
-            # Ищем по квартире или ID
             stmt = stmt.where(
                 or_(
                     Pass.apartment == int(query),

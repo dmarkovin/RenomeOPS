@@ -69,7 +69,9 @@ async def assign_to_team(callback: CallbackQuery):
     if not admin:
         await callback.answer("Ошибка", show_alert=True)
         return
-    task = await assign_task_to_team(task_id, team, admin.id)
+    # Принудительное назначение для админа/консьержа/директора
+    force = admin.role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR)
+    task = await assign_task_to_team(task_id, team, admin.id, force=force)
     if not task:
         await callback.answer("Ошибка назначения", show_alert=True)
         return
@@ -112,8 +114,6 @@ async def assign_employee(callback: CallbackQuery):
     if not admin:
         await callback.answer("Ошибка", show_alert=True)
         return
-    
-    # Для администратора/консьержа/директора разрешаем принудительное назначение (force=True)
     force = admin.role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR)
     task = await assign_task_to_user(task_id, emp_id, admin.id, force=force)
     if not task:

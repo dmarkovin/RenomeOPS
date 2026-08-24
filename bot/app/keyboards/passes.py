@@ -44,7 +44,7 @@ def pass_list_keyboard(passes: List[Pass], page: int, total_pages: int) -> Inlin
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def pass_action_keyboard(pass_id: int, status: str, user_role: str, checked_in: bool = False, checked_out: bool = False) -> InlineKeyboardMarkup:
+def pass_action_keyboard(pass_id: int, status: str, user_role: str, checked_in: bool = False, checked_out: bool = False, comment_count: int = 0, photo_count: int = 0) -> InlineKeyboardMarkup:
     buttons = []
     # Кнопка въезда/выезда/выполнено
     if status == "active":
@@ -68,9 +68,16 @@ def pass_action_keyboard(pass_id: int, status: str, user_role: str, checked_in: 
     if status not in ("completed", "expired") and user_role in ("CONCIERGE", "ADMIN", "DIRECTOR"):
         buttons.append([InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"pass_close:{pass_id}")])
 
-    # Комментарии и история
+    # Комментарии, фото, история со счётчиками
     buttons.append([
-        InlineKeyboardButton(text="💬 Комментарии", callback_data=f"pass_comment_menu:{pass_id}"),
+        InlineKeyboardButton(
+            text=f"💬 Комментарии ({comment_count})",
+            callback_data=f"pass_comment_menu:{pass_id}"
+        ),
+        InlineKeyboardButton(
+            text=f"📷 Фото ({photo_count})",
+            callback_data=f"pass_photo:{pass_id}"
+        ),
         InlineKeyboardButton(text="📜 История", callback_data=f"pass_history:{pass_id}"),
     ])
     buttons.append([InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="pass_back")])
