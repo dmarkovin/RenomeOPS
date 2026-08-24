@@ -3,7 +3,7 @@ from .start import router as start_router
 from .menu import router as menu_router
 from .employees import router as employees_router
 from .tasks import router as tasks_router
-from .services import router as services_router          # теперь раньше object_navigation
+from .services import router as services_router
 from .object_navigation import router as object_navigation_router
 from .reception.deliveries import router as deliveries_router
 from .reception.keys import router as keys_router
@@ -15,7 +15,7 @@ routers = [
     start_router,
     menu_router,
     employees_router,
-    tasks_router,
+    tasks_router,          # tasks_router идёт раньше object_navigation_router
     services_router,
     object_navigation_router,
     deliveries_router,

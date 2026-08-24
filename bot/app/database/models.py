@@ -19,9 +19,6 @@ import enum
 
 Base = declarative_base()
 
-# ===========================
-# Роли сотрудников
-# ===========================
 class UserRole(str, enum.Enum):
     ADMIN = "ADMIN"
     DIRECTOR = "DIRECTOR"
@@ -30,9 +27,6 @@ class UserRole(str, enum.Enum):
     CLEANER = "CLEANER"
     SECURITY = "SECURITY"
 
-# ===========================
-# Команды
-# ===========================
 class Team(str, enum.Enum):
     TEAM_TECH = "TEAM_TECH"
     TEAM_CLEANING = "TEAM_CLEANING"
@@ -41,9 +35,6 @@ class Team(str, enum.Enum):
     ADMIN_TEAM = "ADMIN_TEAM"
     DIRECTOR_TEAM = "DIRECTOR_TEAM"
 
-# ===========================
-# Статусы задач
-# ===========================
 class TaskStatus(str, enum.Enum):
     CREATED = "created"
     ACCEPTED = "accepted"
@@ -53,9 +44,6 @@ class TaskStatus(str, enum.Enum):
     WAITING = "waiting"
     PAUSED = "paused"
 
-# ===========================
-# Пользователь
-# ===========================
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -70,9 +58,6 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     registered_at = Column(DateTime, nullable=True)
 
-# ===========================
-# Задача
-# ===========================
 class Task(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -87,6 +72,7 @@ class Task(Base):
     parking_level = Column(Integer, nullable=True)
     parking_spot = Column(Integer, nullable=True)
     cellar = Column(Integer, nullable=True)
+    common_area = Column(String(255), nullable=True)  # добавлено
     applicant_type = Column(String(20), nullable=True)
     applicant_name = Column(String(255), nullable=True)
     applicant_phone = Column(String(20), nullable=True)
@@ -102,7 +88,7 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
-    video_ids = Column(MutableList.as_mutable(JSON), default=list)  # исправлено
+    video_ids = Column(MutableList.as_mutable(JSON), default=list)
     __table_args__ = (
         Index("ix_tasks_status", "status"),
         Index("ix_tasks_assigned_to", "assigned_to"),
@@ -118,9 +104,6 @@ class Task(Base):
     photos = relationship("TaskPhoto", back_populates="task", cascade="all, delete-orphan")
     service_order = relationship("ServiceOrder", foreign_keys=[service_order_id])
 
-# ===========================
-# Комментарии
-# ===========================
 class Comment(Base):
     __tablename__ = "comments"
     id = Column(Integer, primary_key=True)
@@ -131,9 +114,6 @@ class Comment(Base):
     task = relationship("Task", back_populates="comments")
     author = relationship("User")
 
-# ===========================
-# Фото
-# ===========================
 class TaskPhoto(Base):
     __tablename__ = "task_photos"
     id = Column(Integer, primary_key=True)
@@ -143,9 +123,6 @@ class TaskPhoto(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     task = relationship("Task", back_populates="photos")
 
-# ===========================
-# История изменений
-# ===========================
 class TaskHistory(Base):
     __tablename__ = "task_history"
     id = Column(Integer, primary_key=True)
@@ -157,9 +134,6 @@ class TaskHistory(Base):
     task = relationship("Task", back_populates="history")
     user = relationship("User", foreign_keys=[user_id])
 
-# ===========================
-# Платные услуги
-# ===========================
 class Service(Base):
     __tablename__ = "services"
     id = Column(Integer, primary_key=True)
@@ -190,9 +164,6 @@ class ServiceOrder(Base):
     service = relationship("Service")
     user = relationship("User")
 
-# ===========================
-# Пропуска
-# ===========================
 class Pass(Base):
     __tablename__ = "passes"
     id = Column(Integer, primary_key=True)
@@ -219,9 +190,6 @@ class Pass(Base):
     assignee = relationship("User", foreign_keys=[assigned_to])
     __table_args__ = (Index("ix_passes_status", "status"),)
 
-# ===========================
-# Доставка (Ресепшен)
-# ===========================
 class Delivery(Base):
     __tablename__ = "deliveries"
     id = Column(Integer, primary_key=True)
@@ -238,9 +206,6 @@ class Delivery(Base):
     creator = relationship("User", foreign_keys=[created_by])
     __table_args__ = (Index("ix_deliveries_status", "status"),)
 
-# ===========================
-# Ключи (Ресепшен) – оставляем, но не используем в меню
-# ===========================
 class Key(Base):
     __tablename__ = "keys"
     id = Column(Integer, primary_key=True)
@@ -261,9 +226,6 @@ class Key(Base):
     creator = relationship("User", foreign_keys=[created_by])
     __table_args__ = (Index("ix_keys_status", "status"),)
 
-# ===========================
-# Документы (Ресепшен) – оставляем, но не используем в меню
-# ===========================
 class Document(Base):
     __tablename__ = "documents"
     id = Column(Integer, primary_key=True)
@@ -287,9 +249,6 @@ class Document(Base):
     creator = relationship("User", foreign_keys=[created_by])
     __table_args__ = (Index("ix_documents_status", "status"),)
 
-# ===========================
-# Обходы (охрана)
-# ===========================
 class Patrol(Base):
     __tablename__ = "patrols"
     id = Column(Integer, primary_key=True)
@@ -308,9 +267,6 @@ class Patrol(Base):
     task = relationship("Task", foreign_keys=[task_id])
     __table_args__ = (Index("ix_patrols_status", "status"),)
 
-# ===========================
-# Настройки уведомлений пользователя
-# ===========================
 class UserSettings(Base):
     __tablename__ = "user_settings"
     id = Column(Integer, primary_key=True)

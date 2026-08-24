@@ -17,9 +17,6 @@ from app.database.models import (
 from app.metrics import tasks_created_total, tasks_closed_total
 
 
-# ==========================
-# Допустимые переходы статусов
-# ==========================
 STATUS_TRANSITIONS = {
     'created': ['accepted', 'waiting', 'paused', 'closed'],
     'waiting': ['accepted', 'paused', 'closed', 'in_progress'],
@@ -34,9 +31,6 @@ def can_transition(old_status: str, new_status: str) -> bool:
     return new_status in STATUS_TRANSITIONS.get(old_status, [])
 
 
-# ==========================
-# Создание заявки
-# ==========================
 async def create_task(
     title: str,
     description: str,
@@ -49,6 +43,7 @@ async def create_task(
     parking_level: int = None,
     parking_spot: int = None,
     cellar: int = None,
+    common_area: str = None,
     applicant_type: str = None,
     applicant_name: str = None,
     applicant_phone: str = None,
@@ -75,6 +70,7 @@ async def create_task(
             parking_level=parking_level,
             parking_spot=parking_spot,
             cellar=cellar,
+            common_area=common_area,
             applicant_type=applicant_type,
             applicant_name=applicant_name,
             applicant_phone=applicant_phone,
@@ -113,9 +109,6 @@ async def create_task(
         return task
 
 
-# ==========================
-# Получить заявку с подгрузкой
-# ==========================
 async def get_task(task_id: int) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -132,9 +125,6 @@ async def get_task(task_id: int) -> Optional[Task]:
         return result.scalar_one_or_none()
 
 
-# ==========================
-# Списки заявок
-# ==========================
 async def get_open_tasks(limit: int = 20, offset: int = 0, user_id: int = None) -> List[Task]:
     async with AsyncSessionLocal() as db:
         query = select(Task).where(cast(Task.status, String) != "closed")
@@ -183,9 +173,6 @@ async def get_tasks_for_employee(
         return result.scalars().all()
 
 
-# ==========================
-# Счётчики
-# ==========================
 async def count_open_tasks() -> int:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -271,16 +258,13 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
         return result.scalar()
 
 
-# ==========================
-# Назначение на команду (с принудительным)
-# ==========================
 async def assign_task_to_team(task_id: int, team: Team, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
         async with db.begin():
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            if not force and task.status not in ('created', 'waiting'):
+            if not force and task.status not in ("created", "waiting"):
                 return None
             if force and task.status in ("closed", "checking"):
                 return None
@@ -297,12 +281,21 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int, force:
             )
             db.add(history)
             await db.commit()
-            return task
+        # Подгружаем связанные данные для корректного отображения в клавиатуре
+        task = await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.comments),
+                selectinload(Task.photos),
+                selectinload(Task.history),
+            )
+        )
+        return task.scalar_one_or_none()
 
 
-# ==========================
-# Назначение на конкретного сотрудника (с принудительным)
-# ==========================
 async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
         async with db.begin():
@@ -333,12 +326,21 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
             )
             db.add(history)
             await db.commit()
-            return task
+        # Подгружаем связанные данные для корректного отображения в клавиатуре
+        task = await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.comments),
+                selectinload(Task.photos),
+                selectinload(Task.history),
+            )
+        )
+        return task.scalar_one_or_none()
 
 
-# ==========================
-# Взять задачу (исполнитель из команды)
-# ==========================
 async def take_task(task_id: int, user_id: int) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
         async with db.begin():
@@ -367,12 +369,9 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
             )
             db.add(history)
             await db.commit()
-            return task
+        return task
 
 
-# ==========================
-# Передать задачу
-# ==========================
 async def transfer_task(
     task_id: int,
     from_user_id: int,
@@ -405,12 +404,21 @@ async def transfer_task(
             )
             db.add(history)
             await db.commit()
-            return task
+        # Подгружаем связанные данные для корректного отображения в клавиатуре
+        task = await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.assignee),
+                selectinload(Task.comments),
+                selectinload(Task.photos),
+                selectinload(Task.history),
+            )
+        )
+        return task.scalar_one_or_none()
 
 
-# ==========================
-# Изменить статус
-# ==========================
 async def change_status(
     task_id: int,
     new_status: str,
@@ -450,12 +458,9 @@ async def change_status(
             )
             db.add(history)
             await db.commit()
-            return task
+        return task
 
 
-# ==========================
-# Добавить комментарий
-# ==========================
 async def add_comment(
     task_id: int,
     user_id: int,
@@ -483,9 +488,6 @@ async def add_comment(
         return comment
 
 
-# ==========================
-# Добавить фото
-# ==========================
 async def add_photo(
     task_id: int,
     user_id: int,
@@ -513,9 +515,6 @@ async def add_photo(
         return photo
 
 
-# ==========================
-# Получить историю задачи
-# ==========================
 async def get_task_history(task_id: int) -> List[TaskHistory]:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -527,9 +526,6 @@ async def get_task_history(task_id: int) -> List[TaskHistory]:
         return result.scalars().all()
 
 
-# ==========================
-# Получить список сотрудников и команд
-# ==========================
 async def get_available_employees(
     role: Optional[UserRole] = None,
     team: Optional[Team] = None,
@@ -563,9 +559,6 @@ async def get_teams_with_members() -> List[dict]:
         return result
 
 
-# ==========================
-# Архив (закрытые задачи) с фильтрацией
-# ==========================
 async def get_tasks_by_status(status: str, limit: int = 20, offset: int = 0, user_id: int = None) -> List[Task]:
     async with AsyncSessionLocal() as db:
         query = select(Task).where(cast(Task.status, String) == status)
@@ -683,9 +676,7 @@ async def get_team_tasks(
 
 
 async def search_tasks(query: str, limit: int = 20) -> List[Task]:
-    """Поиск задач по ID, названию, описанию, исполнителю или квартире"""
     async with AsyncSessionLocal() as db:
-        # Если запрос начинается с #, ищем по ID
         if query.startswith('#'):
             try:
                 task_id = int(query[1:])
@@ -694,18 +685,15 @@ async def search_tasks(query: str, limit: int = 20) -> List[Task]:
                     return [task]
             except ValueError:
                 pass
-        # Если запрос — цифры, ищем по ID или квартире
         elif query.isdigit():
             task = await db.get(Task, int(query))
             if task:
                 return [task]
-            # Ищем по квартире
             stmt = select(Task).where(Task.apartment == int(query))
             result = await db.execute(stmt)
             tasks = result.scalars().all()
             if tasks:
                 return tasks[:limit]
-        # Общий поиск
         stmt = select(Task).where(
             or_(
                 Task.title.ilike(f"%{query}%"),

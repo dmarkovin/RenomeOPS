@@ -76,7 +76,7 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
     priority_emoji = get_priority_emoji(task.priority)
     priority_name = get_priority_name(task.priority)
 
-    # Формируем адрес
+    # Формируем адрес в зависимости от заполненных полей
     address_parts = []
     if task.building:
         address_parts.append(f"корп. {task.building}")
@@ -86,12 +86,14 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
         address_parts.append(f"эт. {task.floor}")
     if task.apartment:
         address_parts.append(f"кв. {task.apartment}")
-    elif task.location_type == "common_area":
-        address_parts.append("общая зона")
-    elif task.location_type == "parking":
-        if task.parking_level is not None and task.parking_spot is not None:
+    elif task.common_area:
+        address_parts.append(f"общая зона: {task.common_area}")
+    elif task.parking_spot:
+        if task.parking_level is not None:
             address_parts.append(f"паркинг {task.parking_level} эт., место {task.parking_spot}")
-    elif task.location_type == "cellar" and task.cellar is not None:
+        else:
+            address_parts.append(f"место {task.parking_spot}")
+    elif task.cellar:
         address_parts.append(f"келлер {task.cellar}")
     address = ", ".join(address_parts) if address_parts else "—"
 
@@ -110,7 +112,6 @@ async def show_task_card(callback: CallbackQuery, state: FSMContext):
     else:
         text += f"👥 <b>Исполнитель:</b> не назначен\n"
     text += f"📅 <b>Создана:</b> {task.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-    # Дата назначения (если есть)
     if task.assigned_to and task.updated_at:
         text += f"📅 <b>Назначена:</b> {task.updated_at.strftime('%d.%m.%Y %H:%M')}\n"
     if task.closed_at:
@@ -162,7 +163,7 @@ async def pause_task(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Вы не исполнитель этой задачи", show_alert=True)
         return
     await state.update_data(task_id=task_id, action="pause")
-    await safe_edit_or_reply(callback, "⏸ Выберите срок ожидания:", waiting_time_keyboard(task_id))
+    await safe_edit_or_reply(callback, "⏸ Выберите срок ожидания или введите время вручную:", waiting_time_keyboard(task_id))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("task_resume:"))
@@ -370,7 +371,7 @@ async def comment_back_to_task(callback: CallbackQuery, state: FSMContext):
     await show_task_card(callback, state)
     await callback.answer()
 
-# ========== История (исправлена сортировка: сначала старые) ==========
+# ========== История ==========
 @router.callback_query(F.data.startswith("task_history:"))
 async def show_task_history(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -378,7 +379,6 @@ async def show_task_history(callback: CallbackQuery, state: FSMContext):
     if not history:
         await callback.answer("История пуста", show_alert=True)
         return
-    # Переворачиваем: сначала старые записи, потом новые
     history = list(reversed(history))
     text = f"📜 <b>История задачи #{task_id}</b>\n\n"
     for entry in history[:5]:
@@ -405,7 +405,6 @@ async def show_all_history(callback: CallbackQuery, state: FSMContext):
     if not history:
         await callback.answer("История пуста", show_alert=True)
         return
-    # Переворачиваем: сначала старые
     history = list(reversed(history))
     text = f"📜 <b>Вся история задачи #{task_id}</b>\n\n"
     for entry in history:
@@ -573,7 +572,7 @@ async def finish_add_photo(message: Message, state: FSMContext):
     else:
         await message.answer("Возврат в меню.")
 
-# ========== Ожидание (исправлено: добавлен комментарий в задачу) ==========
+# ========== Ожидание ==========
 @router.callback_query(F.data.startswith("task_wait:"))
 async def start_wait(callback: CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split(":")[1])
@@ -617,7 +616,6 @@ async def process_wait_comment(message: Message, state: FSMContext):
         await message.answer("Ошибка")
         await state.clear()
         return
-    # Добавляем комментарий в задачу
     await add_comment(task_id, employee.id, comment)
     wait_until = datetime.utcnow() + timedelta(hours=hours)
     task = await change_status(task_id, "waiting", employee.id, comment, wait_until)

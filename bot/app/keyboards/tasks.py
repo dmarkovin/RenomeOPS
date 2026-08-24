@@ -47,14 +47,20 @@ def get_assignment_emoji(task) -> str:
     else:
         return "❓"
 
-def get_apartment_text(task) -> str:
+def get_address_short(task) -> str:
+    """Возвращает короткий адрес для списка: корпус, квартира/парковка/общая зона"""
+    parts = []
+    if task.building:
+        parts.append(f"корп.{task.building}")
     if task.apartment:
-        return f"кв.{task.apartment}"
+        parts.append(f"кв.{task.apartment}")
     elif task.location_type == "parking" and task.parking_spot:
-        return f"м.{task.parking_spot}"
+        parts.append(f"м.{task.parking_spot}")
     elif task.location_type == "cellar" and task.cellar:
-        return f"к.{task.cellar}"
-    return ""
+        parts.append(f"к.{task.cellar}")
+    elif task.location_type == "common_area" and task.common_area:
+        parts.append(f"зона:{task.common_area[:10]}")
+    return " ".join(parts) if parts else ""
 
 def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str = "open", current_filter: int = None) -> InlineKeyboardMarkup:
     buttons = []
@@ -63,9 +69,9 @@ def task_list_keyboard(tasks: List, page: int, total_pages: int, list_type: str 
         priority_emoji = get_priority_emoji(task.priority)
         paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
         assign_emoji = get_assignment_emoji(task)
-        apartment = get_apartment_text(task)
-        apt_label = f" {apartment}" if apartment else ""
-        text = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apt_label} {paid_marker}{task.title[:25]}"
+        address = get_address_short(task)
+        addr_label = f" {address}" if address else ""
+        text = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id} {paid_marker}{task.title}{addr_label}"
         if list_type == "team" and task.assigned_to is None:
             buttons.append([
                 InlineKeyboardButton(text=text, callback_data=f"task:{task.id}"),

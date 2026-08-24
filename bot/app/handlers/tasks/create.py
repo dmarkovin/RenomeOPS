@@ -6,8 +6,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters.state import StateFilter
 
 from app.services.employees.service import get_employee
-from app.services.tasks.service import create_task, assign_task_to_team
-from app.services.notification_service import notify_admins, notify_team_with_button
+from app.services.tasks.service import create_task
+from app.services.notification_service import notify_admins_with_button, notify_team_with_button
 from app.database.models import UserRole, Team
 from app.keyboards.main_menu import main_menu_keyboard
 from app.keyboards.object_navigation import (
@@ -18,7 +18,7 @@ from app.keyboards.object_navigation import (
 from app.keyboards.priority import priority_keyboard
 from app.keyboards.tasks import tasks_menu_keyboard
 from app.keyboards.task_actions import task_actions_keyboard
-from app.utils.object_navigation import get_entrances, get_floors, get_apartments, get_parking_spots, get_cellars
+from app.utils.object_navigation import get_entrances, get_floors, get_apartments, get_parking_spots, get_cellars, get_common_area_name
 
 router = Router()
 
@@ -53,12 +53,13 @@ async def start_create_task(message: Message, state: FSMContext):
         reply_markup=building_keyboard()
     )
 
+# --- Обработчики выбора объекта ---
 @router.callback_query(StateFilter(TaskCreate.select_building), F.data.startswith("obj_building:"))
 async def process_building(callback: CallbackQuery, state: FSMContext):
     building_id = int(callback.data.split(":")[1])
     await state.update_data(building=building_id)
     entrances = get_entrances(building_id)
-    await state.update_data(object_type="apartment")
+    await state.set_state(TaskCreate.select_entrance)
     await callback.message.edit_text(
         f"🏢 Выберите подъезд для корпуса {building_id}:",
         reply_markup=entrance_keyboard(building_id, entrances)
@@ -67,13 +68,26 @@ async def process_building(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(StateFilter(TaskCreate.select_building), F.data == "obj_parking")
 async def process_parking(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(object_type="parking")
+    await state.set_state(TaskCreate.select_parking_floor)
     await callback.message.edit_text(
         "🚗 Выберите уровень паркинга:",
         reply_markup=parking_floor_keyboard(2, [-1, -2])
     )
     await callback.answer()
 
+@router.callback_query(StateFilter(TaskCreate.select_building), F.data.startswith("obj_cellar:"))
+async def process_cellar_start(callback: CallbackQuery, state: FSMContext):
+    building_id = int(callback.data.split(":")[1])
+    await state.update_data(building=building_id)
+    cellars = get_cellars(building_id)
+    await state.set_state(TaskCreate.select_cellar)
+    await callback.message.edit_text(
+        f"🔐 Выберите келлер для корпуса {building_id}:",
+        reply_markup=cellar_keyboard(building_id, cellars, 0)
+    )
+    await callback.answer()
+
+# --- Выбор подъезда, этажа, квартиры ---
 @router.callback_query(StateFilter(TaskCreate.select_entrance), F.data.startswith("obj_entrance:"))
 async def process_entrance(callback: CallbackQuery, state: FSMContext):
     _, building_id_str, entrance_str = callback.data.split(":")
@@ -81,6 +95,7 @@ async def process_entrance(callback: CallbackQuery, state: FSMContext):
     entrance = int(entrance_str)
     await state.update_data(entrance=entrance)
     floors = get_floors(building_id, entrance)
+    await state.set_state(TaskCreate.select_floor)
     await callback.message.edit_text(
         f"🏗 Выберите этаж (подъезд {entrance}):",
         reply_markup=floor_keyboard(building_id, entrance, floors)
@@ -98,6 +113,7 @@ async def process_floor(callback: CallbackQuery, state: FSMContext):
     if not apartments:
         await callback.message.edit_text("На этом этаже нет квартир. Выберите другой этаж.")
         return
+    await state.set_state(TaskCreate.select_apartment)
     await callback.message.edit_text(
         f"🏠 Выберите на этаже {floor}:",
         reply_markup=apartment_keyboard(building_id, entrance, floor, apartments)
@@ -107,49 +123,59 @@ async def process_floor(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(StateFilter(TaskCreate.select_apartment), F.data.startswith("obj_apartment:"))
 async def process_apartment(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
-    if len(parts) >= 5 and not parts[4].isdigit():
-        # Общая зона
-        _, building_str, entrance_str, floor_str, common_name = parts
-        building = int(building_str)
-        entrance = int(entrance_str)
-        floor = int(floor_str)
-        await state.update_data(
-            building=building,
-            entrance=entrance,
-            floor=floor,
-            location_type="common_area",
-            common_area=common_name
-        )
-        await callback.message.edit_text(f"✅ Выбрана общая зона: {common_name}")
-    else:
-        # Квартира
-        _, building_str, entrance_str, floor_str, apt_str = parts
-        building = int(building_str)
-        entrance = int(entrance_str)
-        floor = int(floor_str)
-        apartment = int(apt_str)
-        await state.update_data(
-            building=building,
-            entrance=entrance,
-            floor=floor,
-            apartment=apartment,
-            location_type="apartment"
-        )
-        await callback.message.edit_text(f"✅ Выбрана квартира {apartment}")
+    building = int(parts[1])
+    entrance = int(parts[2])
+    floor = int(parts[3])
+    item = parts[4]
+    if floor == 1:
+        try:
+            area_id = int(item)
+            common_name = get_common_area_name(building, entrance, area_id)
+            if common_name:
+                await state.update_data(
+                    building=building,
+                    entrance=entrance,
+                    floor=floor,
+                    common_area=common_name,
+                    location_type="common_area"
+                )
+                await callback.message.edit_text(f"✅ Выбрана общая зона: {common_name}")
+                await state.set_state(TaskCreate.enter_title)
+                await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
+                await callback.answer()
+                return
+        except ValueError:
+            pass
+    apartment = int(item)
+    await state.update_data(
+        building=building,
+        entrance=entrance,
+        floor=floor,
+        apartment=apartment,
+        location_type="apartment"
+    )
+    await callback.message.edit_text(
+        f"✅ Выбран адрес:\n"
+        f"Корпус {building}, подъезд {entrance}, этаж {floor}, квартира {apartment}"
+    )
     await state.set_state(TaskCreate.enter_title)
     await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
+# --- Парковка ---
 @router.callback_query(StateFilter(TaskCreate.select_parking_floor), F.data.startswith("obj_parking_floor:"))
 async def process_parking_floor(callback: CallbackQuery, state: FSMContext):
     _, building_str, floor_str = callback.data.split(":")
     building = int(building_str)
     floor = int(floor_str)
-    await state.update_data(parking_floor=floor)
+    print(f"DEBUG parking_floor: building={building}, floor={floor}")
+    await state.update_data(parking_floor=floor, parking_offset=0)  # сброс offset
     spots = get_parking_spots(building, floor)
+    print(f"DEBUG parking_floor: spots len={len(spots)}")
+    await state.set_state(TaskCreate.select_parking_spot)
     await callback.message.edit_text(
-        f"🚗 Выберите машиноместо на этаже {floor}:",
-        reply_markup=parking_spot_keyboard(building, floor, spots)
+        f"🚗 Выберите машиноместо на этаже {floor} (показаны первые 20):",
+        reply_markup=parking_spot_keyboard(building, floor, spots, 0)
     )
     await callback.answer()
 
@@ -170,6 +196,37 @@ async def process_parking_spot(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
+@router.callback_query(StateFilter(TaskCreate.select_parking_spot), F.data.startswith("obj_parking_more:"))
+async def parking_more(callback: CallbackQuery, state: FSMContext):
+    _, building_str, floor_str, offset_str = callback.data.split(":")
+    building = int(building_str)
+    floor = int(floor_str)
+    offset = int(offset_str)
+    print(f"DEBUG parking_more: building={building}, floor={floor}, offset={offset}")
+    spots = get_parking_spots(building, floor)
+    next_spots = spots[offset:offset+20]
+    if not next_spots:
+        await callback.answer("Больше нет мест", show_alert=True)
+        return
+    await state.update_data(parking_offset=offset+20)
+    kb = parking_spot_keyboard(building, floor, spots, offset+20)
+    await callback.message.edit_text(
+        f"🚗 Выберите машиноместо на этаже {floor} (показаны места {offset+1}-{offset+len(next_spots)}):",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_parking_spot), F.data.startswith("obj_back_parking_floor:"))
+async def back_to_parking_floor(callback: CallbackQuery, state: FSMContext):
+    building_id = int(callback.data.split(":")[1]) if len(callback.data.split(":")) > 1 else 2
+    await state.set_state(TaskCreate.select_parking_floor)
+    await callback.message.edit_text(
+        "🚗 Выберите уровень паркинга:",
+        reply_markup=parking_floor_keyboard(building_id, [-1, -2])
+    )
+    await callback.answer()
+
+# --- Келлеры ---
 @router.callback_query(StateFilter(TaskCreate.select_cellar), F.data.startswith("obj_cellar:"))
 async def process_cellar(callback: CallbackQuery, state: FSMContext):
     _, building_str, cellar_str = callback.data.split(":")
@@ -185,6 +242,117 @@ async def process_cellar(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Введите заголовок заявки:", reply_markup=ReplyKeyboardRemove())
     await callback.answer()
 
+@router.callback_query(StateFilter(TaskCreate.select_cellar), F.data.startswith("obj_cellar_more:"))
+async def cellar_more(callback: CallbackQuery, state: FSMContext):
+    _, building_str, offset_str = callback.data.split(":")
+    building = int(building_str)
+    offset = int(offset_str)
+    cellars = get_cellars(building)
+    next_cellars = cellars[offset:offset+20]
+    if not next_cellars:
+        await callback.answer("Больше нет келлеров", show_alert=True)
+        return
+    await state.update_data(cellar_offset=offset+20)
+    kb = cellar_keyboard(building, cellars, offset+20)
+    await callback.message.edit_text(
+        f"🔐 Выберите келлер для корпуса {building} (показаны {offset+1}-{offset+len(next_cellars)}):",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_cellar), F.data.startswith("obj_back_building:"))
+async def back_to_building_from_cellar(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(TaskCreate.select_building)
+    await callback.message.edit_text(
+        "🏢 Выберите объект (корпус, паркинг или келлер):",
+        reply_markup=building_keyboard()
+    )
+    await callback.answer()
+
+# --- Навигация "Назад" для других состояний ---
+@router.callback_query(StateFilter(TaskCreate.select_entrance), F.data.startswith("obj_back_building:"))
+async def back_to_building_from_entrance(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(TaskCreate.select_building)
+    await callback.message.edit_text(
+        "🏢 Выберите объект (корпус, паркинг или келлер):",
+        reply_markup=building_keyboard()
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_floor), F.data.startswith("obj_back_entrance:"))
+async def back_to_entrance_from_floor(callback: CallbackQuery, state: FSMContext):
+    building_id = int(callback.data.split(":")[1]) if len(callback.data.split(":")) > 1 else None
+    if building_id:
+        entrances = get_entrances(building_id)
+        await state.set_state(TaskCreate.select_entrance)
+        await callback.message.edit_text(
+            f"🏢 Выберите подъезд для корпуса {building_id}:",
+            reply_markup=entrance_keyboard(building_id, entrances)
+        )
+    else:
+        await state.set_state(TaskCreate.select_building)
+        await callback.message.edit_text(
+            "🏢 Выберите объект (корпус, паркинг или келлер):",
+            reply_markup=building_keyboard()
+        )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_floor), F.data.startswith("obj_back_building:"))
+async def back_to_building_from_floor(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(TaskCreate.select_building)
+    await callback.message.edit_text(
+        "🏢 Выберите объект (корпус, паркинг или келлер):",
+        reply_markup=building_keyboard()
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_apartment), F.data.startswith("obj_back_floor:"))
+async def back_to_floor_from_apartment(callback: CallbackQuery, state: FSMContext):
+    building_id = int(callback.data.split(":")[1]) if len(callback.data.split(":")) > 1 else None
+    entrance = int(callback.data.split(":")[2]) if len(callback.data.split(":")) > 2 else None
+    if building_id and entrance:
+        floors = get_floors(building_id, entrance)
+        await state.set_state(TaskCreate.select_floor)
+        await callback.message.edit_text(
+            f"🏗 Выберите этаж для подъезда {entrance} (корпус {building_id}):",
+            reply_markup=floor_keyboard(building_id, entrance, floors)
+        )
+    else:
+        await state.set_state(TaskCreate.select_building)
+        await callback.message.edit_text(
+            "🏢 Выберите объект (корпус, паркинг или келлер):",
+            reply_markup=building_keyboard()
+        )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_apartment), F.data.startswith("obj_back_entrance:"))
+async def back_to_entrance_from_apartment(callback: CallbackQuery, state: FSMContext):
+    building_id = int(callback.data.split(":")[1]) if len(callback.data.split(":")) > 1 else None
+    if building_id:
+        entrances = get_entrances(building_id)
+        await state.set_state(TaskCreate.select_entrance)
+        await callback.message.edit_text(
+            f"🏢 Выберите подъезд для корпуса {building_id}:",
+            reply_markup=entrance_keyboard(building_id, entrances)
+        )
+    else:
+        await state.set_state(TaskCreate.select_building)
+        await callback.message.edit_text(
+            "🏢 Выберите объект (корпус, паркинг или келлер):",
+            reply_markup=building_keyboard()
+        )
+    await callback.answer()
+
+@router.callback_query(StateFilter(TaskCreate.select_parking_floor), F.data.startswith("obj_back_building:"))
+async def back_to_building_from_parking_floor(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(TaskCreate.select_building)
+    await callback.message.edit_text(
+        "🏢 Выберите объект (корпус, паркинг или келлер):",
+        reply_markup=building_keyboard()
+    )
+    await callback.answer()
+
+# --- Остальные шаги ---
 @router.message(StateFilter(TaskCreate.enter_title), F.text)
 async def process_title(message: Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
@@ -267,6 +435,8 @@ async def process_priority(callback: CallbackQuery, state: FSMContext):
 async def process_media_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
+    if photos is None:
+        photos = []
     photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
     await message.answer(f"✅ Добавлено фото ({len(photos)})")
@@ -275,6 +445,8 @@ async def process_media_photo(message: Message, state: FSMContext):
 async def process_media_video(message: Message, state: FSMContext):
     data = await state.get_data()
     videos = data.get("videos", [])
+    if videos is None:
+        videos = []
     videos.append(message.video.file_id)
     await state.update_data(videos=videos)
     await message.answer(f"✅ Добавлено видео ({len(videos)})")
@@ -283,11 +455,28 @@ async def process_media_video(message: Message, state: FSMContext):
 async def finish_media(message: Message, state: FSMContext):
     await state.set_state(TaskCreate.confirm)
     data = await state.get_data()
+    address_parts = []
+    if data.get('building'):
+        address_parts.append(f"корп. {data['building']}")
+    if data.get('entrance'):
+        address_parts.append(f"под. {data['entrance']}")
+    if data.get('floor'):
+        address_parts.append(f"эт. {data['floor']}")
+    if data.get('apartment'):
+        address_parts.append(f"кв. {data['apartment']}")
+    elif data.get('common_area'):
+        address_parts.append(f"зона: {data['common_area']}")
+    elif data.get('parking_spot'):
+        address_parts.append(f"м. {data['parking_spot']}")
+    elif data.get('cellar'):
+        address_parts.append(f"к. {data['cellar']}")
+    address = ", ".join(address_parts) if address_parts else "—"
+
     text = (
         f"📝 Проверьте данные заявки:\n\n"
         f"Заголовок: {data['title']}\n"
         f"Описание: {data['description']}\n"
-        f"Объект: {data.get('building') or '—'} {data.get('apartment') or data.get('parking_spot') or data.get('cellar') or data.get('common_area') or '—'}\n"
+        f"Адрес: {address}\n"
         f"Заявитель: {data.get('applicant_name')} ({data.get('applicant_type')})\n"
         f"Телефон: {data.get('applicant_phone') or '—'}\n"
         f"Приоритет: {data.get('priority')}\n"
@@ -303,11 +492,36 @@ async def finish_media(message: Message, state: FSMContext):
 @router.message(StateFilter(TaskCreate.confirm), F.text == "✅ Да, создать")
 async def confirm_create(message: Message, state: FSMContext):
     data = await state.get_data()
+    print(f"DEBUG confirm_create data: {data}")
     employee = await get_employee(message.from_user.id)
     if not employee:
         await message.answer("Ошибка.")
         await state.clear()
         return
+
+    selection = data.get('object_selection', {})
+    if selection.get('type') == 'parking':
+        if not data.get('parking_spot'):
+            data['parking_spot'] = selection.get('parking_spot')
+            data['parking_floor'] = selection.get('parking_floor')
+            data['building'] = selection.get('building')
+    elif selection.get('type') == 'common_area':
+        if not data.get('common_area'):
+            data['common_area'] = selection.get('common_area')
+            data['building'] = selection.get('building')
+            data['entrance'] = selection.get('entrance')
+            data['floor'] = selection.get('floor')
+    elif selection.get('type') == 'apartment':
+        if not data.get('apartment'):
+            data['apartment'] = selection.get('apartment')
+            data['building'] = selection.get('building')
+            data['entrance'] = selection.get('entrance')
+            data['floor'] = selection.get('floor')
+    elif selection.get('type') == 'cellar':
+        if not data.get('cellar'):
+            data['cellar'] = selection.get('cellar')
+            data['building'] = selection.get('building')
+
     try:
         task = await create_task(
             title=data['title'],
@@ -321,6 +535,7 @@ async def confirm_create(message: Message, state: FSMContext):
             parking_level=data.get('parking_floor'),
             parking_spot=data.get('parking_spot'),
             cellar=data.get('cellar'),
+            common_area=data.get('common_area'),
             applicant_type=data.get('applicant_type'),
             applicant_name=data.get('applicant_name'),
             applicant_phone=data.get('applicant_phone'),
@@ -329,12 +544,16 @@ async def confirm_create(message: Message, state: FSMContext):
             video_ids=data.get('videos', [])
         )
         await state.clear()
-        await notify_admins(f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}")
+        await notify_admins_with_button(
+            f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}",
+            "👁️ Посмотреть заявку",
+            f"task:{task.id}"
+        )
         if employee.role != UserRole.CONCIERGE:
             await notify_team_with_button(
                 Team.TEAM_CONCIERGE,
                 f"📢 Новая заявка #{task.id}: {task.title} создана сотрудником {employee.full_name}\nНазначьте исполнителя.",
-                "Посмотреть заявку",
+                "👁️ Посмотреть заявку",
                 f"task:{task.id}"
             )
         kb = InlineKeyboardMarkup(inline_keyboard=[

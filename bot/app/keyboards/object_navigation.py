@@ -7,6 +7,7 @@ def building_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🏢 Корпус 1 (Новослободская 24астр1)", callback_data="obj_building:1")],
         [InlineKeyboardButton(text="🏢 Корпус 2 (Новослободская 24астр2)", callback_data="obj_building:2")],
         [InlineKeyboardButton(text="🚗 Паркинг", callback_data="obj_parking")],
+        [InlineKeyboardButton(text="🔐 Келлеры", callback_data="obj_cellar:2")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -15,7 +16,7 @@ def entrance_keyboard(building_id: int, entrances: List[int]) -> InlineKeyboardM
     buttons = []
     for e in entrances:
         buttons.append([InlineKeyboardButton(text=f"🚪 Подъезд {e}", callback_data=f"obj_entrance:{building_id}:{e}")])
-    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_building")])
+    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data=f"obj_back_building:{building_id}")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -23,7 +24,7 @@ def floor_keyboard(building_id: int, entrance: int, floors: List[int]) -> Inline
     buttons = []
     for f in floors:
         buttons.append([InlineKeyboardButton(text=f"🏗 Этаж {f}", callback_data=f"obj_floor:{building_id}:{entrance}:{f}")])
-    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_entrance")])
+    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data=f"obj_back_entrance:{building_id}")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -31,16 +32,15 @@ def apartment_keyboard(building_id: int, entrance: int, floor: int, apartments: 
     buttons = []
     for item in apartments:
         if floor == 1:
-            # Общая зона – item это ID
             area_id = item
             name = get_common_area_name(building_id, entrance, area_id)
             text = name if name else f"Зона {area_id}"
-            callback = f"obj_common:{building_id}:{entrance}:{floor}:{area_id}"
+            callback = f"obj_apartment:{building_id}:{entrance}:{floor}:{area_id}"
         else:
             text = f"Квартира {item}"
             callback = f"obj_apartment:{building_id}:{entrance}:{floor}:{item}"
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
-    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_floor")])
+    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data=f"obj_back_floor:{building_id}:{entrance}")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -49,23 +49,39 @@ def parking_floor_keyboard(building_id: int, floors: List[int]) -> InlineKeyboar
     for f in floors:
         label = f"Парковка {f} этаж" if f >= 0 else f"Парковка {-f} подземный"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"obj_parking_floor:{building_id}:{f}")])
-    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_building")])
+    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data=f"obj_back_building:{building_id}")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def parking_spot_keyboard(building_id: int, floor: int, spots: List[int]) -> InlineKeyboardMarkup:
+def parking_spot_keyboard(building_id: int, floor: int, spots: List[int], offset: int = 0) -> InlineKeyboardMarkup:
     buttons = []
-    for spot in spots[:20]:
+    page_spots = spots[offset:offset+20]
+    for spot in page_spots:
         buttons.append([InlineKeyboardButton(text=f"🚗 Место {spot}", callback_data=f"obj_parking_spot:{building_id}:{floor}:{spot}")])
-    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_parking_floor")])
+    nav_buttons = []
+    if offset > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"obj_parking_back:{building_id}:{floor}:{offset-20 if offset-20 >= 0 else 0}"))
+    if offset + 20 < len(spots):
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶", callback_data=f"obj_parking_more:{building_id}:{floor}:{offset+20}"))
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    buttons.append([InlineKeyboardButton(text="⬅ Назад к уровням", callback_data=f"obj_back_parking_floor:{building_id}")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def cellar_keyboard(building_id: int, cellars: List[int]) -> InlineKeyboardMarkup:
+def cellar_keyboard(building_id: int, cellars: List[int], offset: int = 0) -> InlineKeyboardMarkup:
     buttons = []
-    for cellar in cellars[:20]:
+    page_cellars = cellars[offset:offset+20]
+    for cellar in page_cellars:
         buttons.append([InlineKeyboardButton(text=f"🔐 Келлер {cellar}", callback_data=f"obj_cellar:{building_id}:{cellar}")])
-    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="obj_back_building")])
+    nav_buttons = []
+    if offset > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"obj_cellar_back:{building_id}:{offset-20 if offset-20 >= 0 else 0}"))
+    if offset + 20 < len(cellars):
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶", callback_data=f"obj_cellar_more:{building_id}:{offset+20}"))
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    buttons.append([InlineKeyboardButton(text="⬅ Назад к выбору", callback_data=f"obj_back_building:{building_id}")])
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="obj_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
