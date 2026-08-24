@@ -18,11 +18,11 @@ from app.metrics import tasks_created_total, tasks_closed_total
 
 
 # ==========================
-# Допустимые переходы статусов
+# Допустимые переходы статусов (исправлено: добавлены переходы в waiting)
 # ==========================
 STATUS_TRANSITIONS = {
     'created': ['accepted', 'waiting', 'paused', 'closed'],
-    'waiting': ['accepted', 'paused', 'closed'],
+    'waiting': ['accepted', 'paused', 'closed', 'in_progress'],  # можно вернуть в работу
     'accepted': ['in_progress', 'waiting', 'paused', 'closed'],
     'in_progress': ['checking', 'waiting', 'paused', 'closed'],
     'checking': ['closed', 'in_progress'],
@@ -297,7 +297,7 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int) -> Opt
 
 
 # ==========================
-# Назначение на конкретного сотрудника (с поддержкой force)
+# Назначение на конкретного сотрудника (с принудительным назначением)
 # ==========================
 async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, force: bool = False) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
@@ -305,10 +305,10 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
             task = await db.get(Task, task_id, with_for_update=True)
             if not task:
                 return None
-            # Если не принудительно, разрешаем только для created и waiting
+            # Если не принудительно, разрешаем только для статусов created и waiting
             if not force and task.status not in ("created", "waiting"):
                 return None
-            # Если принудительно, запрещаем только closed и checking
+            # Если принудительно, запрещаем только для closed и checking
             if force and task.status in ("closed", "checking"):
                 return None
             employee = await db.get(User, user_id)
@@ -317,10 +317,9 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
             # Если не принудительно, проверяем команду
             if not force and task.assigned_team and employee.team != task.assigned_team:
                 return None
-            # Назначаем
             task.assigned_to = user_id
             task.assigned_team = employee.team
-            # Устанавливаем статус accepted, если он ещё не accepted
+            # Устанавливаем статус accepted, если задача была создана или ожидает
             if task.status == "created":
                 task.status = "accepted"
             elif force and task.status != "accepted":
@@ -338,7 +337,7 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
 
 
 # ==========================
-# Взять задачу
+# Взять задачу (исполнитель из команды)
 # ==========================
 async def take_task(task_id: int, user_id: int) -> Optional[Task]:
     async with AsyncSessionLocal() as db:
@@ -349,7 +348,7 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
             employee = await db.get(User, user_id)
             if not employee or not employee.active:
                 return None
-            if task.status in ("closed", "checking"):
+            if task.status in ("closed", "checking", "waiting"):
                 return None
             if task.assigned_to is not None and employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
                 return None

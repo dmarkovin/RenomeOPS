@@ -38,11 +38,11 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
         # Приостановить (если статус позволяет)
         if status in ("accepted", "in_progress"):
             buttons.append([InlineKeyboardButton(text="⏸ Приостановить", callback_data=f"task_pause:{task_id}")])
-        # Возобновить (если статус paused)
-        if status == "paused":
+        # Возобновить (если статус paused или waiting)
+        if status in ("paused", "waiting"):
             buttons.append([InlineKeyboardButton(text="▶ Возобновить", callback_data=f"task_resume:{task_id}")])
-        # Выполнено (на проверку) – для всех исполнителей
-        if status in ("in_progress", "paused", "accepted"):
+        # Выполнено (на проверку) – для всех исполнителей, включая статус waiting
+        if status in ("in_progress", "paused", "accepted", "waiting"):
             buttons.append([InlineKeyboardButton(text="✅ Выполнено", callback_data=f"task_check_start:{task_id}")])
         # Передать
         if status != "closed":
