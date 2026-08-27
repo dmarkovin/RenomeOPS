@@ -35,6 +35,34 @@ def can_transition(old_status: str, new_status: str) -> bool:
 
 
 # ==========================
+# Вспомогательная функция для подгрузки связанных данных задачи
+# ==========================
+async def _reload_task_with_relations(
+    db: AsyncSessionLocal,
+    task_id: int,
+    include_history: bool = False,
+) -> Optional[Task]:
+    """
+    Подгружает задачу со всеми необходимыми связями для отображения в интерфейсе.
+    Если include_history=True, подгружается также история.
+    """
+    options = [
+        selectinload(Task.creator),
+        selectinload(Task.assignee),
+        selectinload(Task.comments),
+        selectinload(Task.photos),
+    ]
+    if include_history:
+        options.append(selectinload(Task.history).selectinload(TaskHistory.user))
+    result = await db.execute(
+        select(Task)
+        .where(Task.id == task_id)
+        .options(*options)
+    )
+    return result.scalar_one_or_none()
+
+
+# ==========================
 # Создание заявки
 # ==========================
 async def create_task(
@@ -274,9 +302,13 @@ async def count_team_tasks(user_id: int, status: str = None) -> int:
 
 
 # ==========================
-# Назначение на команду (с принудительным и подгрузкой)
+# Назначение на команду (с принудительным)
 # ==========================
 async def assign_task_to_team(task_id: int, team: Team, assigned_by: int, force: bool = False) -> Optional[Task]:
+    """
+    Назначает задачу на команду.
+    Если force=True, разрешает назначение даже если задача не в статусе created или waiting.
+    """
     async with AsyncSessionLocal() as db:
         async with db.begin():
             task = await db.get(Task, task_id, with_for_update=True)
@@ -298,26 +330,23 @@ async def assign_task_to_team(task_id: int, team: Team, assigned_by: int, force:
                 description=f"Задача назначена на команду {team.value}" + (" (принудительно)" if force else ""),
             )
             db.add(history)
+            # Подгружаем связанные данные до коммита, чтобы транзакция была атомарной
+            task = await _reload_task_with_relations(db, task_id, include_history=False)
+            if not task:
+                return None
             await db.commit()
-        # Подгружаем связанные данные для корректного отображения в клавиатуре
-        task = await db.execute(
-            select(Task)
-            .where(Task.id == task_id)
-            .options(
-                selectinload(Task.creator),
-                selectinload(Task.assignee),
-                selectinload(Task.comments),
-                selectinload(Task.photos),
-                selectinload(Task.history).selectinload(TaskHistory.user),
-            )
-        )
-        return task.scalar_one_or_none()
+            return task
 
 
 # ==========================
-# Назначение на конкретного сотрудника (с принудительным и подгрузкой)
+# Назначение на конкретного сотрудника (с принудительным)
 # ==========================
 async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, force: bool = False) -> Optional[Task]:
+    """
+    Назначает задачу на конкретного сотрудника.
+    Если force=True, разрешает назначение даже если задача не в статусе created или waiting,
+    и позволяет назначить сотрудника, не соответствующего команде задачи.
+    """
     async with AsyncSessionLocal() as db:
         async with db.begin():
             task = await db.get(Task, task_id, with_for_update=True)
@@ -346,20 +375,12 @@ async def assign_task_to_user(task_id: int, user_id: int, assigned_by: int, forc
                 description=f"Назначен исполнитель: {employee.full_name}" + (" (принудительно)" if force else ""),
             )
             db.add(history)
+            # Подгружаем связанные данные до коммита
+            task = await _reload_task_with_relations(db, task_id, include_history=False)
+            if not task:
+                return None
             await db.commit()
-        # Подгружаем связанные данные
-        task = await db.execute(
-            select(Task)
-            .where(Task.id == task_id)
-            .options(
-                selectinload(Task.creator),
-                selectinload(Task.assignee),
-                selectinload(Task.comments),
-                selectinload(Task.photos),
-                selectinload(Task.history).selectinload(TaskHistory.user),
-            )
-        )
-        return task.scalar_one_or_none()
+            return task
 
 
 # ==========================
@@ -392,20 +413,12 @@ async def take_task(task_id: int, user_id: int) -> Optional[Task]:
                 description=f"Сотрудник {employee.full_name} взял задачу в работу",
             )
             db.add(history)
+            # Подгружаем связанные данные до коммита
+            task = await _reload_task_with_relations(db, task_id, include_history=False)
+            if not task:
+                return None
             await db.commit()
-        # Подгружаем связанные данные для отображения
-        task = await db.execute(
-            select(Task)
-            .where(Task.id == task_id)
-            .options(
-                selectinload(Task.creator),
-                selectinload(Task.assignee),
-                selectinload(Task.comments),
-                selectinload(Task.photos),
-                selectinload(Task.history).selectinload(TaskHistory.user),
-            )
-        )
-        return task.scalar_one_or_none()
+            return task
 
 
 # ==========================
@@ -442,20 +455,12 @@ async def transfer_task(
                 description=history_text,
             )
             db.add(history)
+            # Подгружаем связанные данные до коммита
+            task = await _reload_task_with_relations(db, task_id, include_history=False)
+            if not task:
+                return None
             await db.commit()
-        # Подгружаем связанные данные
-        task = await db.execute(
-            select(Task)
-            .where(Task.id == task_id)
-            .options(
-                selectinload(Task.creator),
-                selectinload(Task.assignee),
-                selectinload(Task.comments),
-                selectinload(Task.photos),
-                selectinload(Task.history).selectinload(TaskHistory.user),
-            )
-        )
-        return task.scalar_one_or_none()
+            return task
 
 
 # ==========================
@@ -500,19 +505,9 @@ async def change_status(
             )
             db.add(history)
             await db.commit()
-        # Подгружаем связанные данные для отображения
-        task = await db.execute(
-            select(Task)
-            .where(Task.id == task_id)
-            .options(
-                selectinload(Task.creator),
-                selectinload(Task.assignee),
-                selectinload(Task.comments),
-                selectinload(Task.photos),
-                selectinload(Task.history).selectinload(TaskHistory.user),
-            )
-        )
-        return task.scalar_one_or_none()
+            # Возвращаем задачу без подгрузки, так как она используется только для отображения результата,
+            # а карточка будет перезагружена через get_task.
+            return task
 
 
 # ==========================

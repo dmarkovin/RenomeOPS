@@ -58,9 +58,14 @@ def task_actions_keyboard(task, employee: User) -> InlineKeyboardMarkup:
             buttons.append([InlineKeyboardButton(text="🔄 Вернуть в работу", callback_data=f"task_status:{task_id}:start")])
 
     # ====== Общие кнопки со счётчиками ======
-    comment_count = len(task.comments) if task.comments else 0
-    photo_count = len(task.photos) if task.photos else 0
-    video_count = len(task.video_ids) if task.video_ids else 0
+    # Гарантируем, что task.photos и task.video_ids — списки
+    photos = task.photos or []
+    video_ids = task.video_ids or []
+    comments = task.comments or []
+
+    comment_count = len(comments)
+    photo_count = len(photos)
+    video_count = len(video_ids)
 
     buttons.append([
         InlineKeyboardButton(

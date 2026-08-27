@@ -38,6 +38,11 @@ async def create_pass(
             assigned_to=assigned_to,
             assigned_team=assigned_team,
         )
+        # Гарантируем, что history и comments — списки
+        if p.history is None:
+            p.history = []
+        if p.comments is None:
+            p.comments = []
         db.add(p)
         creator_name = "Система"
         if created_by:
@@ -118,6 +123,8 @@ async def update_pass_status(pass_id: int, status: str, user_id: int) -> Optiona
         p = await db.get(Pass, pass_id)
         if not p:
             return None
+        if p.history is None:
+            p.history = []
         old_status = p.status
         p.status = status
         p.updated_at = datetime.utcnow()
@@ -141,6 +148,8 @@ async def check_in(pass_id: int, user_id: int) -> Optional[Pass]:
         p = await db.get(Pass, pass_id)
         if not p or p.status != "active":
             return None
+        if p.history is None:
+            p.history = []
         p.checked_in_at = datetime.utcnow()
         p.updated_at = datetime.utcnow()
         user_name = "Система"
@@ -163,6 +172,8 @@ async def check_out(pass_id: int, user_id: int) -> Optional[Pass]:
         p = await db.get(Pass, pass_id)
         if not p or p.status not in ("active", "used"):
             return None
+        if p.history is None:
+            p.history = []
         p.checked_out_at = datetime.utcnow()
         p.status = "used"
         p.updated_at = datetime.utcnow()
@@ -193,8 +204,11 @@ async def add_pass_comment(pass_id: int, user_id: int, user_name: str, text: str
         p = await db.get(Pass, pass_id)
         if not p:
             return False
-        if not isinstance(p.comments, list):
+        # Гарантируем, что comments — список
+        if p.comments is None:
             p.comments = []
+        if p.history is None:
+            p.history = []
         p.comments.append({
             "author_id": user_id,
             "author_name": user_name,
