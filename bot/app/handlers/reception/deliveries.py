@@ -134,6 +134,10 @@ async def delivery_confirm(message: Message, state: FSMContext):
         await state.clear()
         await message.answer(
             f"✅ Посылка #{delivery.id} создана!",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await message.answer(
+            "Выберите действие:",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="👁️ Посмотреть посылку", callback_data=f"delivery:{delivery.id}")],
@@ -319,7 +323,7 @@ async def show_delivery_card(callback: CallbackQuery):
         text += f"👤 <b>Создал:</b> {d.creator.full_name}\n"
     text += f"📅 <b>Создана:</b> {format_datetime_msk(d.created_at)}"
 
-    kb = delivery_action_keyboard(d.id, d.status, user_role)
+    kb = delivery_action_keyboard(d.id, d.status, user_role, d.photo_ids)
     await safe_delete_message(callback.message)
     await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
@@ -481,6 +485,10 @@ async def delivery_history(callback: CallbackQuery):
 # ========== Назад (с сохранением контекста) ==========
 @router.callback_query(F.data == "delivery_back")
 async def delivery_back(callback: CallbackQuery, state: FSMContext):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE):
+        await callback.answer("У вас нет прав для просмотра списка посылок.", show_alert=True)
+        return
     data = await state.get_data()
     list_type = data.get('delivery_list_type', 'active')
     page = data.get('delivery_page', 1)

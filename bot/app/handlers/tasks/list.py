@@ -14,14 +14,16 @@ from app.services.tasks.service import (
     get_regular_closed_tasks,
     take_task,
     search_tasks,
+    get_teams_with_members,
 )
-from app.database.models import UserRole
+from app.database.models import UserRole, Team
 from app.keyboards.tasks import (
     task_list_keyboard,
     get_task_status_emoji,
     get_priority_emoji,
     get_priority_name,
-    tasks_menu_keyboard
+    tasks_menu_keyboard,
+    team_filter_keyboard,
 )
 from app.states.tasks.context import TaskContext
 from app.states.tasks.search import TaskSearch
@@ -61,7 +63,8 @@ async def show_list(
     page: int = 1,
     sort_by: str = "date",
     filter_priority: int = None,
-    user_id: int = None
+    user_id: int = None,
+    team: Team = None,
 ):
     try:
         if user_id is None:
@@ -92,8 +95,10 @@ async def show_list(
                 else:
                     await target.answer("У вас нет прав на просмотр всех заявок.")
                 return
-            tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id)
+            tasks = await get_open_tasks(limit=1000, offset=0, user_id=employee.id, team=team)
             title = "📋 Все открытые заявки"
+            if team:
+                title += f" (команда: {team.value})"
         elif list_type == "my":
             tasks = await get_tasks_for_employee(
                 employee.id,
@@ -163,10 +168,19 @@ async def show_list(
 
         if not tasks_page:
             text = f"{title}\n\nНет записей."
-            if isinstance(target, CallbackQuery):
-                await target.message.answer(text, reply_markup=None)
+            if list_type == "open" and employee.role in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+                back_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад к выбору команды", callback_data="task_filter_back")]
+                ])
+                if isinstance(target, CallbackQuery):
+                    await target.message.answer(text, reply_markup=back_kb)
+                else:
+                    await target.answer(text, reply_markup=back_kb)
             else:
-                await target.answer(text, reply_markup=None)
+                if isinstance(target, CallbackQuery):
+                    await target.message.answer(text, reply_markup=None)
+                else:
+                    await target.answer(text, reply_markup=None)
             return
 
         text = get_task_list_text(title, tasks_page, page, total_pages, show_assignee)
@@ -238,8 +252,42 @@ async def tasks_menu(message: Message, state: FSMContext):
     await message.answer("📋 Управление заявками:", reply_markup=tasks_menu_keyboard(employee.role))
 
 @router.message(F.text.startswith("📋 Список заявок"))
-async def show_all_open_tasks(message: Message, state: FSMContext):
-    await show_list(message, state, "open", user_id=message.from_user.id)
+async def show_filter_team(message: Message, state: FSMContext):
+    employee = await get_employee(message.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+        await message.answer("У вас нет прав на просмотр всех заявок.")
+        return
+    teams = await get_teams_with_members()
+    current_team = await state.get_data()
+    selected_team = current_team.get("selected_team") if current_team else None
+    kb = team_filter_keyboard(teams, selected_team)
+    await message.answer("Выберите команду для просмотра заявок:", reply_markup=kb)
+
+@router.callback_query(F.data.startswith("task_filter_team:"))
+async def filter_team_selected(callback: CallbackQuery, state: FSMContext):
+    data = callback.data.split(":")
+    team_val = data[1]
+    if team_val == "none":
+        team = None
+        await state.update_data(selected_team=None)
+    else:
+        team = Team(team_val)
+        await state.update_data(selected_team=team_val)
+    await safe_delete_message(callback.message)
+    await show_list(callback, state, "open", user_id=callback.from_user.id, team=team)
+    await callback.answer()
+
+@router.callback_query(F.data == "task_filter_back")
+async def filter_back(callback: CallbackQuery, state: FSMContext):
+    employee = await get_employee(callback.from_user.id)
+    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+        await callback.message.delete()
+        await callback.message.answer("У вас нет прав.", reply_markup=None)
+        await callback.answer()
+        return
+    await safe_delete_message(callback.message)
+    await show_filter_team(callback.message, state)
+    await callback.answer()
 
 @router.message(F.text.startswith("📋 Мои задачи"))
 async def show_my_tasks(message: Message, state: FSMContext):
@@ -291,7 +339,9 @@ async def paginate_tasks(callback: CallbackQuery, state: FSMContext):
     list_type = data.get("list_type", "open")
     sort_by = data.get("sort_by", "date")
     filter_priority = data.get("filter_priority")
-    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+    selected_team = data.get("selected_team")
+    team = Team(selected_team) if selected_team else None
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id, team=team)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("task_sort:"))
@@ -301,8 +351,10 @@ async def change_sort(callback: CallbackQuery, state: FSMContext):
     list_type = data.get("list_type", "open")
     page = data.get("page", 1)
     filter_priority = data.get("filter_priority")
+    selected_team = data.get("selected_team")
+    team = Team(selected_team) if selected_team else None
     await state.update_data(sort_by=sort_by)
-    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id, team=team)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("task_filter:"))
@@ -316,8 +368,10 @@ async def change_filter(callback: CallbackQuery, state: FSMContext):
     list_type = data.get("list_type", "open")
     page = data.get("page", 1)
     sort_by = data.get("sort_by", "date")
+    selected_team = data.get("selected_team")
+    team = Team(selected_team) if selected_team else None
     await state.update_data(filter_priority=filter_priority)
-    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id, team=team)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("task_take_from_list:"))
@@ -337,7 +391,9 @@ async def take_from_list(callback: CallbackQuery, state: FSMContext):
     page = data.get("page", 1)
     sort_by = data.get("sort_by", "date")
     filter_priority = data.get("filter_priority")
-    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+    selected_team = data.get("selected_team")
+    team = Team(selected_team) if selected_team else None
+    await show_list(callback, state, list_type, page, sort_by, filter_priority, user_id=callback.from_user.id, team=team)
 
 @router.callback_query(F.data == "tasks_back")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
@@ -347,12 +403,19 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         page = data.get("prev_page", 1)
         sort_by = data.get("prev_sort", "date")
         filter_priority = data.get("prev_filter")
+        selected_team = data.get("selected_team")
+        team = Team(selected_team) if selected_team else None
         await state.update_data(prev_list_type=None, prev_page=None, prev_sort=None, prev_filter=None)
-        await show_list(callback, state, prev_list_type, page, sort_by, filter_priority, user_id=callback.from_user.id)
+        await show_list(callback, state, prev_list_type, page, sort_by, filter_priority, user_id=callback.from_user.id, team=team)
         return
     list_type = data.get("list_type", "open")
     if list_type.startswith("archive_"):
         await show_archive_menu(callback, state)
+    elif list_type == "open":
+        # Возврат к выбору команды
+        await safe_delete_message(callback.message)
+        await show_filter_team(callback.message, state)
+        await callback.answer()
     else:
         await state.clear()
         employee = await get_employee(callback.from_user.id)
@@ -382,12 +445,11 @@ async def back_to_main_menu(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Главное меню:", reply_markup=main_menu_keyboard(employee.role))
 
-# ========== Поиск по заявкам (с разделением на активные/выполненные) ==========
 @router.message(F.text == "🔍 Поиск по заявкам")
 async def start_search(message: Message, state: FSMContext):
     employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        await message.answer("Только для администратора, консьержа и директора.")
+    if not employee:
+        await message.answer("Вы не зарегистрированы.")
         return
     await state.set_state(TaskSearch.query)
     await message.answer(
@@ -399,121 +461,31 @@ async def start_search(message: Message, state: FSMContext):
 
 @router.message(TaskSearch.query)
 async def process_search(message: Message, state: FSMContext):
-    employee = await get_employee(message.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        await message.answer("У вас нет прав для поиска.")
-        await state.clear()
-        return
     query = message.text.strip()
     if len(query) < 2 and not query.startswith('#'):
         await message.answer("Введите минимум 2 символа.")
         return
+    employee = await get_employee(message.from_user.id)
+    if not employee:
+        await message.answer("Ошибка.")
+        await state.clear()
+        return
 
-    # Ищем открытые задачи
-    open_tasks = await search_tasks(query, limit=50)
-    # Фильтруем только активные (не closed)
-    active_tasks = [t for t in open_tasks if t.status != "closed"]
-    # Выполненные задачи
-    completed_tasks = [t for t in open_tasks if t.status == "closed"]
-
-    if not active_tasks and not completed_tasks:
+    tasks = await search_tasks(query, limit=20, user_id=employee.id)
+    if not tasks:
         await message.answer("Ничего не найдено.")
         await state.clear()
         return
 
-    # Отображаем активные задачи
-    if active_tasks:
-        text = "🔍 Результаты поиска (активные заявки):\n\n"
-        buttons = []
-        for task in active_tasks[:10]:
-            status_emoji = get_task_status_emoji(task.status)
-            priority_emoji = get_priority_emoji(task.priority)
-            assign_emoji = "👤" if task.assigned_to else ("👥" if task.assigned_team else "❓")
-            apartment = f" кв.{task.apartment}" if task.apartment else ""
-            label = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apartment} {task.title[:25]}"
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"task:{task.id}")])
-        if completed_tasks:
-            buttons.append([InlineKeyboardButton(text="📜 Выполненные заявки", callback_data=f"search_completed_tasks:{query}")])
-        buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="tasks_back")])
-        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-        await message.answer(text, reply_markup=kb)
-    else:
-        # Если активных нет, но есть выполненные – показываем их сразу
-        text = "🔍 Результаты поиска (выполненные заявки):\n\n"
-        buttons = []
-        for task in completed_tasks[:10]:
-            status_emoji = "✅"
-            priority_emoji = get_priority_emoji(task.priority)
-            assign_emoji = "👤" if task.assigned_to else ("👥" if task.assigned_team else "❓")
-            apartment = f" кв.{task.apartment}" if task.apartment else ""
-            label = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apartment} {task.title[:25]}"
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"task:{task.id}")])
-        buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="tasks_back")])
-        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-        await message.answer(text, reply_markup=kb)
-
-    await state.clear()
-
-# ========== Поиск выполненных заявок ==========
-@router.callback_query(F.data.startswith("search_completed_tasks:"))
-async def search_completed_tasks(callback: CallbackQuery):
-    query = callback.data.split(":", 1)[1]
-    employee = await get_employee(callback.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        await callback.answer("Нет прав", show_alert=True)
-        return
-    # Ищем все задачи по запросу и фильтруем выполненные
-    tasks = await search_tasks(query, limit=50)
-    completed_tasks = [t for t in tasks if t.status == "closed"]
-
-    if not completed_tasks:
-        await callback.message.edit_text("Нет выполненных заявок.")
-        await callback.answer()
-        return
-
-    text = "📜 Результаты поиска (выполненные заявки):\n\n"
-    buttons = []
-    for task in completed_tasks[:10]:
-        status_emoji = "✅"
-        priority_emoji = get_priority_emoji(task.priority)
-        assign_emoji = "👤" if task.assigned_to else ("👥" if task.assigned_team else "❓")
-        apartment = f" кв.{task.apartment}" if task.apartment else ""
-        label = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apartment} {task.title[:25]}"
-        buttons.append([InlineKeyboardButton(text=label, callback_data=f"task:{task.id}")])
-
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад к активным", callback_data=f"search_active_tasks:{query}")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="tasks_back")])
-    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await callback.message.edit_text(text, reply_markup=kb)
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("search_active_tasks:"))
-async def search_active_tasks(callback: CallbackQuery):
-    query = callback.data.split(":", 1)[1]
-    employee = await get_employee(callback.from_user.id)
-    if not employee or employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
-        await callback.answer("Нет прав", show_alert=True)
-        return
-    tasks = await search_tasks(query, limit=50)
-    active_tasks = [t for t in tasks if t.status != "closed"]
-
-    if not active_tasks:
-        await callback.message.edit_text("Активных заявок не найдено.")
-        await callback.answer()
-        return
-
-    text = "🔍 Результаты поиска (активные заявки):\n\n"
-    buttons = []
-    for task in active_tasks[:10]:
+    text = "🔍 Результаты поиска:\n\n"
+    for task in tasks:
         status_emoji = get_task_status_emoji(task.status)
         priority_emoji = get_priority_emoji(task.priority)
-        assign_emoji = "👤" if task.assigned_to else ("👥" if task.assigned_team else "❓")
-        apartment = f" кв.{task.apartment}" if task.apartment else ""
-        label = f"{status_emoji} {priority_emoji} {assign_emoji} #{task.id}{apartment} {task.title[:25]}"
-        buttons.append([InlineKeyboardButton(text=label, callback_data=f"task:{task.id}")])
-
-    buttons.append([InlineKeyboardButton(text="📜 Выполненные заявки", callback_data=f"search_completed_tasks:{query}")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="tasks_back")])
-    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await callback.message.edit_text(text, reply_markup=kb)
-    await callback.answer()
+        priority_name = get_priority_name(task.priority)
+        assignee_name = task.assignee.full_name if task.assignee else "не назначен"
+        paid_marker = "💰 " if getattr(task, 'is_paid', False) else ""
+        apartment = f" (кв.{task.apartment})" if task.apartment else ""
+        text += f"{status_emoji} {priority_emoji} #{task.id}{apartment} **{paid_marker}{task.title[:30]}**\n"
+        text += f"   Приоритет: {priority_name} | Исполнитель: {assignee_name}\n\n"
+    await message.answer(text, parse_mode="HTML")
+    await state.clear()

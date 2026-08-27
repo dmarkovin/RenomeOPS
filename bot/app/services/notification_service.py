@@ -8,27 +8,21 @@ import asyncio
 import logging
 
 bot: Bot = None
-_settings_cache = {}
 
 def set_bot(bot_instance: Bot):
     global bot
     bot = bot_instance
 
 async def _can_send(telegram_id: int, notification_type: str) -> bool:
+    """Проверяет, включены ли уведомления данного типа для пользователя по его telegram_id"""
     try:
-        cache_key = f"{telegram_id}:{notification_type}"
-        if cache_key in _settings_cache:
-            return _settings_cache[cache_key]
         employee = await get_employee(telegram_id)
         if not employee:
-            _settings_cache[cache_key] = False
             return False
         settings = await get_user_settings(employee.id)
         if not settings:
-            _settings_cache[cache_key] = True
             return True
         result = getattr(settings, notification_type, True)
-        _settings_cache[cache_key] = result
         return result
     except Exception as e:
         logging.error(f"Ошибка в _can_send для telegram_id {telegram_id}: {e}")
@@ -121,46 +115,3 @@ async def notify_concierges_with_button(text: str, button_text: str, callback_da
     for emp in employees:
         if emp.telegram_id and await _can_send(emp.telegram_id, notification_type):
             await _send_message(emp.telegram_id, text, keyboard)
-
-# ===== Уведомление о новой задаче (с кнопкой) =====
-async def notify_new_task(telegram_id: int, task_id: int, title: str, priority: int, notification_type: str = "notify_new_task_team"):
-    if not bot or not telegram_id:
-        return
-    priority_map = {5: "Критический", 4: "Высокий", 3: "Средний", 2: "Низкий", 1: "Неважно"}
-    priority_text = priority_map.get(priority, "Средний")
-    text = (
-        f"📋 Новая задача #{task_id}: {title}\n"
-        f"Приоритет: {priority_text}\n"
-        f"---\nНажмите кнопку, чтобы перейти к задаче."
-    )
-    if await _can_send(telegram_id, notification_type):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Посмотреть заявку", callback_data=f"task:{task_id}")]])
-        await _send_message(telegram_id, text, keyboard)
-
-# ===== Уведомление о назначении задачи =====
-async def notify_task_assigned(telegram_id: int, task_id: int, title: str, assigned_by: str, notification_type: str = "notify_task_assigned"):
-    if not bot or not telegram_id:
-        return
-    text = (
-        f"📢 Вам назначена задача #{task_id}: {title}\n"
-        f"Назначил: {assigned_by}\n"
-        f"---\nНажмите кнопку, чтобы перейти к задаче."
-    )
-    if await _can_send(telegram_id, notification_type):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Посмотреть заявку", callback_data=f"task:{task_id}")]])
-        await _send_message(telegram_id, text, keyboard)
-
-# ===== Уведомление о статусе "На проверку" =====
-async def notify_checking(telegram_id: int, task_id: int, title: str, executor: str, comment: str = "", notification_type: str = "notify_checking"):
-    if not bot or not telegram_id:
-        return
-    text = (
-        f"🔍 Задача #{task_id}: {title} готова к проверке.\n"
-        f"Исполнитель: {executor}\n"
-    )
-    if comment:
-        text += f"Комментарий: {comment}\n"
-    text += "---\nНажмите кнопку, чтобы перейти к задаче."
-    if await _can_send(telegram_id, notification_type):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Просмотреть заявку", callback_data=f"task:{task_id}")]])
-        await _send_message(telegram_id, text, keyboard)

@@ -165,13 +165,15 @@ async def get_task(task_id: int) -> Optional[Task]:
 # ==========================
 # Списки заявок
 # ==========================
-async def get_open_tasks(limit: int = 20, offset: int = 0, user_id: int = None) -> List[Task]:
+async def get_open_tasks(limit: int = 20, offset: int = 0, user_id: int = None, team: Team = None) -> List[Task]:
     async with AsyncSessionLocal() as db:
         query = select(Task).where(cast(Task.status, String) != "closed")
         if user_id:
             user = await db.get(User, user_id)
             if user and user.role != UserRole.ADMIN:
                 query = query.where(Task.is_feedback == False)
+        if team:
+            query = query.where(cast(Task.assigned_team, String) == team.value)
         query = query.order_by(Task.priority.desc(), Task.created_at.desc())
         query = query.limit(limit).offset(offset)
         query = query.options(selectinload(Task.creator), selectinload(Task.assignee))
@@ -505,8 +507,6 @@ async def change_status(
             )
             db.add(history)
             await db.commit()
-            # Возвращаем задачу без подгрузки, так как она используется только для отображения результата,
-            # а карточка будет перезагружена через get_task.
             return task
 
 
@@ -739,32 +739,59 @@ async def get_team_tasks(
         return result.scalars().all()
 
 
-async def search_tasks(query: str, limit: int = 20) -> List[Task]:
+async def search_tasks(query: str, limit: int = 20, user_id: int = None) -> List[Task]:
     async with AsyncSessionLocal() as db:
+        employee = None
+        if user_id:
+            employee = await db.get(User, user_id)
+
+        base_filters = []
+        if employee and employee.role not in (UserRole.ADMIN, UserRole.CONCIERGE, UserRole.DIRECTOR):
+            base_filters.append(
+                or_(
+                    Task.assigned_to == user_id,
+                    cast(Task.assigned_team, String) == employee.team.value
+                )
+            )
+            base_filters.append(Task.is_feedback == False)
+            base_filters.append(cast(Task.assigned_team, String) != Team.ADMIN_TEAM.value)
+
         if query.startswith('#'):
             try:
                 task_id = int(query[1:])
-                task = await db.get(Task, task_id)
+                stmt = select(Task).where(Task.id == task_id)
+                if base_filters:
+                    stmt = stmt.where(and_(*base_filters))
+                task = (await db.execute(stmt)).scalar_one_or_none()
                 if task:
                     return [task]
             except ValueError:
                 pass
         elif query.isdigit():
-            task = await db.get(Task, int(query))
+            stmt = select(Task).where(Task.id == int(query))
+            if base_filters:
+                stmt = stmt.where(and_(*base_filters))
+            task = (await db.execute(stmt)).scalar_one_or_none()
             if task:
                 return [task]
             stmt = select(Task).where(Task.apartment == int(query))
+            if base_filters:
+                stmt = stmt.where(and_(*base_filters))
             result = await db.execute(stmt)
             tasks = result.scalars().all()
             if tasks:
                 return tasks[:limit]
+
         stmt = select(Task).where(
             or_(
                 Task.title.ilike(f"%{query}%"),
                 Task.description.ilike(f"%{query}%"),
                 Task.assignee.has(User.full_name.ilike(f"%{query}%"))
             )
-        ).order_by(Task.created_at.desc()).limit(limit)
+        )
+        if base_filters:
+            stmt = stmt.where(and_(*base_filters))
+        stmt = stmt.order_by(Task.created_at.desc()).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all()
 

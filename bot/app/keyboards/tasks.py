@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from app.database.models import TaskStatus, UserRole
-from typing import List
+from app.database.models import TaskStatus, UserRole, Team
+from typing import List, Optional
 
 def get_priority_emoji(priority):
     try:
@@ -48,7 +48,6 @@ def get_assignment_emoji(task) -> str:
         return "❓"
 
 def get_address_short(task) -> str:
-    """Возвращает короткий адрес для списка: корпус, квартира/парковка/общая зона"""
     parts = []
     if task.building:
         parts.append(f"корп.{task.building}")
@@ -110,6 +109,7 @@ def tasks_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
         buttons = [
             [KeyboardButton(text="➕ Создать заявку")],
             [KeyboardButton(text="📋 Список заявок")],
+            [KeyboardButton(text="📋 Мои задачи")],
             [KeyboardButton(text="🔍 Поиск по заявкам")],
             [KeyboardButton(text="📦 Архив")],
             [KeyboardButton(text="⬅️ Назад")]
@@ -129,6 +129,18 @@ def tasks_menu_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📋 Мои задачи")],
             [KeyboardButton(text="📋 Новые задачи")],
             [KeyboardButton(text="📦 Архив")],
+            [KeyboardButton(text="🔍 Поиск по заявкам")],
             [KeyboardButton(text="⬅️ Назад")]
         ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+def team_filter_keyboard(teams: List[dict], current_team: Optional[str] = None) -> InlineKeyboardMarkup:
+    buttons = []
+    label = "✅ Все команды" if current_team is None else "Все команды"
+    buttons.append([InlineKeyboardButton(text=label, callback_data="task_filter_team:none")])
+    for team_info in teams:
+        team_value = team_info["team"].value
+        label = f"✅ {team_value}" if current_team == team_value else team_value
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"task_filter_team:{team_value}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="task_filter_back")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

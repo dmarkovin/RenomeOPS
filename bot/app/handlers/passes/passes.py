@@ -335,8 +335,13 @@ async def confirm_create_pass(message: Message, state: FSMContext):
             await notify_team(p.assigned_team, f"🪪 Новый пропуск #{p.id} назначен на вашу команду.")
         await notify_concierges(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
         await notify_security(f"🪪 Создан новый пропуск #{p.id} для {p.guest_name or p.car_number}.")
+        # Показываем результат и убираем reply-клавиатуру
         await message.answer(
             f"✅ Пропуск #{p.id} создан!",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await message.answer(
+            "Выберите действие:",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="👁️ Посмотреть пропуск", callback_data=f"pass:{p.id}")],
